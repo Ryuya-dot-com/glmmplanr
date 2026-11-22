@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+src/*.o
+src/*.so
+src/*.dll
+*.tar.gz
+*.Rcheck
+.DS_Store
+inst/doc
+Meta
+inst/stan/crossed_binomial_mafc
+inst/stan/*.exe
+AGENTS.md
+ROADMAP.md
+validation/

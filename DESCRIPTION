@@ -1,0 +1,52 @@
+Package: glmmplanr
+Title: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs
+Version: 0.3.0
+Authors@R: 
+    person("Ryuya", "Komuro", , "ryuya.komuro.c4@tohoku.ac.jp", role = c("aut", "cre"))
+Description: An end-to-end sample size and precision optimization pipeline for
+    crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item
+    Response Models in behavioral science, psycholinguistics, and language
+    assessment. Generates balanced Latin-square, between-within, incomplete-block,
+    and testlet-nested designs with configurable factor contrasts; numerically
+    inverts marginal cell probabilities and m-AFC guessing asymptotes into
+    conditional GLMM parameters via two-dimensional Gauss-Hermite quadrature;
+    evaluates statistical power, confidence/credible interval width (AIPE),
+    ROPE exclusion, singularity/convergence rates, coverage, and Type M/S
+    errors; and identifies Pareto-optimal or cost/budget-optimal (N_subj x N_item)
+    designs using Universal Kriging monotone Gaussian process surrogates and
+    multi-stage parallel C++ estimation. Supports both random-item and fixed-bank
+    Rasch parameter recovery planning.
+License: MIT + file LICENSE
+URL: https://github.com/Ryuya-dot-com/glmmplanr
+BugReports: https://github.com/Ryuya-dot-com/glmmplanr/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+VignetteBuilder: knitr
+Depends:
+    R (>= 4.1.0)
+Imports:
+    cli,
+    ggplot2,
+    gt,
+    lme4,
+    mirai,
+    nleqslv,
+    Rcpp,
+    rlang,
+    stats
+LinkingTo:
+    Rcpp,
+    RcppEigen
+Suggests:
+    cmdstanr,
+    glmmTMB,
+    instantiate,
+    knitr,
+    pkgload,
+    plotly,
+    posterior,
+    rmarkdown,
+    rstan,
+    TAM,
+    testthat (>= 3.0.0)
+Config/roxygen2/version: 8.1.1

@@ -1,0 +1,11 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^README\.Rmd$
+^LICENSE\.md$
+^\.github$
+^_pkgdown\.yml$
+^docs$
+^validation$
+^AGENTS\.md$
+^ROADMAP\.md$
+^inst/stan/crossed_binomial_mafc$

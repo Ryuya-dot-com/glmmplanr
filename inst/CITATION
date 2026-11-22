@@ -1,0 +1,10 @@
+citHeader("To cite glmmplanr in publications use:")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "glmmplanr: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs",
+  author  = person("Ryuya", "Komuro", email = "ryuya.komuro.c4@tohoku.ac.jp"),
+  year    = "2026",
+  note    = "R package version 0.3.0",
+  url     = "https://github.com/Ryuya-dot-com/glmmplanr"
+)

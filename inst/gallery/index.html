@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>glmmplanr — Interactive Recipe Gallery &amp; Cost Explorer</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-alt: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #0284c7;
+      --primary-soft: #e0f2fe;
+      --accent: #ef4444;
+      --pass: #059669;
+      --warn: #d97706;
+      --fail: #dc2626;
+      --code-bg: #0f172a;
+      --code-fg: #e2e8f0;
+    }
+    [data-theme="dark"] {
+      --bg: #0b1120;
+      --surface: #111827;
+      --surface-alt: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-soft: #0c4a6e;
+      --accent: #f87171;
+      --pass: #34d399;
+      --warn: #fbbf24;
+      --fail: #f87171;
+      --code-bg: #020617;
+      --code-fg: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    .container { max-width: 1220px; margin: 0 auto; padding: 24px 20px 56px; }
+    .header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start;
+      gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--border);
+    }
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+      text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+      background: var(--primary-soft); color: var(--primary); margin-bottom: 6px;
+    }
+    h1 { margin: 0; font-size: 24px; letter-spacing: -0.02em; }
+    .subtitle { margin: 6px 0 0; color: var(--muted); max-width: 820px; font-size: 14px; }
+    .btn {
+      cursor: pointer; border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); padding: 7px 12px; border-radius: 8px; font-size: 12.5px;
+      font-weight: 600; transition: all 0.15s ease;
+    }
+    .btn:hover { border-color: var(--primary); }
+    .btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .tabs {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 8px; margin: 18px 0 22px;
+    }
+    .tab-btn {
+      text-align: left; padding: 11px 13px; border-radius: 10px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover { border-color: var(--primary); }
+    .tab-btn.active {
+      border-color: var(--primary); background: var(--primary-soft);
+      box-shadow: 0 1px 3px rgba(2,132,199,0.12);
+    }
+    .tab-num { font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
+    .tab-title { font-size: 13.5px; font-weight: 700; margin-top: 2px; }
+    .tab-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+    .grid-2 { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; align-items: start; }
+    @media (max-width: 920px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px;
+    }
+    .card h2 { margin: 0 0 6px; font-size: 17px; }
+    .card h3 { margin: 0 0 8px; font-size: 14.5px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin: 12px 0; }
+    .kpi {
+      background: var(--surface-alt); border: 1px solid var(--border);
+      border-radius: 9px; padding: 10px 12px;
+    }
+    .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+    .kpi-val { font-size: 18px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+    .heatmap-wrap { overflow-x: auto; margin-top: 10px; }
+    .hm-table { border-collapse: separate; border-spacing: 3px; width: 100%; min-width: 560px; }
+    .hm-table th { font-size: 11px; color: var(--muted); font-weight: 600; padding: 4px; text-align: center; }
+    .hm-cell {
+      height: 34px; border-radius: 5px; text-align: center; font-size: 11px; font-weight: 700;
+      cursor: pointer; position: relative; transition: transform 0.1s ease;
+      font-variant-numeric: tabular-nums; user-select: none;
+    }
+    .hm-cell:hover { transform: scale(1.08); z-index: 3; outline: 2px solid var(--text); }
+    .hm-cell.pareto { box-shadow: inset 0 0 0 2px #38bdf8; }
+    .hm-cell.winner { outline: 3px solid #ef4444 !important; z-index: 4; }
+    .pill {
+      display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    }
+    .pill-pass { background: rgba(5,150,105,0.16); color: var(--pass); }
+    .pill-ind { background: rgba(217,119,6,0.16); color: var(--warn); }
+    .pill-fail { background: rgba(220,38,38,0.16); color: var(--fail); }
+    pre.code {
+      background: var(--code-bg); color: var(--code-fg); padding: 14px; border-radius: 9px;
+      overflow-x: auto; font-size: 12.2px; line-height: 1.5; margin: 8px 0 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .slider-group { margin-bottom: 10px; }
+    .slider-head { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; margin-bottom: 3px; }
+    input[type="range"] { width: 100%; accent-color: var(--primary); }
+    .report-box {
+      background: var(--surface-alt); border-left: 3px solid var(--primary);
+      padding: 12px 14px; border-radius: 0 8px 8px 0; font-size: 12.8px; white-space: pre-wrap;
+    }
+    .bar-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; font-size: 12.5px; }
+    .bar-track { flex: 1; height: 20px; background: var(--surface-alt); border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+    .bar-fill { height: 100%; transition: width 0.2s ease; }
+    table.data-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+    table.data-tbl th, table.data-tbl td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; }
+    table.data-tbl th:first-child, table.data-tbl td:first-child { text-align: left; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <span class="badge">Interactive Package Showcase</span>
+      <h1><code>glmmplanr</code> Interactive Design &amp; Precision Gallery</h1>
+      <p class="subtitle">
+        Explore five verified sample size and precision planning workflows bridging crossed binary experiments and Explanatory Item Response Models — powered by real Monte Carlo evaluations from <code>glmmplanr</code>.
+      </p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn" id="themeBtn" onclick="toggleTheme()">Toggle Dark / Light</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="recipeTabs">
+    <button class="tab-btn active" onclick="selectTab(0)">
+      <div class="tab-num">Recipe 1 • Psycholinguistics</div>
+      <div class="tab-title">Latin-Square 3AFC &amp; Pareto</div>
+      <div class="tab-desc">135-point 2D power + CI-width explorer</div>
+    </button>
+    <button class="tab-btn" onclick="selectTab(1)">
+      <div class="tab-num">Recipe 2 • Behavioral</div>
+      <div class="tab-title">Scale Inversion &amp; Incomplete Block</div>
+      <div class="tab-desc">Live Gauss-Hermite calculator + H0/H1 check</div>
+    </button>
+    <button class="tab-btn" onclick="selectTab(2)">
+      <div class="tab-num">Recipe 3 • Reading &amp; EIRM</div>
+      <div class="tab-title">Testlet Passages &amp; Robustness</div>
+      <div class="tab-desc">4 items/passage across +6 / +8 / +10 pp</div>
+    </button>
+    <button class="tab-btn" onclick="selectTab(3)">
+      <div class="tab-num">Recipe 4 • Research Economics</div>
+      <div class="tab-title">2D Cost &amp; Budget Optimizer</div>
+      <div class="tab-desc">Live sliders for optimal allocation reversal</div>
+    </button>
+    <button class="tab-btn" onclick="selectTab(4)">
+      <div class="tab-num">Recipe 5 • Psychometrics</div>
+      <div class="tab-title">Random vs. Fixed-Bank Rasch</div>
+      <div class="tab-desc">Bank RMSE vs. worst-item anchor precision</div>
+    </button>
+  </div>
+
+  <!-- TAB 0: RECIPE 1 -->
+  <section id="tab-0" class="tab-pane">
+    <div class="grid-2">
+      <div class="card">
+        <div style="display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:center;">
+          <div>
+            <h2>Interactive 2D Trade-Off Surface (2&times;2 Latin-Square, 3AFC <i>g</i> = 1/3)</h2>
+            <div class="muted">Click or hover any <code>(N_subj, N_item)</code> cell. Cyan border = Non-dominated Pareto frontier; Red outline = Selected winner.</div>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">
+          <span class="muted" style="align-self:center; font-weight:600; margin-right:4px;">Surface Metric:</span>
+          <button class="btn active" id="m-power" onclick="setR1Metric('power')">Power (%)</button>
+          <button class="btn" id="m-width" onclick="setR1Metric('width')">Mean 95% CI (pp)</button>
+          <button class="btn" id="m-aipe" onclick="setR1Metric('aipe')">Width Assurance (%)</button>
+          <button class="btn" id="m-joint" onclick="setR1Metric('joint')">Joint Power+Width (%)</button>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+          <span class="muted" style="align-self:center; font-weight:600; margin-right:4px;">Pareto Rule (<code>prefer</code>):</span>
+          <button class="btn active" id="p-balanced" onclick="setR1Prefer('balanced')">balanced</button>
+          <button class="btn" id="p-fewer_subj" onclick="setR1Prefer('fewer_subj')">fewer_subj</button>
+          <button class="btn" id="p-fewer_items" onclick="setR1Prefer('fewer_items')">fewer_items</button>
+          <button class="btn" id="p-fewer_trials" onclick="setR1Prefer('fewer_trials')">fewer_trials</button>
+        </div>
+        <div class="heatmap-wrap" id="r1Heatmap"></div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card" id="r1Inspector"></div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>Copy-Ready R Workflow</h3>
+            <button class="btn" onclick="copyCode('code-r1', this)">Copy R Code</button>
+          </div>
+          <pre class="code" id="code-r1">des1 &lt;- design_crossed(
+  factors = list(exposure = c("incidental", "intentional"),
+                 spacing  = c("massed", "distributed")),
+  allocation = "latin_square", attrition = 0.05
+)
+probs1 &lt;- cell_probs_from_diffs(
+  des1, baseline_prob = 0.64,
+  effects_pp = c(exposure = 9, spacing = 5, "exposure:spacing" = 3)
+)
+dgp1 &lt;- calibrate_dgp(
+  des1, cell_probs = probs1, chance = 1/3,
+  subj_prob_range = c(0.45, 0.84), item_prob_range = c(0.46, 0.85),
+  slope_sd_ratio = 0.25, corr_structure = 0.15
+)
+spec1 &lt;- specify_target(
+  dgp1, effect = "exposure", scale = "pp", criterion = "both",
+  power_min = 0.80, ci_width = 12.0, engine = "bayes_laplace"
+)
+res1 &lt;- optimize_sample_size(
+  spec1, n_subj_range = c(24, 80), n_item_range = c(16, 48),
+  prefer = "balanced", workers = 4, seed = 810101
+)</pre>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h3>Auto-Generated Registered Report Justification (<code>report_plan(res1, lang = "en")</code>)</h3>
+      <div class="report-box" id="r1Report"></div>
+    </div>
+  </section>
+
+  <!-- TAB 1: RECIPE 2 -->
+  <section id="tab-1" class="tab-pane hidden">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Interactive Scale Non-Collapsibility &amp; <i>m</i>-AFC Calculator</h2>
+        <p class="muted">
+          Adjust random-effect SDs and guessing floor <i>g</i> to see how naive <code>qlogis()</code> input (used when feeding raw probabilities into generic conditional GLMM simulators) attenuates the true population-averaged effect.
+        </p>
+        <div class="slider-group">
+          <div class="slider-head"><span>Control Marginal Probability (<i>p</i><sub>A</sub>)</span><span id="nc-p0-lbl">60%</span></div>
+          <input type="range" id="nc-p0" min="40" max="80" step="1" value="60" oninput="updateNC()" />
+        </div>
+        <div class="slider-group">
+          <div class="slider-head"><span>Target Marginal Effect (&Delta;pp)</span><span id="nc-diff-lbl">+12 pp</span></div>
+          <input type="range" id="nc-diff" min="4" max="20" step="1" value="12" oninput="updateNC()" />
+        </div>
+        <div class="slider-group">
+          <div class="slider-head"><span>Subject Intercept SD (logit)</span><span id="nc-sds-lbl">1.05</span></div>
+          <input type="range" id="nc-sds" min="0" max="2.0" step="0.05" value="1.05" oninput="updateNC()" />
+        </div>
+        <div class="slider-group">
+          <div class="slider-head"><span>Item Intercept SD (logit)</span><span id="nc-sdi-lbl">0.80</span></div>
+          <input type="range" id="nc-sdi" min="0" max="2.0" step="0.05" value="0.80" oninput="updateNC()" />
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 14px;">
+          <span class="muted" style="align-self:center; font-weight:600;">Guessing Floor <i>g</i>:</span>
+          <button class="btn active" id="g-0" onclick="setGuess(0, 'g-0')">Binary (g = 0)</button>
+          <button class="btn" id="g-25" onclick="setGuess(0.25, 'g-25')">4AFC (g = 0.25)</button>
+          <button class="btn" id="g-33" onclick="setGuess(0.3333333, 'g-33')">3AFC (g = 1/3)</button>
+        </div>
+        <div id="ncReadout"></div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card">
+          <h3>Incomplete-Block Pre-Registration Check (<code>validate_design_point</code>)</h3>
+          <p class="muted">32-item stimulus bank, <code>items_per_subject = 16</code> (50% partial presentation), 4% participant dropout + 5% trial missingness (140 replications/point).</p>
+          <table class="data-tbl" id="r2Table"></table>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>Copy-Ready R Workflow</h3>
+            <button class="btn" onclick="copyCode('code-r2', this)">Copy R Code</button>
+          </div>
+          <pre class="code" id="code-r2">des2 &lt;- design_crossed(
+  factors = list(arm = c("control", "intervention")),
+  allocation = "between_subj", between_subj = "arm",
+  contrast = "treatment", items_per_subject = 16L,
+  attrition = 0.05, participant_dropout = 0.04, item_seed = 402L
+)
+dgp2 &lt;- calibrate_dgp(
+  des2, cell_probs = c(control = 0.60, intervention = 0.72),
+  subj_sd = 1.05, item_sd = 0.80, slope_sd_ratio = 0
+)
+spec2 &lt;- specify_target(dgp2, effect = "arm", scale = "pp", power_min = 0.80)
+validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030)</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 2: RECIPE 3 -->
+  <section id="tab-2" class="tab-pane hidden">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Testlet-Nested Reading Passages &amp; Multi-Scenario Robustness</h2>
+        <p class="muted">
+          4 comprehension items per reading passage (4AFC, <i>g</i> = 0.25), shared passage SD = 0.45, plus reader-by-passage local dependence (<code>participant_testlet_sd = 0.30</code>).
+        </p>
+        <div class="kpi-row">
+          <div class="kpi">
+            <div class="kpi-label">Standard (+8 pp)</div>
+            <div class="kpi-val">52 &times; 32</div>
+            <div class="kpi-sub">8 passages • 1,664 trials</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">All-Scenario Robust</div>
+            <div class="kpi-val">70 &times; 40</div>
+            <div class="kpi-sub">10 passages • 2,800 trials</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Robustness Increment</div>
+            <div class="kpi-val" style="color:var(--primary);">+18 / +8</div>
+            <div class="kpi-sub">+1,136 scheduled trials</div>
+          </div>
+        </div>
+        <h3 style="margin-top:14px;">Power Across Scenarios at Key Passage Counts</h3>
+        <table class="data-tbl" id="r3ScenarioTbl"></table>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card">
+          <h3>Random-Slope Sensitivity at Robust Winner (70 &times; 40, +6 pp)</h3>
+          <div id="r3SensBars"></div>
+          <p class="muted" style="margin-top:10px;">
+            Even at the robust design, if true participant/item random slopes are 1.35&times; steeper than anticipated, conservative (+6 pp) power dips to 75.5%, prompting either Bayesian shrinkage priors or +1 passage.
+          </p>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>Copy-Ready R Workflow</h3>
+            <button class="btn" onclick="copyCode('code-r3', this)">Copy R Code</button>
+          </div>
+          <pre class="code" id="code-r3">des3 &lt;- design_testlet(
+  factors = list(glossing = c("none", "marginal_gloss")),
+  testlet_size = 4L, attrition = 0.03
+)
+dgp3 &lt;- calibrate_dgp(
+  des3, cell_probs = c(none = 0.62, marginal_gloss = 0.70),
+  chance = 0.25, subj_sd = 0.75, item_sd = 0.50,
+  testlet_sd = 0.45, participant_testlet_sd = 0.30
+)
+scens3 &lt;- scenario_dgps(
+  dgp3, effect = "glossing",
+  effect_diffs_pp = c(conservative_6pp = 6, standard_8pp = 8, optimistic_10pp = 10)
+)
+res3 &lt;- optimize_sample_size(
+  specify_target(dgp3, "glossing", scale = "pp", power_min = 0.80),
+  n_subj_range = c(24, 72), n_item_range = c(16, 48),
+  scenarios = scens3, standard_scenario = "standard_8pp", seed = 830303
+)</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: RECIPE 4 (LIVE COST OPTIMIZER) -->
+  <section id="tab-3" class="tab-pane hidden">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Live 2D Cost &amp; Budget Allocation Explorer (<code>switch_preference()</code>)</h2>
+        <p class="muted">
+          Drag unit costs or click a research paradigm preset to re-optimize across the 135 verified designs in real time — zero re-simulation required.
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 14px;">
+          <button class="btn active" id="preset-lab" onclick="applyCostPreset(60, 8, 0.02, 200, 3200, 'preset-lab')">In-Lab Eye-Tracking ($60/subj, $8/item)</button>
+          <button class="btn" id="preset-irt" onclick="applyCostPreset(6, 85, 0.01, 200, 3200, 'preset-irt')">Field IRT Item Piloting ($6/subj, $85/item)</button>
+          <button class="btn" id="preset-online" onclick="applyCostPreset(14, 24, 0.01, 200, 2000, 'preset-online')">Online Crowdsourced ($14/subj, $24/item)</button>
+        </div>
+
+        <div class="heatmap-wrap" id="r4Heatmap"></div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card">
+          <h3>Unit Cost &amp; Grant Budget Controls</h3>
+          <div class="slider-group">
+            <div class="slider-head"><span>Per-Participant Cost (<code>subj</code>)</span><span id="c-subj-lbl">$60</span></div>
+            <input type="range" id="c-subj" min="2" max="120" step="2" value="60" oninput="updateCostExplorer()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-head"><span>Per-Item Authoring Cost (<code>item</code>)</span><span id="c-item-lbl">$8</span></div>
+            <input type="range" id="c-item" min="2" max="150" step="1" value="8" oninput="updateCostExplorer()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-head"><span>Per-Trial Cost (<code>trial</code>)</span><span id="c-trial-lbl">$0.02</span></div>
+            <input type="range" id="c-trial" min="0" max="0.20" step="0.01" value="0.02" oninput="updateCostExplorer()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-head"><span>Fixed Study Overhead (<code>fixed</code>)</span><span id="c-fixed-lbl">$200</span></div>
+            <input type="range" id="c-fixed" min="0" max="1000" step="50" value="200" oninput="updateCostExplorer()" />
+          </div>
+          <div class="slider-group">
+            <div class="slider-head"><span>Total Grant Budget Cap (<code>budget</code>)</span><span id="c-budget-lbl">$3,200</span></div>
+            <input type="range" id="c-budget" min="1200" max="6000" step="100" value="3200" oninput="updateCostExplorer()" />
+          </div>
+          <div id="r4WinnerBox" style="margin-top:12px;"></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>Generated R Call</h3>
+            <button class="btn" onclick="copyCode('code-r4', this)">Copy R Code</button>
+          </div>
+          <pre class="code" id="code-r4"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 4: RECIPE 5 -->
+  <section id="tab-4" class="tab-pane hidden">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Random-Item vs. Fixed-Item-Bank Rasch Calibration</h2>
+        <div style="display:flex; gap:8px; margin:10px 0 14px;">
+          <button class="btn active" id="rasch-mode-fixed" onclick="setRaschMode('fixed')">Fixed 16-Item Bank (&plusmn;3.0 Logit Anchors)</button>
+          <button class="btn" id="rasch-mode-rand" onclick="setRaschMode('random')">Random-Item Generalization</button>
+        </div>
+        <div id="raschContent"></div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div class="card">
+          <h3>Key Methodological Takeaway</h3>
+          <p class="muted" style="margin:0;">
+            <strong>1. Generalizing to new items (<code>plan_rasch_precision</code>)</strong> requires sufficient item count (<i>N</i><sub>item</sub> &ge; 24) to estimate the population item SD (&sigma;<sub>item</sub>); adding examinees alone cannot rescue a 16-item test (plateaus at 48.3%).<br/><br/>
+            <strong>2. Calibrating a fixed item bank (<code>plan_rasch_fixed_bank</code>)</strong> separates bank-wide average accuracy from anchor-level accuracy: while Random-Item EB reaches 100% attainment on bank RMSE &le; 0.45 at <i>N</i> = 80, unpenalized <strong>Fixed-Item MML</strong> passes worst-item |err| &le; 0.60 earlier (<i>N</i> = 180, 90.0% PASS) because EB shrinks &plusmn;3.0 logit anchors toward zero.
+          </p>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>Copy-Ready R Workflow</h3>
+            <button class="btn" onclick="copyCode('code-r5', this)">Copy R Code</button>
+          </div>
+          <pre class="code" id="code-r5"># Fixed 16-item bank with two extreme +/-3.0 logit anchor items
+b_bank &lt;- c(-3.0, seq(-1.1, 1.1, length.out = 14), 3.0)
+
+bank_mml &lt;- plan_rasch_fixed_bank(
+  item_difficulties = b_bank,
+  n_subj            = c(40, 80, 120, 180, 240),
+  person_sd         = 0.85,
+  max_error         = c(difficulty = 0.45, difficulty_max_abs_error = 0.60),
+  method            = "fixed_item",
+  engine            = "mml",
+  assurance         = 0.80,
+  nsim              = 120,
+  workers           = 4,
+  seed              = 850502
+)</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const GRID_R1 = [
+  {s:24,i:16,tr:384,ex:365,p:0.35,lo:0.284,hi:0.422,w:21.26,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:16,tr:448,ex:426,p:0.439,lo:0.368,hi:0.512,w:19.81,aipe:0,jt:0,st:"fail",par:false},
+  {s:32,i:16,tr:512,ex:486,p:0.483,lo:0.411,hi:0.556,w:18.45,aipe:0,jt:0,st:"fail",par:false},
+  {s:36,i:16,tr:576,ex:547,p:0.494,lo:0.422,hi:0.567,w:17.56,aipe:0,jt:0,st:"fail",par:false},
+  {s:40,i:16,tr:640,ex:608,p:0.589,lo:0.516,hi:0.658,w:16.70,aipe:0,jt:0,st:"fail",par:false},
+  {s:44,i:16,tr:704,ex:669,p:0.622,lo:0.550,hi:0.690,w:15.89,aipe:0,jt:0,st:"fail",par:false},
+  {s:48,i:16,tr:768,ex:730,p:0.650,lo:0.578,hi:0.716,w:15.17,aipe:0,jt:0,st:"fail",par:false},
+  {s:52,i:16,tr:832,ex:790,p:0.761,lo:0.694,hi:0.818,w:14.70,aipe:0,jt:0,st:"fail",par:false},
+  {s:56,i:16,tr:896,ex:851,p:0.767,lo:0.700,hi:0.822,w:14.07,aipe:0,jt:0,st:"fail",par:false},
+  {s:60,i:16,tr:960,ex:912,p:0.739,lo:0.670,hi:0.798,w:13.67,aipe:0,jt:0,st:"fail",par:false},
+  {s:64,i:16,tr:1024,ex:973,p:0.761,lo:0.694,hi:0.818,w:13.23,aipe:0.056,jt:0.050,st:"fail",par:false},
+  {s:68,i:16,tr:1088,ex:1034,p:0.806,lo:0.742,hi:0.857,w:12.91,aipe:0.128,jt:0.094,st:"fail",par:false},
+  {s:72,i:16,tr:1152,ex:1094,p:0.806,lo:0.742,hi:0.857,w:12.47,aipe:0.289,jt:0.250,st:"fail",par:false},
+  {s:76,i:16,tr:1216,ex:1155,p:0.867,lo:0.809,hi:0.909,w:12.07,aipe:0.483,jt:0.439,st:"fail",par:false},
+  {s:80,i:16,tr:1280,ex:1216,p:0.889,lo:0.835,hi:0.927,w:11.98,aipe:0.583,jt:0.522,st:"fail",par:false},
+
+  {s:24,i:20,tr:480,ex:456,p:0.483,lo:0.411,hi:0.556,w:19.15,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:20,tr:560,ex:532,p:0.567,lo:0.494,hi:0.637,w:17.69,aipe:0,jt:0,st:"fail",par:false},
+  {s:32,i:20,tr:640,ex:608,p:0.700,lo:0.629,hi:0.762,w:16.54,aipe:0,jt:0,st:"fail",par:false},
+  {s:36,i:20,tr:720,ex:684,p:0.683,lo:0.612,hi:0.747,w:15.61,aipe:0,jt:0,st:"fail",par:false},
+  {s:40,i:20,tr:800,ex:760,p:0.733,lo:0.664,hi:0.793,w:14.76,aipe:0,jt:0,st:"fail",par:false},
+  {s:44,i:20,tr:880,ex:836,p:0.717,lo:0.647,hi:0.777,w:14.13,aipe:0,jt:0,st:"fail",par:false},
+  {s:48,i:20,tr:960,ex:912,p:0.811,lo:0.748,hi:0.862,w:13.49,aipe:0.011,jt:0.011,st:"fail",par:false},
+  {s:52,i:20,tr:1040,ex:988,p:0.861,lo:0.803,hi:0.904,w:12.99,aipe:0.044,jt:0.044,st:"fail",par:false},
+  {s:56,i:20,tr:1120,ex:1064,p:0.844,lo:0.784,hi:0.890,w:12.50,aipe:0.239,jt:0.206,st:"fail",par:false},
+  {s:60,i:20,tr:1200,ex:1140,p:0.839,lo:0.778,hi:0.885,w:12.13,aipe:0.439,jt:0.383,st:"fail",par:false},
+  {s:64,i:20,tr:1280,ex:1216,p:0.850,lo:0.791,hi:0.895,w:11.75,aipe:0.683,jt:0.628,st:"fail",par:false},
+  {s:68,i:20,tr:1360,ex:1292,p:0.896,lo:0.853,hi:0.928,w:11.37,aipe:0.827,jt:0.758,st:"indeterminate",par:false},
+  {s:72,i:20,tr:1440,ex:1368,p:0.928,lo:0.880,hi:0.957,w:11.06,aipe:0.922,jt:0.872,st:"pass",par:true},
+  {s:76,i:20,tr:1520,ex:1444,p:0.956,lo:0.915,hi:0.977,w:10.83,aipe:0.950,jt:0.906,st:"pass",par:false},
+  {s:80,i:20,tr:1600,ex:1520,p:0.933,lo:0.887,hi:0.961,w:10.51,aipe:0.967,jt:0.900,st:"pass",par:false},
+
+  {s:24,i:24,tr:576,ex:547,p:0.594,lo:0.521,hi:0.663,w:17.44,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:24,tr:672,ex:638,p:0.644,lo:0.572,hi:0.711,w:16.08,aipe:0,jt:0,st:"fail",par:false},
+  {s:32,i:24,tr:768,ex:730,p:0.644,lo:0.572,hi:0.711,w:15.06,aipe:0,jt:0,st:"fail",par:false},
+  {s:36,i:24,tr:864,ex:821,p:0.750,lo:0.682,hi:0.808,w:14.18,aipe:0,jt:0,st:"fail",par:false},
+  {s:40,i:24,tr:960,ex:912,p:0.806,lo:0.742,hi:0.857,w:13.52,aipe:0.006,jt:0.006,st:"fail",par:false},
+  {s:44,i:24,tr:1056,ex:1003,p:0.828,lo:0.766,hi:0.876,w:12.81,aipe:0.106,jt:0.094,st:"fail",par:false},
+  {s:48,i:24,tr:1152,ex:1094,p:0.872,lo:0.816,hi:0.913,w:12.24,aipe:0.400,jt:0.356,st:"fail",par:false},
+  {s:52,i:24,tr:1248,ex:1186,p:0.867,lo:0.809,hi:0.909,w:11.83,aipe:0.661,jt:0.567,st:"fail",par:false},
+  {s:56,i:24,tr:1344,ex:1277,p:0.892,lo:0.849,hi:0.924,w:11.44,aipe:0.812,jt:0.735,st:"indeterminate",par:false},
+  {s:60,i:24,tr:1440,ex:1368,p:0.950,lo:0.908,hi:0.973,w:10.99,aipe:0.933,jt:0.889,st:"pass",par:true},
+  {s:64,i:24,tr:1536,ex:1459,p:0.967,lo:0.929,hi:0.985,w:10.73,aipe:0.956,jt:0.922,st:"pass",par:false},
+  {s:68,i:24,tr:1632,ex:1550,p:0.961,lo:0.922,hi:0.981,w:10.37,aipe:1.000,jt:0.961,st:"pass",par:false},
+  {s:72,i:24,tr:1728,ex:1642,p:0.967,lo:0.929,hi:0.985,w:10.10,aipe:0.989,jt:0.961,st:"pass",par:false},
+  {s:76,i:24,tr:1824,ex:1733,p:0.983,lo:0.952,hi:0.994,w:9.76,aipe:0.994,jt:0.978,st:"pass",par:false},
+  {s:80,i:24,tr:1920,ex:1824,p:0.978,lo:0.944,hi:0.991,w:9.63,aipe:1.000,jt:0.978,st:"pass",par:false},
+
+  {s:24,i:28,tr:672,ex:638,p:0.617,lo:0.544,hi:0.685,w:16.09,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:28,tr:784,ex:745,p:0.739,lo:0.670,hi:0.798,w:14.87,aipe:0,jt:0,st:"fail",par:false},
+  {s:32,i:28,tr:896,ex:851,p:0.817,lo:0.754,hi:0.866,w:13.87,aipe:0,jt:0,st:"fail",par:false},
+  {s:36,i:28,tr:1008,ex:958,p:0.800,lo:0.736,hi:0.852,w:13.12,aipe:0.028,jt:0.011,st:"fail",par:false},
+  {s:40,i:28,tr:1120,ex:1064,p:0.867,lo:0.809,hi:0.909,w:12.40,aipe:0.289,jt:0.250,st:"fail",par:false},
+  {s:44,i:28,tr:1232,ex:1170,p:0.878,lo:0.822,hi:0.918,w:11.95,aipe:0.583,jt:0.511,st:"fail",par:false},
+  {s:48,i:28,tr:1344,ex:1277,p:0.896,lo:0.853,hi:0.928,w:11.38,aipe:0.842,jt:0.750,st:"indeterminate",par:false},
+  {s:52,i:28,tr:1456,ex:1383,p:0.906,lo:0.854,hi:0.940,w:10.97,aipe:0.933,jt:0.850,st:"pass",par:true},
+  {s:56,i:28,tr:1568,ex:1490,p:0.944,lo:0.901,hi:0.970,w:10.53,aipe:0.978,jt:0.922,st:"pass",par:false},
+  {s:60,i:28,tr:1680,ex:1596,p:0.967,lo:0.929,hi:0.985,w:10.20,aipe:0.989,jt:0.956,st:"pass",par:false},
+  {s:64,i:28,tr:1792,ex:1702,p:0.972,lo:0.937,hi:0.988,w:9.89,aipe:0.994,jt:0.967,st:"pass",par:false},
+  {s:68,i:28,tr:1904,ex:1809,p:0.978,lo:0.944,hi:0.991,w:9.61,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:72,i:28,tr:2016,ex:1915,p:0.978,lo:0.944,hi:0.991,w:9.22,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:76,i:28,tr:2128,ex:2022,p:0.978,lo:0.944,hi:0.991,w:9.09,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:80,i:28,tr:2240,ex:2128,p:0.983,lo:0.952,hi:0.994,w:8.81,aipe:1.000,jt:0.983,st:"pass",par:false},
+
+  {s:24,i:32,tr:768,ex:730,p:0.639,lo:0.566,hi:0.705,w:15.04,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:32,tr:896,ex:851,p:0.778,lo:0.712,hi:0.832,w:13.98,aipe:0,jt:0,st:"fail",par:false},
+  {s:32,i:32,tr:1024,ex:973,p:0.817,lo:0.754,hi:0.866,w:13.09,aipe:0.039,jt:0.033,st:"fail",par:false},
+  {s:36,i:32,tr:1152,ex:1094,p:0.861,lo:0.803,hi:0.904,w:12.33,aipe:0.289,jt:0.244,st:"fail",par:false},
+  {s:40,i:32,tr:1280,ex:1216,p:0.931,lo:0.893,hi:0.956,w:11.63,aipe:0.781,jt:0.731,st:"indeterminate",par:false},
+  {s:44,i:32,tr:1408,ex:1338,p:0.911,lo:0.861,hi:0.945,w:11.06,aipe:0.917,jt:0.828,st:"pass",par:true},
+  {s:48,i:32,tr:1536,ex:1459,p:0.939,lo:0.894,hi:0.966,w:10.61,aipe:0.989,jt:0.933,st:"pass",par:false},
+  {s:52,i:32,tr:1664,ex:1581,p:0.972,lo:0.937,hi:0.988,w:10.19,aipe:1.000,jt:0.972,st:"pass",par:false},
+  {s:56,i:32,tr:1792,ex:1702,p:0.961,lo:0.922,hi:0.981,w:9.82,aipe:1.000,jt:0.961,st:"pass",par:false},
+  {s:60,i:32,tr:1920,ex:1824,p:0.989,lo:0.960,hi:0.997,w:9.52,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:64,i:32,tr:2048,ex:1946,p:0.994,lo:0.969,hi:0.999,w:9.21,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:68,i:32,tr:2176,ex:2067,p:0.978,lo:0.944,hi:0.991,w:8.96,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:72,i:32,tr:2304,ex:2189,p:0.994,lo:0.969,hi:0.999,w:8.69,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:76,i:32,tr:2432,ex:2310,p:0.989,lo:0.960,hi:0.997,w:8.45,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:80,i:32,tr:2560,ex:2432,p:1.000,lo:0.979,hi:1.000,w:8.27,aipe:1.000,jt:1.000,st:"pass",par:false},
+
+  {s:24,i:36,tr:864,ex:821,p:0.744,lo:0.676,hi:0.803,w:14.21,aipe:0,jt:0,st:"fail",par:false},
+  {s:28,i:36,tr:1008,ex:958,p:0.756,lo:0.688,hi:0.813,w:13.14,aipe:0.022,jt:0.017,st:"fail",par:false},
+  {s:32,i:36,tr:1152,ex:1094,p:0.833,lo:0.772,hi:0.881,w:12.18,aipe:0.428,jt:0.378,st:"fail",par:false},
+  {s:36,i:36,tr:1296,ex:1231,p:0.869,lo:0.823,hi:0.905,w:11.58,aipe:0.773,jt:0.688,st:"indeterminate",par:false},
+  {s:40,i:36,tr:1440,ex:1368,p:0.906,lo:0.854,hi:0.940,w:10.92,aipe:0.961,jt:0.894,st:"pass",par:true},
+  {s:44,i:36,tr:1584,ex:1505,p:0.939,lo:0.894,hi:0.966,w:10.38,aipe:0.994,jt:0.933,st:"pass",par:false},
+  {s:48,i:36,tr:1728,ex:1642,p:0.961,lo:0.922,hi:0.981,w:9.99,aipe:1.000,jt:0.961,st:"pass",par:false},
+  {s:52,i:36,tr:1872,ex:1778,p:0.972,lo:0.937,hi:0.988,w:9.61,aipe:1.000,jt:0.972,st:"pass",par:false},
+  {s:56,i:36,tr:2016,ex:1915,p:1.000,lo:0.979,hi:1.000,w:9.24,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:60,i:36,tr:2160,ex:2052,p:0.967,lo:0.929,hi:0.985,w:8.98,aipe:1.000,jt:0.967,st:"pass",par:false},
+  {s:64,i:36,tr:2304,ex:2189,p:0.994,lo:0.969,hi:0.999,w:8.68,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:68,i:36,tr:2448,ex:2326,p:1.000,lo:0.979,hi:1.000,w:8.41,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:72,i:36,tr:2592,ex:2462,p:0.994,lo:0.969,hi:0.999,w:8.18,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:76,i:36,tr:2736,ex:2599,p:0.994,lo:0.969,hi:0.999,w:7.94,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:80,i:36,tr:2880,ex:2736,p:1.000,lo:0.979,hi:1.000,w:7.78,aipe:1.000,jt:1.000,st:"pass",par:false},
+
+  {s:24,i:40,tr:960,ex:912,p:0.756,lo:0.688,hi:0.813,w:13.40,aipe:0.017,jt:0.017,st:"fail",par:false},
+  {s:28,i:40,tr:1120,ex:1064,p:0.850,lo:0.791,hi:0.895,w:12.43,aipe:0.261,jt:0.233,st:"fail",par:false},
+  {s:32,i:40,tr:1280,ex:1216,p:0.923,lo:0.884,hi:0.950,w:11.65,aipe:0.746,jt:0.696,st:"fail",par:false},
+  {s:36,i:40,tr:1440,ex:1368,p:0.906,lo:0.854,hi:0.940,w:10.92,aipe:0.983,jt:0.889,st:"pass",par:true},
+  {s:40,i:40,tr:1600,ex:1520,p:0.917,lo:0.867,hi:0.949,w:10.39,aipe:1.000,jt:0.917,st:"pass",par:false},
+  {s:44,i:40,tr:1760,ex:1672,p:0.950,lo:0.908,hi:0.973,w:9.92,aipe:1.000,jt:0.950,st:"pass",par:false},
+  {s:48,i:40,tr:1920,ex:1824,p:0.961,lo:0.922,hi:0.981,w:9.49,aipe:1.000,jt:0.961,st:"pass",par:false},
+  {s:52,i:40,tr:2080,ex:1976,p:0.989,lo:0.960,hi:0.997,w:9.09,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:56,i:40,tr:2240,ex:2128,p:0.983,lo:0.952,hi:0.994,w:8.76,aipe:1.000,jt:0.983,st:"pass",par:false},
+  {s:60,i:40,tr:2400,ex:2280,p:0.989,lo:0.960,hi:0.997,w:8.47,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:64,i:40,tr:2560,ex:2432,p:1.000,lo:0.979,hi:1.000,w:8.24,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:68,i:40,tr:2720,ex:2584,p:1.000,lo:0.979,hi:1.000,w:7.95,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:72,i:40,tr:2880,ex:2736,p:0.994,lo:0.969,hi:0.999,w:7.79,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:76,i:40,tr:3040,ex:2888,p:1.000,lo:0.979,hi:1.000,w:7.49,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:80,i:40,tr:3200,ex:3040,p:1.000,lo:0.979,hi:1.000,w:7.38,aipe:1.000,jt:1.000,st:"pass",par:false},
+
+  {s:24,i:44,tr:1056,ex:1003,p:0.811,lo:0.748,hi:0.862,w:12.79,aipe:0.111,jt:0.100,st:"fail",par:false},
+  {s:28,i:44,tr:1232,ex:1170,p:0.861,lo:0.803,hi:0.904,w:11.89,aipe:0.644,jt:0.589,st:"fail",par:false},
+  {s:32,i:44,tr:1408,ex:1338,p:0.928,lo:0.880,hi:0.957,w:11.13,aipe:0.911,jt:0.850,st:"pass",par:true},
+  {s:36,i:44,tr:1584,ex:1505,p:0.944,lo:0.901,hi:0.970,w:10.50,aipe:1.000,jt:0.944,st:"pass",par:false},
+  {s:40,i:44,tr:1760,ex:1672,p:0.972,lo:0.937,hi:0.988,w:9.88,aipe:1.000,jt:0.972,st:"pass",par:false},
+  {s:44,i:44,tr:1936,ex:1839,p:0.983,lo:0.952,hi:0.994,w:9.42,aipe:1.000,jt:0.983,st:"pass",par:false},
+  {s:48,i:44,tr:2112,ex:2006,p:0.989,lo:0.960,hi:0.997,w:8.97,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:52,i:44,tr:2288,ex:2174,p:0.989,lo:0.960,hi:0.997,w:8.62,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:56,i:44,tr:2464,ex:2341,p:1.000,lo:0.979,hi:1.000,w:8.32,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:60,i:44,tr:2640,ex:2508,p:0.994,lo:0.969,hi:0.999,w:8.05,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:64,i:44,tr:2816,ex:2675,p:0.994,lo:0.969,hi:0.999,w:7.82,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:68,i:44,tr:2992,ex:2842,p:0.994,lo:0.969,hi:0.999,w:7.59,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:72,i:44,tr:3168,ex:3010,p:1.000,lo:0.979,hi:1.000,w:7.39,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:76,i:44,tr:3344,ex:3177,p:1.000,lo:0.979,hi:1.000,w:7.15,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:80,i:44,tr:3520,ex:3344,p:1.000,lo:0.979,hi:1.000,w:6.93,aipe:1.000,jt:1.000,st:"pass",par:false},
+
+  {s:24,i:48,tr:1152,ex:1094,p:0.900,lo:0.847,hi:0.936,w:12.33,aipe:0.372,jt:0.333,st:"fail",par:false},
+  {s:28,i:48,tr:1344,ex:1277,p:0.904,lo:0.862,hi:0.934,w:11.37,aipe:0.835,jt:0.762,st:"indeterminate",par:false},
+  {s:32,i:48,tr:1536,ex:1459,p:0.944,lo:0.901,hi:0.970,w:10.64,aipe:0.983,jt:0.928,st:"pass",par:false},
+  {s:36,i:48,tr:1728,ex:1642,p:0.978,lo:0.944,hi:0.991,w:9.97,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:40,i:48,tr:1920,ex:1824,p:0.978,lo:0.944,hi:0.991,w:9.48,aipe:1.000,jt:0.978,st:"pass",par:false},
+  {s:44,i:48,tr:2112,ex:2006,p:0.989,lo:0.960,hi:0.997,w:9.03,aipe:1.000,jt:0.989,st:"pass",par:false},
+  {s:48,i:48,tr:2304,ex:2189,p:0.994,lo:0.969,hi:0.999,w:8.62,aipe:1.000,jt:0.994,st:"pass",par:false},
+  {s:52,i:48,tr:2496,ex:2371,p:1.000,lo:0.979,hi:1.000,w:8.32,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:56,i:48,tr:2688,ex:2554,p:1.000,lo:0.979,hi:1.000,w:7.93,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:60,i:48,tr:2880,ex:2736,p:1.000,lo:0.979,hi:1.000,w:7.71,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:64,i:48,tr:3072,ex:2918,p:1.000,lo:0.979,hi:1.000,w:7.44,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:68,i:48,tr:3264,ex:3101,p:1.000,lo:0.979,hi:1.000,w:7.23,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:72,i:48,tr:3456,ex:3283,p:1.000,lo:0.979,hi:1.000,w:7.06,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:76,i:48,tr:3648,ex:3466,p:1.000,lo:0.979,hi:1.000,w:6.82,aipe:1.000,jt:1.000,st:"pass",par:false},
+  {s:80,i:48,tr:3840,ex:3648,p:1.000,lo:0.979,hi:1.000,w:6.72,aipe:1.000,jt:1.000,st:"pass",par:false}
+];
+
+const R1_REPORT = `Sample size was planned a priori via two-dimensional simulation-based optimization for crossed binary GLMMs using glmmplanr (seed = 810101, disjoint L'Ecuyer-CMRG stage/point streams). We specified a balanced latin_square (exposure x spacing) design with sum contrasts (multiples of 4 participants x 4 items) and 5.0% random trial attrition.
+
+Expected marginal cell accuracies corresponded to a focal exposure marginal accuracy difference of +9.00 percentage points (calibrated conditional beta = 0.661 logit via 21x21 Gauss-Hermite quadrature accounting for a lower guessing asymptote of g = 0.333).
+
+Targeting separate thresholds: statistical power >= 80% (alpha = 0.05) and interval width <= 12.00 percentage points (>= 80% assurance) under effective failure accounting (bayes_laplace engine, 180 replications), the recommended balanced design was N_subj = 44 participants and N_item = 32 items (1,408 scheduled trials; 1,338 expected post-attrition observations). Monte Carlo decision status (95% Wilson CI) was PASS: target-scale power = 91.1% [86.0%, 94.5%], width-attainment probability = 91.7% [86.7%, 94.9%], mean 95% CI width = 11.06 pp, singular-fit rate = 0.0%.`;
+
+let r1Metric = "power";
+let r1Prefer = "balanced";
+let r1Selected = {s: 44, i: 32};
+let guessFloor = 0;
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+}
+
+function selectTab(idx) {
+  document.querySelectorAll(".tab-btn").forEach((b, k) => b.classList.toggle("active", k === idx));
+  document.querySelectorAll(".tab-pane").forEach((p, k) => p.classList.toggle("hidden", k !== idx));
+}
+
+function copyCode(id, btn) {
+  const txt = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(txt).then(() => {
+    const old = btn.innerText;
+    btn.innerText = "Copied!";
+    setTimeout(() => btn.innerText = old, 1400);
+  });
+}
+
+function getPreferWinner(prefer) {
+  const pareto = GRID_R1.filter(d => d.par);
+  return pareto.slice().sort((a, b) => {
+    if (prefer === "fewer_subj") return a.s - b.s || a.i - b.i;
+    if (prefer === "fewer_items") return a.i - b.i || a.s - b.s;
+    if (prefer === "fewer_trials") return a.tr - b.tr || a.s - b.s;
+    const sa = (a.s / 80) + (a.i / 48) + 0.5 * (a.tr / 3840);
+    const sb = (b.s / 80) + (b.i / 48) + 0.5 * (b.tr / 3840);
+    return sa - sb;
+  })[0];
+}
+
+function colorForR1(d) {
+  if (r1Metric === "width") {
+    const t = Math.max(0, Math.min(1, (21.5 - d.w) / (21.5 - 6.7)));
+    const r = Math.round(239 - t * 200), g = Math.round(68 + t * 130), b = Math.round(68 + t * 120);
+    return `rgb(${r},${g},${b})`;
+  }
+  const val = r1Metric === "power" ? d.p : (r1Metric === "aipe" ? d.aipe : d.jt);
+  const t = Math.max(0, Math.min(1, val));
+  const r = Math.round(45 + t * 15), g = Math.round(55 + t * 145), b = Math.round(110 + t * 85);
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderR1() {
+  const win = getPreferWinner(r1Prefer);
+  const subjs = [24,28,32,36,40,44,48,52,56,60,64,68,72,76,80];
+  const items = [48,44,40,36,32,28,24,20,16];
+  let html = `<table class="hm-table"><thead><tr><th>Items \\ Subj</th>`;
+  subjs.forEach(s => html += `<th>${s}</th>`);
+  html += `</tr></thead><tbody>`;
+  items.forEach(it => {
+    html += `<tr><th>${it}</th>`;
+    subjs.forEach(s => {
+      const d = GRID_R1.find(x => x.s === s && x.i === it);
+      const txt = r1Metric === "width" ? d.w.toFixed(1) : Math.round((r1Metric === "power" ? d.p : (r1Metric === "aipe" ? d.aipe : d.jt)) * 100) + "%";
+      const cls = ["hm-cell", d.par ? "pareto" : "", (win.s === s && win.i === it) ? "winner" : ""].join(" ");
+      html += `<td class="${cls}" style="background:${colorForR1(d)}; color:#fff;" onclick="inspectR1(${s},${it})" onmouseenter="inspectR1(${s},${it})">${txt}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table>`;
+  document.getElementById("r1Heatmap").innerHTML = html;
+  inspectR1(r1Selected.s, r1Selected.i);
+}
+
+function inspectR1(s, it) {
+  r1Selected = {s, i: it};
+  const d = GRID_R1.find(x => x.s === s && x.i === it);
+  const win = getPreferWinner(r1Prefer);
+  const pillCls = d.st === "pass" ? "pill-pass" : (d.st === "indeterminate" ? "pill-ind" : "pill-fail");
+  document.getElementById("r1Inspector").innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3>Cell Inspector: <code>N_subj = ${d.s}, N_item = ${d.i}</code></h3>
+      <span class="pill ${pillCls}">${d.st.toUpperCase()}</span>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">
+      ${d.par ? "&#9733; Non-dominated Pareto-optimal design" : "Candidate lattice point"}
+      ${(win.s === d.s && win.i === d.i) ? ` • <strong>Selected (${r1Prefer})</strong>` : ""}
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Power [95% MC]</div><div class="kpi-val">${(d.p*100).toFixed(1)}%</div><div class="kpi-sub">[${(d.lo*100).toFixed(1)}%, ${(d.hi*100).toFixed(1)}%]</div></div>
+      <div class="kpi"><div class="kpi-label">Mean 95% CI</div><div class="kpi-val">${d.w.toFixed(2)} pp</div><div class="kpi-sub">Target &le; 12.0 pp</div></div>
+      <div class="kpi"><div class="kpi-label">Width Assurance</div><div class="kpi-val">${(d.aipe*100).toFixed(1)}%</div><div class="kpi-sub">Joint: ${(d.jt*100).toFixed(1)}%</div></div>
+      <div class="kpi"><div class="kpi-label">Trials</div><div class="kpi-val">${d.tr}</div><div class="kpi-sub">${d.ex} post-attrition</div></div>
+    </div>
+  `;
+}
+
+function setR1Metric(m) {
+  r1Metric = m;
+  ["power","width","aipe","joint"].forEach(k => document.getElementById("m-"+k).classList.toggle("active", k===m));
+  renderR1();
+}
+
+function setR1Prefer(p) {
+  r1Prefer = p;
+  ["balanced","fewer_subj","fewer_items","fewer_trials"].forEach(k => document.getElementById("p-"+k).classList.toggle("active", k===p));
+  const win = getPreferWinner(p);
+  r1Selected = {s: win.s, i: win.i};
+  renderR1();
+}
+
+// Gauss-Hermite 11-node quadrature for live Non-Collapsibility Calculator
+const GH_X = [-3.66847, -2.78329, -2.02595, -1.32656, -0.65681, 0, 0.65681, 1.32656, 2.02595, 2.78329, 3.66847];
+const GH_W = [0.0000014, 0.000154, 0.00453, 0.04992, 0.22715, 0.43649, 0.22715, 0.04992, 0.00453, 0.000154, 0.0000014];
+
+function margProb(eta, totSd, g) {
+  let acc = 0;
+  for (let k = 0; k < GH_X.length; k++) {
+    const z = eta + Math.SQRT2 * totSd * GH_X[k];
+    const pl = 1 / (1 + Math.exp(-z));
+    acc += GH_W[k] * (g + (1 - g) * pl);
+  }
+  return acc;
+}
+
+function invertMarg(targetP, totSd, g) {
+  let lo = -8, hi = 8;
+  for (let it = 0; it < 42; it++) {
+    const mid = 0.5 * (lo + hi);
+    if (margProb(mid, totSd, g) < targetP) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+function setGuess(g, btnId) {
+  guessFloor = g;
+  ["g-0","g-25","g-33"].forEach(id => document.getElementById(id).classList.toggle("active", id===btnId));
+  updateNC();
+}
+
+function updateNC() {
+  const p0 = parseFloat(document.getElementById("nc-p0").value) / 100;
+  const diff = parseFloat(document.getElementById("nc-diff").value) / 100;
+  const sds = parseFloat(document.getElementById("nc-sds").value);
+  const sdi = parseFloat(document.getElementById("nc-sdi").value);
+  const p1 = Math.min(0.97, p0 + diff);
+  const effP0 = Math.max(guessFloor + 0.03, p0);
+  const effP1 = Math.min(0.98, Math.max(effP0 + 0.02, p1));
+
+  document.getElementById("nc-p0-lbl").innerText = Math.round(effP0 * 100) + "%";
+  document.getElementById("nc-diff-lbl").innerText = "+" + Math.round((effP1 - effP0) * 100) + " pp";
+  document.getElementById("nc-sds-lbl").innerText = sds.toFixed(2);
+  document.getElementById("nc-sdi-lbl").innerText = sdi.toFixed(2);
+
+  const totSd = Math.hypot(sds, sdi);
+  const eta0 = invertMarg(effP0, totSd, guessFloor);
+  const eta1 = invertMarg(effP1, totSd, guessFloor);
+  const betaCal = eta1 - eta0;
+
+  const naive0 = Math.log(effP0 / (1 - effP0));
+  const naive1 = Math.log(effP1 / (1 - effP1));
+  const betaNaive = naive1 - naive0;
+  const naiveMarg0 = margProb(naive0, totSd, guessFloor);
+  const naiveMarg1 = margProb(naive1, totSd, guessFloor);
+  const naiveDiffPp = (naiveMarg1 - naiveMarg0) * 100;
+  const targetDiffPp = (effP1 - effP0) * 100;
+
+  document.getElementById("ncReadout").innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Calibrated &beta;</div><div class="kpi-val" style="color:var(--primary);">${betaCal.toFixed(3)}</div><div class="kpi-sub">Exact +${targetDiffPp.toFixed(1)} pp marginal</div></div>
+      <div class="kpi"><div class="kpi-label">Naive qlogis &beta;</div><div class="kpi-val">${betaNaive.toFixed(3)}</div><div class="kpi-sub">${((betaCal/betaNaive - 1)*100).toFixed(0)}% slope gap</div></div>
+      <div class="kpi"><div class="kpi-label">Naive Marginal Diff</div><div class="kpi-val" style="color:var(--fail);">+${naiveDiffPp.toFixed(1)} pp</div><div class="kpi-sub">Distorted by ${(naiveDiffPp - targetDiffPp).toFixed(1)} pp</div></div>
+    </div>
+    <div class="bar-row"><span style="width:155px;">Calibrated Marginal</span><div class="bar-track"><div class="bar-fill" style="width:${targetDiffPp*4}%; background:var(--primary);"></div></div><strong>+${targetDiffPp.toFixed(1)} pp</strong></div>
+    <div class="bar-row"><span style="width:155px;">Naive <code>qlogis()</code> Actual</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, naiveDiffPp*4)}%; background:var(--fail);"></div></div><strong>+${naiveDiffPp.toFixed(1)} pp</strong></div>
+  `;
+}
+
+function renderR2andR3() {
+  const r2 = [
+    {n:48, pPow:"54.3% [46.0, 62.3]", cov:"94.3%", t1:"7.9%"},
+    {n:72, pPow:"67.9% [59.7, 75.0]", cov:"94.3%", t1:"7.1%"},
+    {n:96, pPow:"86.4% [79.8, 91.1]", cov:"92.1%", t1:"6.4%"},
+    {n:120, pPow:"92.9% [87.4, 96.1]", cov:"93.6%", t1:"10.7%"}
+  ];
+  document.getElementById("r2Table").innerHTML = `
+    <thead><tr><th>N_subj</th><th>Planned Power (+12 pp)</th><th>95% CI Coverage</th><th>Null Type I (0 pp)</th></tr></thead>
+    <tbody>${r2.map(r => `<tr><td><strong>${r.n}</strong> (${r.n*16} trials)</td><td>${r.pPow}</td><td>${r.cov}</td><td>${r.t1}</td></tr>`).join("")}</tbody>
+  `;
+
+  const r3Rows = [
+    {d:"40 x 24 (6 passages)", c6:"46.7%", s8:"72.7%", o10:"88.7%", st:"Fails +6 & +8 pp"},
+    {d:"52 x 32 (8 passages)", c6:"67.3%", s8:"88.0% (PASS)", o10:"98.0% (PASS)", st:"Standard Winner"},
+    {d:"64 x 32 (8 passages)", c6:"72.0%", s8:"95.3% (PASS)", o10:"99.3% (PASS)", st:"Fails +6 pp"},
+    {d:"70 x 40 (10 passages)", c6:"88.0% (PASS)", s8:"98.7% (PASS)", o10:"100.0% (PASS)", st:"All-Scenario Robust"}
+  ];
+  document.getElementById("r3ScenarioTbl").innerHTML = `
+    <thead><tr><th>Design (N_subj &times; N_item)</th><th>+6 pp</th><th>+8 pp</th><th>+10 pp</th><th>Status</th></tr></thead>
+    <tbody>${r3Rows.map(r => `<tr><td><strong>${r.d}</strong></td><td>${r.c6}</td><td>${r.s8}</td><td>${r.o10}</td><td>${r.st}</td></tr>`).join("")}</tbody>
+  `;
+
+  const sens = [
+    {lbl:"0.70x Slope SD (Optimistic)", pow:85.0, ci:8.66},
+    {lbl:"1.00x Slope SD (Nominal)", pow:82.0, ci:8.67},
+    {lbl:"1.35x Slope SD (Steeper Slopes)", pow:75.5, ci:8.73}
+  ];
+  document.getElementById("r3SensBars").innerHTML = sens.map(x => `
+    <div class="bar-row">
+      <span style="width:195px;">${x.lbl}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${x.pow}%; background:${x.pow>=80?'var(--primary)':'var(--warn)'};"></div></div>
+      <strong>${x.pow.toFixed(1)}%</strong>
+    </div>
+  `).join("");
+}
+
+function applyCostPreset(cs, ci, ct, cf, b, btnId) {
+  document.getElementById("c-subj").value = cs;
+  document.getElementById("c-item").value = ci;
+  document.getElementById("c-trial").value = ct;
+  document.getElementById("c-fixed").value = cf;
+  document.getElementById("c-budget").value = b;
+  ["preset-lab","preset-irt","preset-online"].forEach(id => document.getElementById(id).classList.toggle("active", id===btnId));
+  updateCostExplorer();
+}
+
+function updateCostExplorer() {
+  const cs = parseFloat(document.getElementById("c-subj").value);
+  const ci = parseFloat(document.getElementById("c-item").value);
+  const ct = parseFloat(document.getElementById("c-trial").value);
+  const cf = parseFloat(document.getElementById("c-fixed").value);
+  const budget = parseFloat(document.getElementById("c-budget").value);
+
+  document.getElementById("c-subj-lbl").innerText = "$" + cs;
+  document.getElementById("c-item-lbl").innerText = "$" + ci;
+  document.getElementById("c-trial-lbl").innerText = "$" + ct.toFixed(2);
+  document.getElementById("c-fixed-lbl").innerText = "$" + cf;
+  document.getElementById("c-budget-lbl").innerText = "$" + budget.toLocaleString();
+
+  const withCost = GRID_R1.map(d => ({...d, cost: cf + cs * d.s + ci * d.i + ct * d.tr}));
+  const passAll = withCost.filter(d => d.st === "pass").sort((a,b) => a.cost - b.cost || a.tr - b.tr);
+  const passBudget = passAll.filter(d => d.cost <= budget);
+  const feasible = passBudget.length > 0;
+  const winner = feasible ? passBudget[0] : passAll[0];
+
+  const minC = Math.min(...withCost.map(d => d.cost));
+  const maxC = Math.max(...withCost.map(d => d.cost));
+
+  const subjs = [24,28,32,36,40,44,48,52,56,60,64,68,72,76,80];
+  const items = [48,44,40,36,32,28,24,20,16];
+  let html = `<table class="hm-table"><thead><tr><th>Items \\ Subj</th>`;
+  subjs.forEach(s => html += `<th>${s}</th>`);
+  html += `</tr></thead><tbody>`;
+  items.forEach(it => {
+    html += `<tr><th>${it}</th>`;
+    subjs.forEach(s => {
+      const d = withCost.find(x => x.s === s && x.i === it);
+      const inB = d.cost <= budget;
+      let bg = inB ? "rgba(148,163,184,0.28)" : "rgba(100,116,139,0.12)";
+      let fg = "var(--muted)";
+      if (d.st === "pass" && inB) {
+        const t = (d.cost - minC) / Math.max(1, budget - minC);
+        bg = `rgb(${Math.round(16 + t*30)}, ${Math.round(155 - t*45)}, ${Math.round(115 - t*20)})`;
+        fg = "#fff";
+      } else if (d.st === "pass" && !inB) {
+        bg = "rgba(217,119,6,0.28)";
+        fg = "var(--text)";
+      }
+      const isWin = winner && winner.s === s && winner.i === it;
+      html += `<td class="hm-cell ${d.par?'pareto':''} ${isWin?'winner':''}" style="background:${bg}; color:${fg};" title="(${s}, ${it}): $${d.cost.toFixed(0)} | ${d.st.toUpperCase()} | Power ${(d.p*100).toFixed(1)}%">$${Math.round(d.cost/100)/10}k</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table><div class="muted" style="margin-top:8px;">Green = Budget-feasible <code>PASS</code> | Amber = Over-budget <code>PASS</code> | Gray = Fails power/width target | Red outline = Optimal minimum-cost choice</div>`;
+  document.getElementById("r4Heatmap").innerHTML = html;
+
+  document.getElementById("r4WinnerBox").innerHTML = feasible ? `
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Min-Cost Winner</div><div class="kpi-val" style="color:var(--pass);">${winner.s} &times; ${winner.i}</div><div class="kpi-sub">${winner.tr} trials</div></div>
+      <div class="kpi"><div class="kpi-label">Total Cost</div><div class="kpi-val">$${winner.cost.toFixed(0)}</div><div class="kpi-sub">Saves $${(budget - winner.cost).toFixed(0)}</div></div>
+      <div class="kpi"><div class="kpi-label">Verified Power</div><div class="kpi-val">${(winner.p*100).toFixed(1)}%</div><div class="kpi-sub">CI ${winner.w.toFixed(1)} pp</div></div>
+    </div>
+  ` : `
+    <div class="report-box" style="border-left-color:var(--warn);">
+      <strong>Budget Insufficient ($${budget.toLocaleString()}):</strong> No verified <code>PASS</code> design fits under cap. Cheapest passing fallback (<code>min_cost_over_budget</code>) is <strong>${winner.s} subjects &times; ${winner.i} items</strong> at <strong>$${winner.cost.toFixed(2)}</strong> (+$${(winner.cost - budget).toFixed(2)} over cap).
+    </div>
+  `;
+
+  document.getElementById("code-r4").innerText =
+`res_cost <- switch_preference(
+  res1,
+  prefer = "min_cost",
+  cost   = c(subj = ${cs}, item = ${ci}, trial = ${ct.toFixed(2)}, fixed = ${cf}),
+  budget = ${budget}
+)
+plot(res_cost, type = "contour", metric = "cost")`;
+}
+
+function setRaschMode(mode) {
+  document.getElementById("rasch-mode-fixed").classList.toggle("active", mode === "fixed");
+  document.getElementById("rasch-mode-rand").classList.toggle("active", mode === "random");
+  if (mode === "fixed") {
+    const rows = [
+      {n:40, ex:"14 / 120", mmlR:"54.2%", ebR:"54.2%", mmlM:"4.2% (FAIL)", ebM:"6.7% (FAIL)"},
+      {n:80, ex:"0 / 120", mmlR:"95.8% (PASS)", ebR:"100.0% (PASS)", mmlM:"47.5% (FAIL)", ebM:"35.0% (FAIL)"},
+      {n:120, ex:"0 / 120", mmlR:"99.2% (PASS)", ebR:"100.0% (PASS)", mmlM:"62.5% (FAIL)", ebM:"61.7% (FAIL)"},
+      {n:180, ex:"0 / 120", mmlR:"100.0% (PASS)", ebR:"100.0% (PASS)", mmlM:"90.0% (PASS)", ebM:"82.5% (INDET)"},
+      {n:240, ex:"0 / 120", mmlR:"100.0% (PASS)", ebR:"100.0% (PASS)", mmlM:"90.8% (PASS)", ebM:"90.8% (PASS)"}
+    ];
+    document.getElementById("raschContent").innerHTML = `
+      <p class="muted">16 fixed items (14 core items in [&minus;1.1, +1.1] plus 2 extreme anchors at &plusmn;3.0 logits; 120 replications/point, 80% Wilson lower-bound assurance).</p>
+      <table class="data-tbl">
+        <thead><tr><th>N_subj</th><th>Extreme-Item Reps</th><th>MML Bank RMSE &le; 0.45</th><th>EB Bank RMSE &le; 0.45</th><th>MML All 16 |err| &le; 0.60</th><th>EB All 16 |err| &le; 0.60</th></tr></thead>
+        <tbody>${rows.map(r => `<tr><td><strong>${r.n}</strong></td><td>${r.ex}</td><td>${r.mmlR}</td><td>${r.ebR}</td><td><strong>${r.mmlM}</strong></td><td>${r.ebM}</td></tr>`).join("")}</tbody>
+      </table>
+    `;
+  } else {
+    const rows = [
+      {n:60, i16:"26.7% (FAIL)", i24:"51.7% (FAIL)", i36:"56.7% (FAIL)"},
+      {n:90, i16:"39.2% (FAIL)", i24:"81.7% (INDET)", i36:"94.2% (PASS)"},
+      {n:120, i16:"47.5% (FAIL)", i24:"90.0% (PASS)", i36:"95.8% (PASS)"},
+      {n:160, i16:"48.3% (FAIL)", i24:"92.5% (PASS)", i36:"99.2% (PASS)"}
+    ];
+    document.getElementById("raschContent").innerHTML = `
+      <p class="muted">Joint attainment simultaneously requiring Ability RMSE &le; 0.50, Difficulty RMSE &le; 0.30, and Item Population SD error &le; 0.22 logit.</p>
+      <table class="data-tbl">
+        <thead><tr><th>N_subj</th><th>N_item = 16</th><th>N_item = 24</th><th>N_item = 36</th></tr></thead>
+        <tbody>${rows.map(r => `<tr><td><strong>${r.n}</strong></td><td>${r.i16}</td><td><strong>${r.i24}</strong></td><td><strong>${r.i36}</strong></td></tr>`).join("")}</tbody>
+      </table>
+    `;
+  }
+}
+
+document.getElementById("r1Report").innerText = R1_REPORT;
+renderR1();
+updateNC();
+renderR2andR3();
+updateCostExplorer();
+setRaschMode("fixed");
+</script>
+</body>
+</html>
