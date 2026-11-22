@@ -1,6 +1,6 @@
 Package: glmmplanr
 Title: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs
-Version: 0.3.0
+Version: 0.1.0
 Authors@R: 
     person("Ryuya", "Komuro", , "ryuya.komuro.c4@tohoku.ac.jp", role = c("aut", "cre"))
 Description: An end-to-end sample size and precision optimization pipeline for
@@ -49,4 +49,5 @@ Suggests:
     rstan,
     TAM,
     testthat (>= 3.0.0)
+Additional_repositories: https://stan-dev.r-universe.dev/
 Config/roxygen2/version: 8.1.1

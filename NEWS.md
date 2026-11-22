@@ -1,4 +1,4 @@
-# glmmplanr 0.3.0
+# glmmplanr 0.1.0
 
 * Initial public release of `glmmplanr`.
 * Declarative crossed, balanced Latin-square, incomplete-block (`items_per_subject`), and testlet-nested (`design_testlet()`) experimental and assessment schedules with separate trial-level missingness (`attrition`) and whole-participant dropout (`participant_dropout`).

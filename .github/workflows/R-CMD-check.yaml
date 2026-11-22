@@ -40,8 +40,8 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck
-          needs: check
+          dependencies: '"hard"'
+          extra-packages: any::rcmdcheck, any::knitr, any::rmarkdown, any::testthat, any::pkgload, any::plotly, any::TAM, any::glmmTMB
 
       - uses: r-lib/actions/check-r-package@v2
         with:
