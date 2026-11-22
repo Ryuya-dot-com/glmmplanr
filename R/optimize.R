@@ -26,15 +26,6 @@
 #'   * `"fewer_subj"`: Minimizes participant count `N_subj` first, then `N_item`.
 #'   * `"fewer_items"`: Minimizes stimulus/item count `N_item` first, then `N_subj`.
 #'   * `"fewer_trials"`: Minimizes scheduled total trials (`N_trials_scheduled`).
-#'   * `"min_cost"`: Minimizes total study cost computed from `cost` (selected
-#'     automatically when `cost` is supplied and `prefer` is omitted).
-#' @param cost Optional explicit study cost specification: either a named
-#'   numeric vector/list `c(subj = ..., item = ..., trial = ..., fixed = 0)`
-#'   giving unit recruitment, item-development, per-trial, and fixed overhead
-#'   costs, or a custom `function(n_subj, n_item, n_trials_scheduled)`.
-#' @param budget Optional positive numeric maximum total cost. When supplied
-#'   together with `cost`, confirmed recommendations must satisfy
-#'   `total_cost <= budget` in addition to `decision_status == "pass"`.
 #' @param scenarios Optional named list of `"glmmplanr_dgp"` objects (e.g., from
 #'   [scenario_dgps()] or [sensitivity_dgps()]) for **robust multi-scenario
 #'   planning**. When supplied, identifies both the standard-scenario design and
@@ -86,9 +77,7 @@ optimize_sample_size <- function(
   spec,
   n_subj_range,
   n_item_range,
-  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost"),
-  cost = NULL,
-  budget = NULL,
+  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials"),
   scenarios = NULL,
   standard_scenario = NULL,
   method = c("surrogate_gp", "grid"),
@@ -108,23 +97,7 @@ optimize_sample_size <- function(
   if (!inherits(spec, "glmmplanr_spec")) {
     cli::cli_abort("{.arg spec} must be a {.cls glmmplanr_spec} object.")
   }
-  prefer_missing <- missing(prefer)
   prefer <- match.arg(prefer)
-  if (!is.null(cost) && prefer_missing) {
-    prefer <- "min_cost"
-  }
-  if (prefer == "min_cost" && is.null(cost)) {
-    cli::cli_abort("Supply {.arg cost} when using {.code prefer = 'min_cost'}.")
-  }
-  if (!is.null(budget)) {
-    if (is.null(cost)) {
-      cli::cli_abort("Supply {.arg cost} when specifying {.arg budget}.")
-    }
-    if (!is.numeric(budget) || length(budget) != 1L || !is.finite(budget) || budget <= 0) {
-      cli::cli_abort("{.arg budget} must be a single positive finite number.")
-    }
-    budget <- as.numeric(budget)
-  }
   method <- match.arg(method)
   parallel_backend <- match.arg(parallel_backend)
   workers <- max(1L, as.integer(workers))
@@ -181,32 +154,12 @@ optimize_sample_size <- function(
   grid_df$grid_id <- seq_len(n_grid_stride)
   grid_df$n_trials_scheduled <- compute_scheduled_trials(des, grid_df$n_subj, grid_df$n_item)
   grid_df$n_trials_expected <- compute_expected_trials(des, grid_df$n_subj, grid_df$n_item)
-  if (!is.null(cost)) {
-    grid_df$total_cost <- evaluate_design_cost(grid_df, cost = cost)
-    grid_df$within_budget <- if (!is.null(budget)) (grid_df$total_cost <= budget + 1e-9) else rep(TRUE, n_grid_stride)
-    if (!any(grid_df$within_budget)) {
-      cli::cli_abort(
-        "No candidate in the search range fits within {.arg budget} = {signif(budget, 6)} (minimum candidate cost = {signif(min(grid_df$total_cost), 6)})."
-      )
-    }
-  } else {
-    grid_df$within_budget <- rep(TRUE, n_grid_stride)
-  }
   grid_df$preference_score <- compute_preference_score(grid_df, prefer = prefer)
 
   t_start <- proc.time()
   if (isTRUE(verbose)) {
-    cost_note <- if (!is.null(cost)) {
-      if (!is.null(budget)) {
-        sprintf(" | cost range [%.2f, %.2f], budget <= %.2f", min(grid_df$total_cost), max(grid_df$total_cost), budget)
-      } else {
-        sprintf(" | cost range [%.2f, %.2f]", min(grid_df$total_cost), max(grid_df$total_cost))
-      }
-    } else {
-      ""
-    }
     cli::cli_inform(
-      "Starting 2D sample size planning ({n_grid_stride} lattice points, prefer = {.val {prefer}}, workers = {workers}{cost_note})..."
+      "Starting 2D sample size planning ({n_grid_stride} lattice points, prefer = {.val {prefer}}, workers = {workers})..."
     )
   }
 
@@ -238,7 +191,6 @@ optimize_sample_size <- function(
   }
 
   robust_info <- NULL
-  min_cost_over_budget <- NULL
   if (!is.null(scenarios)) {
     robust_info <- run_multi_scenario_analysis(
       base_spec = spec,
@@ -264,23 +216,19 @@ optimize_sample_size <- function(
     optimal <- robust_info$optimal_robust
     feasible <- robust_info$feasible_robust
     optimal_hc <- if (feasible) optimal
-    min_cost_over_budget <- robust_info$min_cost_over_budget
     surf <- robust_info$surface
     robust_info$surface <- NULL
     eval_all <- robust_info$scenario_evaluations
     verified_df <- robust_info$verified
-    in_b_ver <- if ("within_budget" %in% names(verified_df)) verified_df$within_budget else rep(TRUE, nrow(verified_df))
-    verified_pareto <- extract_2d_pareto(verified_df[verified_df$decision_status == "pass" & in_b_ver, , drop = FALSE])
+    verified_pareto <- extract_2d_pareto(verified_df[verified_df$decision_status == "pass", , drop = FALSE])
   } else {
     optimal <- core_res$optimal
     optimal_hc <- core_res$optimal_high_confidence
     feasible <- core_res$feasible
-    min_cost_over_budget <- core_res$min_cost_over_budget
     surf <- core_res$surface
     eval_all <- core_res$evaluated
     verified_df <- core_res$verified
-    in_b_ver <- if ("within_budget" %in% names(verified_df)) verified_df$within_budget else rep(TRUE, nrow(verified_df))
-    verified_pareto <- extract_2d_pareto(verified_df[verified_df$decision_status == "pass" & in_b_ver, , drop = FALSE])
+    verified_pareto <- extract_2d_pareto(verified_df[verified_df$decision_status == "pass", , drop = FALSE])
   }
 
   sens_spec <- if (!is.null(robust_info) && !is.null(robust_info$specs) &&
@@ -331,11 +279,8 @@ optimize_sample_size <- function(
     list(
       spec = spec,
       prefer = prefer,
-      cost = cost,
-      budget = budget,
       optimal = optimal,
       optimal_high_confidence = optimal_hc,
-      min_cost_over_budget = min_cost_over_budget,
       decision_status = optimal$decision_status[1L],
       feasible = feasible,
       surface = surf,
@@ -348,8 +293,6 @@ optimize_sample_size <- function(
       search_meta = list(
         method = method,
         prefer = prefer,
-        cost = cost,
-        budget = budget,
         n_subj_grid = s_grid,
         n_item_grid = i_grid,
         n_grid_total = nrow(grid_df),
@@ -371,26 +314,21 @@ optimize_sample_size <- function(
   )
 }
 
-#' Switch the Preferred Trade-Off or Cost/Budget Rule Without Re-Running Simulations
+#' Switch the Preferred Trade-Off Rule Without Re-Running Simulations
 #'
 #' Re-ranks already verified Pareto-optimal `(N_subj, N_item)` candidates under
-#' a different `prefer` rule (`"balanced"`, `"fewer_subj"`, `"fewer_items"`,
-#' `"fewer_trials"`, or `"min_cost"`) or updated `cost` / `budget` assumptions.
+#' a different `prefer` rule (`"balanced"`, `"fewer_subj"`, `"fewer_items"`, or
+#' `"fewer_trials"`).
 #'
 #' @param result A `"glmmplanr_result"` object.
 #' @param prefer New preference rule.
-#' @param cost Optional updated cost specification (defaults to `result$cost`).
-#' @param budget Optional updated maximum total budget (defaults to `result$budget`;
-#'   pass `Inf` to remove an existing budget cap).
 #' @param verbose Logical; notify if stored random-slope sensitivity table is
 #'   cleared because the selected candidate changed (default `FALSE`).
 #' @return Updated `"glmmplanr_result"` object.
 #' @export
 switch_preference <- function(
   result,
-  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost"),
-  cost = result$cost,
-  budget = result$budget,
+  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials"),
   verbose = FALSE
 ) {
   if (!inherits(result, "glmmplanr_result")) {
@@ -399,40 +337,10 @@ switch_preference <- function(
   if (is.null(result$spec$prob_boot) && result$spec$scale %in% c("pp", "prob")) {
     cli::cli_abort("Rerun this probability-scale plan to verify the target contrast under the current interval method.")
   }
-  prefer_missing <- missing(prefer)
   prefer <- match.arg(prefer)
-  if (!missing(cost) && !is.null(cost) && prefer_missing) {
-    prefer <- "min_cost"
-  }
-  if (prefer == "min_cost" && is.null(cost)) {
-    cli::cli_abort("Supply {.arg cost} when using {.code prefer = 'min_cost'}.")
-  }
-  if (!is.null(budget) && is.infinite(budget)) budget <- NULL
-  if (!is.null(budget)) {
-    if (is.null(cost)) cli::cli_abort("Supply {.arg cost} when specifying {.arg budget}.")
-    if (!is.numeric(budget) || length(budget) != 1L || !is.finite(budget) || budget <= 0) {
-      cli::cli_abort("{.arg budget} must be a single positive finite number.")
-    }
-  }
 
   result$prefer <- prefer
-  result$cost <- cost
-  result$budget <- budget
   result$search_meta$prefer <- prefer
-  result$search_meta$cost <- cost
-  result$search_meta$budget <- budget
-
-  if (!is.null(cost)) {
-    result$surface$total_cost <- evaluate_design_cost(result$surface, cost = cost)
-    result$surface$within_budget <- if (!is.null(budget)) {
-      result$surface$total_cost <= budget + 1e-9
-    } else {
-      rep(TRUE, nrow(result$surface))
-    }
-  } else {
-    result$surface$total_cost <- NULL
-    result$surface$within_budget <- rep(TRUE, nrow(result$surface))
-  }
   result$surface$preference_score <- compute_preference_score(result$surface, prefer = prefer)
 
   if (!is.null(result$robust)) {
@@ -452,11 +360,9 @@ switch_preference <- function(
   sel <- select_recommended_from_verified(result$verified, result$spec)
   result$optimal <- sel$optimal
   result$optimal_high_confidence <- sel$optimal_high_confidence
-  result$min_cost_over_budget <- sel$min_cost_over_budget
   result$decision_status <- sel$optimal$decision_status[1L]
   result$feasible <- sel$feasible
-  in_b <- if ("within_budget" %in% names(result$verified)) result$verified$within_budget else rep(TRUE, nrow(result$verified))
-  confirmed <- (result$verified$decision_status == "pass") & in_b
+  confirmed <- (result$verified$decision_status == "pass")
   result$verified_pareto <- extract_2d_pareto(result$verified[confirmed, , drop = FALSE])
   result$pareto_frontier <- result$verified_pareto
   if (!is.null(result$sensitivity) &&
@@ -477,16 +383,7 @@ lookup_pref_score <- function(df_sub, grid_df) {
 }
 
 attach_grid_meta <- function(df_sub, grid_df) {
-  m <- match(paste(df_sub$n_subj, df_sub$n_item), paste(grid_df$n_subj, grid_df$n_item))
-  df_sub$preference_score <- grid_df$preference_score[m]
-  if ("total_cost" %in% names(grid_df)) {
-    df_sub$total_cost <- grid_df$total_cost[m]
-  } else {
-    df_sub$total_cost <- NULL
-  }
-  if ("within_budget" %in% names(grid_df)) {
-    df_sub$within_budget <- grid_df$within_budget[m]
-  }
+  df_sub$preference_score <- lookup_pref_score(df_sub, grid_df)
   df_sub
 }
 
@@ -535,8 +432,6 @@ run_single_spec_search <- function(
   attach_pref <- function(df_in) {
     attach_grid_meta(df_in, grid_df)
   }
-
-  in_b_grid <- if ("within_budget" %in% names(grid_df)) grid_df$within_budget else rep(TRUE, n_grid)
 
   if (method == "grid" || n_grid <= (n_eval_init + n_eval_adapt)) {
     if (verbose) {
@@ -662,9 +557,8 @@ run_single_spec_search <- function(
     verified_df$stage <- "final_verified"
     verified_raw <- s2_out$raw
 
-    in_b_ver <- if ("within_budget" %in% names(verified_df)) verified_df$within_budget else rep(TRUE, nrow(verified_df))
-    if (!any(verified_df$decision_status == "pass" & in_b_ver)) {
-      gp_feas_idx <- which(surf_s1$pred_criterion_met & in_b_grid &
+    if (!any(verified_df$decision_status == "pass")) {
+      gp_feas_idx <- which(surf_s1$pred_criterion_met &
         !(paste(surf_s1$n_subj, surf_s1$n_item) %in% paste(verified_df$n_subj, verified_df$n_item)))
       if (length(gp_feas_idx) > 0L) {
         best_backup <- gp_feas_idx[order(surf_s1$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
@@ -689,11 +583,8 @@ run_single_spec_search <- function(
       }
     }
 
-    in_b_ver <- if ("within_budget" %in% names(verified_df)) verified_df$within_budget else rep(TRUE, nrow(verified_df))
-    if (!any(verified_df$decision_status == "pass" & in_b_ver)) {
-      elig <- which(in_b_grid)
-      if (!length(elig)) elig <- seq_len(nrow(grid_df))
-      max_idx <- elig[which.max(grid_df$n_subj[elig] * 1e5 + grid_df$n_item[elig])]
+    if (!any(verified_df$decision_status == "pass")) {
+      max_idx <- which.max(grid_df$n_subj * 1e5 + grid_df$n_item)
       already_max <- any(verified_df$n_subj == grid_df$n_subj[max_idx] &
                            verified_df$n_item == grid_df$n_item[max_idx])
       if (!already_max) {
@@ -747,7 +638,6 @@ run_single_spec_search <- function(
   list(
     optimal = sel$optimal,
     optimal_high_confidence = sel$optimal_high_confidence,
-    min_cost_over_budget = sel$min_cost_over_budget,
     feasible = sel$feasible,
     surface = surf,
     evaluated = eval_all,
@@ -756,39 +646,23 @@ run_single_spec_search <- function(
 }
 
 select_recommended_from_verified <- function(verified_df, spec) {
-  in_b <- if ("within_budget" %in% names(verified_df)) {
-    !is.na(verified_df$within_budget) & verified_df$within_budget
-  } else {
-    rep(TRUE, nrow(verified_df))
-  }
-  passed <- which(verified_df$decision_status == "pass" & in_b)
-  pending <- which(verified_df$decision_status == "indeterminate" & in_b)
+  passed <- which(verified_df$decision_status == "pass")
+  pending <- which(verified_df$decision_status == "indeterminate")
 
   if (length(passed) || length(pending)) {
     rows <- if (length(passed)) passed else pending
     best <- rows[order(verified_df$preference_score[rows], -verified_df$power[rows],
                        verified_df$ci_width_mean[rows])[1L]]
   } else {
-    pool <- if (any(in_b)) which(in_b) else seq_len(nrow(verified_df))
-    att <- attainment_score(verified_df[pool, , drop = FALSE], spec)
-    best <- pool[order(-att, verified_df$preference_score[pool])[1L]]
+    att <- attainment_score(verified_df, spec)
+    best <- order(-att, verified_df$preference_score)[1L]
   }
   candidate <- verified_df[best, , drop = FALSE]
   rownames(candidate) <- NULL
 
-  over_pass <- which(verified_df$decision_status == "pass" & !in_b)
-  min_over <- if (!length(passed) && length(over_pass) && ("total_cost" %in% names(verified_df))) {
-    ov <- verified_df[over_pass[order(verified_df$total_cost[over_pass], verified_df$preference_score[over_pass])[1L]], , drop = FALSE]
-    rownames(ov) <- NULL
-    ov
-  } else {
-    NULL
-  }
-
   list(
     optimal = candidate,
     optimal_high_confidence = if (length(passed)) candidate,
-    min_cost_over_budget = min_over,
     feasible = length(passed) > 0L
   )
 }
@@ -1102,12 +976,9 @@ rank_scenarios <- function(all_scen_df, standard_scenario, toughest_name, spec) 
   delta_subj <- as.integer(opt_rob$n_subj - opt_std$n_subj)
   delta_item <- as.integer(opt_rob$n_item - opt_std$n_item)
   delta_trials <- as.integer(opt_rob$n_trials_scheduled - opt_std$n_trials_scheduled)
-  has_cost <- ("total_cost" %in% names(opt_rob)) && is.finite(opt_rob$total_cost) && is.finite(opt_std$total_cost)
-  delta_cost <- if (has_cost) as.numeric(opt_rob$total_cost - opt_std$total_cost) else NA_real_
 
   if (!feasible_std || !feasible_rob) {
     delta_subj <- delta_item <- delta_trials <- NA_integer_
-    delta_cost <- NA_real_
   }
 
   comparison_df <- data.frame(
@@ -1132,23 +1003,17 @@ rank_scenarios <- function(all_scen_df, standard_scenario, toughest_name, spec) 
     ),
     stringsAsFactors = FALSE
   )
-  if (has_cost) {
-    comparison_df$total_cost <- c(opt_std$total_cost, opt_rob$total_cost)
-    comparison_df$delta_cost <- c(0.0, delta_cost)
-  }
 
   list(
     standard_scenario = standard_scenario,
     toughest_scenario = as.character(opt_rob$scenario[1L]),
     optimal_standard = opt_std,
     optimal_robust = opt_rob,
-    min_cost_over_budget = robust$min_cost_over_budget,
     feasible_standard = feasible_std,
     feasible_robust = feasible_rob,
     delta_subj = delta_subj,
     delta_item = delta_item,
     delta_trials = delta_trials,
-    delta_cost = delta_cost,
     comparison = comparison_df,
     verified = verified,
     scenario_evaluations = all_scen_df
@@ -1870,18 +1735,6 @@ select_diverse_top_acq <- function(surf, k, evaluated_mask) {
 
 select_stage2_candidates <- function(surf, spec, prefer = "balanced", n_verify = 4L) {
   n_verify <- max(1L, min(n_verify, nrow(surf)))
-  in_b <- if ("within_budget" %in% names(surf)) {
-    !is.na(surf$within_budget) & surf$within_budget
-  } else {
-    rep(TRUE, nrow(surf))
-  }
-
-  over_feas <- which(!in_b & surf$pred_criterion_met)
-  over_best <- if (!any(in_b & surf$pred_criterion_met) && length(over_feas) > 0L && ("total_cost" %in% names(surf))) {
-    over_feas[order(surf$total_cost[over_feas], surf$preference_score[over_feas])[1L]]
-  } else {
-    integer(0)
-  }
 
   # Extract predicted feasible Pareto frontier + high-confidence neighbors
   pf <- extract_pareto_frontier(surf, spec)
@@ -1889,15 +1742,14 @@ select_stage2_candidates <- function(surf, spec, prefer = "balanced", n_verify =
     pf_idx <- match(paste(pf$n_subj, pf$n_item), paste(surf$n_subj, surf$n_item))
     # 1. Best under requested `prefer`
     best_pref <- pf_idx[order(surf$preference_score[pf_idx], -surf$prob_feasible[pf_idx])]
-    # 2. High-confidence neighbor (`prob_feasible >= 0.80`) along `prefer` within budget
-    hc <- which(surf$prob_feasible >= 0.80 & in_b)
+    # 2. High-confidence neighbor (`prob_feasible >= 0.80`) along `prefer`
+    hc <- which(surf$prob_feasible >= 0.80)
     ord_hc <- hc[order(surf$preference_score[hc], -surf$prob_feasible[hc])]
     # 3. Spread points along Pareto frontier (fewer_items end, balanced knee, fewer_subj end)
     spread_idx <- unique(pf_idx[round(seq(1, length(pf_idx), length.out = min(length(pf_idx), n_verify)))])
 
     pool <- unique(c(
       best_pref[1L],
-      over_best,
       if (length(ord_hc) > 0L) ord_hc[1L] else integer(0),
       spread_idx,
       best_pref,
@@ -1906,19 +1758,13 @@ select_stage2_candidates <- function(surf, spec, prefer = "balanced", n_verify =
     return(pool[seq_len(min(n_verify, length(pool)))])
   }
 
-  plausible <- which(surf$prob_feasible >= 0.35 & in_b)
+  plausible <- which(surf$prob_feasible >= 0.35)
   if (length(plausible) > 0L) {
-    ord_pl <- unique(c(
-      plausible[order(surf$preference_score[plausible], -surf$prob_feasible[plausible])],
-      over_best
-    ))
+    ord_pl <- plausible[order(surf$preference_score[plausible], -surf$prob_feasible[plausible])]
     return(ord_pl[seq_len(min(n_verify, length(ord_pl)))])
   }
 
-  ord <- unique(c(
-    over_best,
-    order(-in_b, -surf$prob_feasible, -surf$pred_power, surf$pred_ci_width, surf$preference_score)
-  ))
+  ord <- order(-surf$prob_feasible, -surf$pred_power, surf$pred_ci_width, surf$preference_score)
   ord[seq_len(n_verify)]
 }
 
@@ -1963,30 +1809,13 @@ extract_2d_pareto <- function(feas_df) {
 }
 
 extract_pareto_frontier <- function(surf, spec) {
-  in_b <- if ("within_budget" %in% names(surf)) {
-    !is.na(surf$within_budget) & surf$within_budget
-  } else {
-    rep(TRUE, nrow(surf))
-  }
-  feas <- surf[surf$pred_criterion_met & in_b, , drop = FALSE]
+  feas <- surf[surf$pred_criterion_met, , drop = FALSE]
   if (nrow(feas) > 0L) {
     return(extract_2d_pareto(feas))
   }
-  # Fallback when no lattice point reaches threshold within budget: return outer eligible edge
-  elig <- if (any(in_b)) surf[in_b, , drop = FALSE] else surf
-  if ("within_budget" %in% names(surf) && any(in_b) && !all(in_b)) {
-    # Budget boundary is itself the outer feasible frontier
-    ord_c <- order(elig$n_item, -elig$n_subj)
-    e_ord <- elig[ord_c, , drop = FALSE]
-    keep <- !duplicated(e_ord$n_item)
-    out <- e_ord[keep, , drop = FALSE]
-    out <- out[order(out$n_item, out$n_subj), , drop = FALSE]
-    rownames(out) <- NULL
-    return(out)
-  }
-  max_s <- max(elig$n_subj)
-  max_i <- max(elig$n_item)
-  out <- elig[elig$n_subj == max_s | elig$n_item == max_i, , drop = FALSE]
+  max_s <- max(surf$n_subj)
+  max_i <- max(surf$n_item)
+  out <- surf[surf$n_subj == max_s | surf$n_item == max_i, , drop = FALSE]
   out <- out[order(out$n_item, out$n_subj), , drop = FALSE]
   rownames(out) <- NULL
   out
@@ -2059,11 +1888,7 @@ print.glmmplanr_result <- function(x, ...) {
 
   status_txt <- switch(
     opt$decision_status[1L],
-    pass = if (isTRUE(x$feasible)) {
-      "PASS (High-confidence verified attainment; MC lower bound >= target)"
-    } else {
-      "OVER BUDGET (Target met, but exceeds specified study budget)"
-    },
+    pass = "PASS (High-confidence verified attainment; MC lower bound >= target)",
     indeterminate = "INDETERMINATE / BORDERLINE (MC confidence interval straddles target; consider top-up)",
     fail = if (isTRUE(x$feasible)) {
       "FEASIBLE POINT ESTIMATE (Check MC interval)"
@@ -2073,21 +1898,10 @@ print.glmmplanr_result <- function(x, ...) {
   )
 
   role <- if (isTRUE(x$feasible)) "Recommended design" else "Unconfirmed candidate"
-  cost_str <- if (!is.null(x$cost) && ("total_cost" %in% names(opt)) && is.finite(opt$total_cost)) {
-    if (!is.null(x$budget)) {
-      sprintf(" | Total Cost = %s (Budget = %s)",
-              format(round(opt$total_cost, 2), big.mark = ","),
-              format(round(x$budget, 2), big.mark = ","))
-    } else {
-      sprintf(" | Total Cost = %s", format(round(opt$total_cost, 2), big.mark = ","))
-    }
-  } else {
-    ""
-  }
 
   bullets <- c(
     "Decision status: {.strong {status_txt}}",
-    "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected}{cost_str})",
+    "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected})",
     "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
     "Accuracy diff ({x$spec$prob_estimand}): true = {sprintf('%+.1f pp', opt$prob_diff_true_pp)} | Mean CI width = {.strong {sprintf('%.2f pp', opt$prob_ci_width_mean_pp)}} ({sprintf('%.3f logit', opt$logit_ci_width_mean)})"
   )
@@ -2111,18 +1925,6 @@ print.glmmplanr_result <- function(x, ...) {
         "ROPE Exclusion P(CI excludes [%.2f, %.2f] %s) = %.1f%% [%.1f%%, %.1f%%]",
         x$spec$rope[1L], x$spec$rope[2L], unit_lbl,
         opt$rope_excl_prob * 100, opt$rope_mc_lo * 100, opt$rope_mc_hi * 100
-      )
-    )
-  }
-  if (!is.null(x$min_cost_over_budget) && !isTRUE(x$feasible) && !is.null(x$budget)) {
-    ov <- x$min_cost_over_budget
-    bullets <- c(
-      bullets,
-      sprintf(
-        "Minimum-cost verified PASS over budget: N_subj = %d, N_item = %d (Cost = %s vs Budget = %s)",
-        ov$n_subj, ov$n_item,
-        format(round(ov$total_cost, 2), big.mark = ","),
-        format(round(x$budget, 2), big.mark = ",")
       )
     )
   }
@@ -2151,14 +1953,9 @@ print.glmmplanr_result <- function(x, ...) {
   if (!is.null(x$robust)) {
     rc <- x$robust
     if (isTRUE(rc$feasible_robust)) {
-      dc_txt <- if (!is.null(rc$delta_cost) && is.finite(rc$delta_cost)) {
-        sprintf(", %+.2f cost", rc$delta_cost)
-      } else {
-        ""
-      }
       bullets <- c(
         bullets,
-        "All-scenario robustness increment (vs {.val {rc$standard_scenario}}): {sprintf('%+d', rc$delta_subj)} subjects, {sprintf('%+d', rc$delta_item)} items ({sprintf('%+d', rc$delta_trials)} scheduled trials{dc_txt})"
+        "All-scenario robustness increment (vs {.val {rc$standard_scenario}}): {sprintf('%+d', rc$delta_subj)} subjects, {sprintf('%+d', rc$delta_item)} items ({sprintf('%+d', rc$delta_trials)} scheduled trials)"
       )
     }
   }
@@ -2188,13 +1985,11 @@ summary.glmmplanr_result <- function(object, ...) {
     cli::cli_h3("Verified Non-Dominated Pareto Frontier (N_subj x N_item)")
     cols_vp <- c(
       "n_subj", "n_item", "n_trials_scheduled",
-      if ("total_cost" %in% names(object$verified_pareto)) "total_cost",
       "effective_power", "prob_ci_width_mean_pp", "decision_status"
     )
     vp <- object$verified_pareto[, cols_vp, drop = FALSE]
     vp$effective_power <- round(vp$effective_power, 3)
     vp$prob_ci_width_mean_pp <- round(vp$prob_ci_width_mean_pp, 2)
-    if ("total_cost" %in% names(vp)) vp$total_cost <- round(vp$total_cost, 2)
     print(vp, row.names = FALSE)
   }
   if (!is.null(object$robust)) {

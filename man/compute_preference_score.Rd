@@ -2,14 +2,14 @@
 % Please edit documentation in R/surrogate_gp.R
 \name{compute_preference_score}
 \alias{compute_preference_score}
-\title{Compute Sample-Size Effort or Cost Score for \code{prefer} Ranking}
+\title{Compute Sample-Size Effort Score for \code{prefer} Ranking}
 \usage{
 compute_preference_score(
   grid_df,
-  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost")
+  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials")
 )
 }
 \description{
-Compute Sample-Size Effort or Cost Score for \code{prefer} Ranking
+Compute Sample-Size Effort Score for \code{prefer} Ranking
 }
 \keyword{internal}

@@ -1,8 +1,8 @@
 # `glmmplanr` Visual Recipe Gallery
 
-An end-to-end showcase of **five domain-specific sample size and precision planning workflows** for crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models:
+An end-to-end showcase of **four domain-specific sample size and precision planning workflows** for crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models:
 
-- **Interactive Browser Gallery**: Explore online at <https://ryuya-dot-com.github.io/glmmplanr/> or open [`index.html`](index.html) locally (`browseURL(system.file("gallery", "index.html", package = "glmmplanr"))`) for interactive 2D hover surfaces, live cost/budget sliders, copy-ready R scripts, and Registered Report text generators.
+- **Interactive Browser Gallery**: Explore online at <https://ryuya-dot-com.github.io/glmmplanr/> or open [`index.html`](index.html) locally (`browseURL(system.file("gallery", "index.html", package = "glmmplanr"))`) for interactive 2D hover surfaces, instant Pareto trade-off switching, copy-ready R scripts, and Registered Report text generators.
 - **Full Reproducibility**: Regenerate the figures and underlying simulation payload from scratch via [`build_gallery.R`](build_gallery.R) (`Rscript --vanilla inst/gallery/build_gallery.R`).
 
 ---
@@ -11,11 +11,10 @@ An end-to-end showcase of **five domain-specific sample size and precision plann
 
 | # | Research Domain | Core Design & Statistical Challenge | Key `glmmplanr` Functions | Recommended Plan |
 |---|---|---|---|---|
-| [1](#recipe-1-psycholinguistics--balanced-2x2-latin-square-3afc-experiment) | **Psycholinguistics** | Counterbalanced $2 \times 2$ Latin-square, 3AFC guessing floor ($g = 1/3$), simultaneous power $\ge 80\%$ and 95% CI width $\le 12\text{ pp}$ | `design_crossed()`, `cell_probs_from_diffs()`, `calibrate_dgp()`, `specify_target()`, `optimize_sample_size()` | **44 subjects $\times$ 32 items** (Power 91.1%, Mean CI 11.06 pp) |
+| [1](#recipe-1-psycholinguistics--balanced-2x2-latin-square-3afc-experiment) | **Psycholinguistics** | Counterbalanced $2 \times 2$ Latin-square, 3AFC guessing floor ($g = 1/3$), simultaneous power $\ge 80\%$ and 95% CI width $\le 12\text{ pp}$ | `design_crossed()`, `cell_probs_from_diffs()`, `calibrate_dgp()`, `specify_target()`, `optimize_sample_size()`, `switch_preference()` | **44 subjects $\times$ 32 items** (Power 91.1%, Mean CI 11.06 pp) |
 | [2](#recipe-2-behavioral-experiments--between-subject-incomplete-block--scale-calibration) | **Behavioral Experiments** | Two-arm intervention, 50% incomplete-block item sampling (16 of 32 items/participant), dropout + attrition, logistic non-collapsibility | `design_crossed(items_per_subject = 16)`, `check_dgp()`, `validate_design_point()` | **96 subjects $\times$ 32-item bank** (Power 86.4%, Null Type I 6.4%) |
 | [3](#recipe-3-reading-comprehension--explanatory-irt--testlet-nested-passages--multi-scenario-robustness) | **Reading & Explanatory IRT** | 4 comprehension items nested per passage (`testlet`), 4AFC ($g = 0.25$), reader-by-passage local dependence, 6 / 8 / 10 pp multi-scenario robustness | `design_testlet()`, `scenario_dgps()`, `report_plan()` | Standard (8 pp): **52 $\times$ 32**<br>All-scenario robust: **70 $\times$ 40** (`+18` subj, `+8` items) |
-| [4](#recipe-4-two-dimensional-cost--budget-optimization--allocation-reversal) | **Research Economics & Grant Planning** | Asymmetric subject vs. item unit costs under a \$3,200 cap — zero-resimulation switching along the verified Pareto frontier | `switch_preference(prefer = "min_cost", cost = ..., budget = ...)`, `plot(..., metric = "cost")` | In-lab (\$60/subj, \$8/item): **32 $\times$ 44** (\$2,500)<br>Field IRT (\$6/subj, \$85/item): **72 $\times$ 20** (\$2,346) |
-| [5](#recipe-5-psychometrics--language-assessment--random-item-vs-fixed-item-bank-rasch-calibration) | **Psychometrics & Assessment** | Random-item generalization vs. calibrating a fixed 16-item anchor bank containing extreme $\pm 3.0$ logit items | `plan_rasch_precision()`, `plan_rasch_fixed_bank()` | Random-item: **120 $\times$ 24** or **90 $\times$ 36**<br>Fixed bank (all 16 items $\le 0.60$): **180 examinees** (MML) |
+| [4](#recipe-4-psychometrics--language-assessment--random-item-vs-fixed-item-bank-rasch-calibration) | **Psychometrics & Assessment** | Random-item generalization vs. calibrating a fixed 16-item anchor bank containing extreme $\pm 3.0$ logit items | `plan_rasch_precision()`, `plan_rasch_fixed_bank()` | Random-item: **120 $\times$ 24** or **90 $\times$ 36**<br>Fixed bank (all 16 items $\le 0.60$): **180 examinees** (MML) |
 
 ---
 
@@ -152,7 +151,7 @@ validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030
 ## Recipe 3: Reading Comprehension & Explanatory IRT — Testlet-Nested Passages & Multi-Scenario Robustness
 
 ### Why Generic Simulators Struggle Here
-In reading comprehension, listening assessment, and vignette experiments, multiple items share a common stimulus passage (**testlet structure**, Wang & Wilson, 2005). Ignoring passage-level clustering and reader-by-passage local dependence (`participant_testlet_sd`) understates standard errors. Furthermore, when true effect sizes are uncertain (e.g., marginal glossing may improve 4AFC comprehension by **+6, +8, or +10 pp**), researchers need the exact **robustness cost** required to protect against conservative scenarios.
+In reading comprehension, listening assessment, and vignette experiments, multiple items share a common stimulus passage (**testlet structure**, Wang & Wilson, 2005). Ignoring passage-level clustering and reader-by-passage local dependence (`participant_testlet_sd`) understates standard errors. Furthermore, when true effect sizes are uncertain (e.g., marginal glossing may improve 4AFC comprehension by **+6, +8, or +10 pp**), researchers need the exact **sample-size increment** required to protect against conservative scenarios.
 
 ### Complete R Workflow
 
@@ -212,43 +211,9 @@ cat(report_plan(res3, lang = "en"))
 
 ---
 
-<a id="recipe-4-two-dimensional-cost--budget-optimization--allocation-reversal"></a>
+<a id="recipe-4-psychometrics--language-assessment--random-item-vs-fixed-item-bank-rasch-calibration"></a>
 
-## Recipe 4: Two-Dimensional Cost & Budget Optimization — Allocation Reversal
-
-### Why Generic Simulators Struggle Here
-Two crossed designs with nearly identical trial counts — such as **32 subjects $\times$ 44 items** (`1,408` trials) vs. **72 subjects $\times$ 20 items** (`1,440` trials) — have radically different financial and logistical footprints across subfields:
-- **Regime A — In-Lab Eye-Tracking / EEG Psycholinguistics**: Participant sessions require lab setup and honoraria (**\$60/subject**), whereas constructing stimulus sentences is inexpensive (**\$8/item**, \$0.02/trial, \$200 fixed overhead).
-- **Regime B — Language Assessment / Explanatory IRT Field Piloting**: Online examinees are inexpensive (**\$6/examinee**), whereas authoring, vetting, and piloting anchored test items is expensive (**\$85/item**, \$0.01/trial, \$200 fixed overhead).
-
-With `switch_preference()`, `glmmplanr` re-optimizes across any linear or custom nonlinear cost function and budget cap **instantaneously without re-running simulations**, while enforcing Stage-2 Wilson lower bounds so surrogate noise never picks an underpowered "cheap" design.
-
-### Complete R Workflow
-
-```r
-# Re-optimize Recipe 1's verified 2D grid under two asymmetric cost structures (zero re-simulation!)
-cost_lab <- c(subj = 60, item = 8,  trial = 0.02, fixed = 200)
-cost_irt <- c(subj = 6,  item = 85, trial = 0.01, fixed = 200)
-
-res4_lab <- switch_preference(res1, prefer = "min_cost", cost = cost_lab, budget = 3200)
-res4_irt <- switch_preference(res1, prefer = "min_cost", cost = cost_irt, budget = 3200)
-
-plot(res4_lab, type = "contour", metric = "cost")
-plot(res4_irt, type = "contour", metric = "cost")
-```
-
-### Visual Output & Interpretation
-
-![Recipe 4: Optimal Allocation Reversal Under Asymmetric Study Costs](../../man/figures/gallery_04_cost_reversal.png)
-
-- **Panel A (In-Lab Psycholinguistics)**: Steep vertical cost contours push the optimizer toward the upper-left end of the verified Pareto frontier, selecting **32 participants $\times$ 44 items** (**\$2,500.16** vs. \$3,200 orange dotted budget contour; Power = `92.8%`, Mean CI = `11.13 pp`). Using the IRT-style `(72, 20)` design in the lab would cost **\$4,708.80** — busting the \$3,200 grant budget by 47%!
-- **Panel B (Field IRT Item Piloting)**: Nearly horizontal cost contours flip the optimal allocation to the lower-right end of the *exact same* Pareto frontier, selecting **72 examinees $\times$ 20 items** (**\$2,346.40**; Power = `92.8%`, Mean CI = `11.06 pp`). Using the lab-style `(32, 44)` design here would cost **\$4,146.08** — exceeding budget by 30%!
-
----
-
-<a id="recipe-5-psychometrics--language-assessment--random-item-vs-fixed-item-bank-rasch-calibration"></a>
-
-## Recipe 5: Psychometrics & Language Assessment — Random-Item vs. Fixed-Item-Bank Rasch Calibration
+## Recipe 4: Psychometrics & Language Assessment — Random-Item vs. Fixed-Item-Bank Rasch Calibration
 
 ### Why Generic Simulators Struggle Here
 Psychometric sample size planning depends critically on **which items you generalize to** and **whether accuracy is defined on average or per item**:
@@ -292,7 +257,7 @@ bank_mml5 <- plan_rasch_fixed_bank(
 
 ### Visual Output & Interpretation
 
-![Recipe 5: Random-Item vs. Fixed-Item-Bank Rasch Calibration](../../man/figures/gallery_05_rasch_calibration.png)
+![Recipe 4: Random-Item vs. Fixed-Item-Bank Rasch Calibration](../../man/figures/gallery_05_rasch_calibration.png)
 
 - **Panel A (Random-Item Generalization)**: With only **16 items** (red curve), joint attainment plateaus below **49%** even at 160 examinees because 16 items cannot pin down $\sigma_{\text{item}}$ within $\pm 0.22\text{ logit}$. Increasing the item sample to **24 items** passes at **120 examinees** (`90.0% [83.3%, 94.2%]`), and **36 items** passes at **90 examinees** (`94.2% [88.4%, 97.1%]`).
 - **Panel B (Fixed 16-Item Bank with $\pm 3.0$ Logit Anchors)**:

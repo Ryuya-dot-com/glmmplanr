@@ -254,10 +254,19 @@ struct GLMMWorkspace {
   RowMatrixXd ZsL, ZiL, ZtL;
 
   Eigen::VectorXd w_vec, wp_vec, g_vec;
-  std::vector<Eigen::MatrixXd> A_ss_inv;
-  Eigen::MatrixXd L_22_saved, S_22, Bt, Bt_Ass_inv, C_bs, C_bs_Ass_inv, S_2b_saved;
-  Eigen::MatrixXd H_bb_schur, L22_inv, W_mat;
-  Eigen::VectorXd c_lap, q_tmp, cs_vec, c2_vec;
+  Eigen::VectorXd Xb_vec, eta0_vec, deta_vec;
+  std::vector<Eigen::MatrixXd> R_ass, V_ss_blk, V_ii_blk, V_tt_blk;
+  Eigen::MatrixXd Ass_tmp, V_tmp_s, V_tmp_i, V_tmp_t;
+  Eigen::MatrixXd L_22_saved, S_22, G_mat, C_bs, C_2b_buf, S_2b_saved, S22_inv_S2b_saved, H_bb_buf;
+  Eigen::MatrixXd H_bb_schur, L22_inv, W_mat, M_cross, M_it;
+  Eigen::MatrixXd sum_uu_s_buf, sum_uu_i_buf, sum_uu_t_buf;
+  Eigen::VectorXd c_lap, cs_vec, c2_vec;
+  Eigen::VectorXd rhs_s_buf, rhs_2_buf, rhs_b_buf, rs_tilde_buf, cs_tilde_buf;
+  Eigen::VectorXd r_2_tilde_buf, S22_inv_r2_buf, S22_inv_c2_buf, r_b_tilde_buf;
+  Eigen::VectorXd d_beta_buf, d_v2_buf, d_vs_buf, b_try_buf, step_2_buf, step_s_buf;
+  Eigen::VectorXd us_buf, ui_buf, ut_buf;
+  Eigen::LLT<Eigen::MatrixXd> llt_s_ws, llt_22_ws, llt_22_fin_ws, llt_22_grad_ws;
+  Eigen::LDLT<Eigen::MatrixXd> ldlt_b_ws;
 
   GLMMWorkspace(
       const Eigen::MatrixXd& X,
@@ -277,13 +286,19 @@ struct GLMMWorkspace {
       subj_idx(s_idx), item_idx(i_idx), testlet_idx(t_idx),
       subj_trials(ns),
       X_rm(X), Zs_rm(Z_subj), Zi_rm(Z_item),
-      Zt_rm(has_testlet ? RowMatrixXd(Z_testlet) : RowMatrixXd(0, 0))
+      Zt_rm(has_testlet ? RowMatrixXd(Z_testlet) : RowMatrixXd(0, 0)),
+      llt_s_ws(Z_subj.cols()),
+      ldlt_b_ws(X.cols())
   {
     q_t = has_testlet ? Z_testlet.cols() : 0;
     dim_s = n_subj * q_s;
     dim_i = n_item * q_i;
     dim_t = has_testlet ? (n_testlet * q_t) : 0;
     dim_2 = dim_i + dim_t;
+
+    llt_22_ws = Eigen::LLT<Eigen::MatrixXd>(dim_2);
+    llt_22_fin_ws = Eigen::LLT<Eigen::MatrixXd>(dim_2);
+    llt_22_grad_ws = Eigen::LLT<Eigen::MatrixXd>(dim_2);
 
     for (int n = 0; n < N; ++n) {
       subj_trials[subj_idx(n)].push_back(n);
@@ -296,49 +311,259 @@ struct GLMMWorkspace {
     w_vec.resize(N);
     wp_vec.resize(N);
     g_vec.resize(N);
+    Xb_vec.resize(N);
+    eta0_vec.resize(N);
+    deta_vec.resize(N);
 
-    A_ss_inv.assign(n_subj, Eigen::MatrixXd::Identity(q_s, q_s));
+    R_ass.assign(n_subj, Eigen::MatrixXd::Identity(q_s, q_s));
+    V_ss_blk.assign(n_subj, Eigen::MatrixXd::Zero(q_s, q_s));
+    V_ii_blk.assign(n_item, Eigen::MatrixXd::Zero(q_i, q_i));
+    if (has_testlet) V_tt_blk.assign(n_testlet, Eigen::MatrixXd::Zero(q_t, q_t));
+    Ass_tmp.resize(q_s, q_s);
+    V_tmp_s.resize(q_s, q_s);
+    V_tmp_i.resize(q_i, q_i);
+    if (has_testlet) V_tmp_t.resize(q_t, q_t);
+
     L_22_saved = Eigen::MatrixXd::Identity(dim_2, dim_2);
     S_22.resize(dim_2, dim_2);
-    Bt.resize(dim_2, dim_s);
-    Bt_Ass_inv.resize(dim_2, dim_s);
+    G_mat.resize(dim_2, dim_s);
     C_bs.resize(P, dim_s);
-    C_bs_Ass_inv.resize(P, dim_s);
+    C_2b_buf.resize(dim_2, P);
     S_2b_saved.resize(dim_2, P);
+    S22_inv_S2b_saved.resize(dim_2, P);
+    H_bb_buf.resize(P, P);
     H_bb_schur = Eigen::MatrixXd::Identity(P, P);
-    L22_inv.resize(dim_2, dim_2);
+    L22_inv = Eigen::MatrixXd::Zero(dim_2, dim_2);
     W_mat.resize(dim_2, dim_s);
+    M_cross.resize(dim_2, dim_s);
+    if (has_testlet) M_it.resize(dim_i, dim_t);
+    sum_uu_s_buf.resize(q_s, q_s);
+    sum_uu_i_buf.resize(q_i, q_i);
+    if (has_testlet) sum_uu_t_buf.resize(q_t, q_t);
+
     c_lap.resize(N);
-    q_tmp.resize(dim_2);
     cs_vec.resize(dim_s);
     c2_vec.resize(dim_2);
+    rhs_s_buf.resize(dim_s);
+    rhs_2_buf.resize(dim_2);
+    rhs_b_buf.resize(P);
+    rs_tilde_buf.resize(dim_s);
+    cs_tilde_buf.resize(dim_s);
+    r_2_tilde_buf.resize(dim_2);
+    S22_inv_r2_buf.resize(dim_2);
+    S22_inv_c2_buf.resize(dim_2);
+    r_b_tilde_buf.resize(P);
+    d_beta_buf.resize(P);
+    d_v2_buf.resize(dim_2);
+    d_vs_buf.resize(dim_s);
+    b_try_buf.resize(P);
+    step_2_buf.resize(dim_2);
+    step_s_buf.resize(dim_s);
+    us_buf.resize(q_s);
+    ui_buf.resize(q_i);
+    if (has_testlet) ut_buf.resize(q_t);
   }
 
-  double eval_data_ll_only(
-      const Eigen::VectorXi& y,
-      const Eigen::VectorXd& beta,
-      const Eigen::VectorXd& v_s,
-      const Eigen::VectorXd& v_2,
-      double chance
-  ) const {
-    double ll_data = 0.0;
-    for (int n = 0; n < N; ++n) {
-      int s = subj_idx(n);
-      int i = item_idx(n);
-      double eta = X_rm.row(n).dot(beta) +
-        ZsL.row(n).dot(v_s.segment(s * q_s, q_s)) +
-        ZiL.row(n).dot(v_2.segment(i * q_i, q_i));
-      if (has_testlet) {
-        int t = testlet_idx(n);
-        eta += ZtL.row(n).dot(v_2.segment(dim_i + t * q_t, q_t));
+  void apply_R_ass(const Eigen::VectorXd& x, Eigen::VectorXd& out) const {
+    if (q_s == 1) {
+      for (int s = 0; s < n_subj; ++s) out[s] = R_ass[s](0, 0) * x[s];
+      return;
+    }
+    for (int s = 0; s < n_subj; ++s) {
+      const Eigen::MatrixXd& Rs = R_ass[s];
+      const double* xp = x.data() + s * q_s;
+      double* op = out.data() + s * q_s;
+      for (int a = 0; a < q_s; ++a) {
+        double acc = 0.0;
+        for (int b = 0; b <= a; ++b) acc += Rs(a, b) * xp[b];
+        op[a] = acc;
       }
+    }
+  }
+
+  void apply_Rt_ass_in_place(Eigen::VectorXd& x) const {
+    if (q_s == 1) {
+      for (int s = 0; s < n_subj; ++s) x[s] *= R_ass[s](0, 0);
+      return;
+    }
+    for (int s = 0; s < n_subj; ++s) {
+      const Eigen::MatrixXd& Rs = R_ass[s];
+      double* xp = x.data() + s * q_s;
+      for (int a = 0; a < q_s; ++a) {
+        double acc = Rs(a, a) * xp[a];
+        for (int b = a + 1; b < q_s; ++b) acc += Rs(b, a) * xp[b];
+        xp[a] = acc;
+      }
+    }
+  }
+
+  void compute_deta_vec(
+      const Eigen::VectorXd* d_beta,
+      const Eigen::VectorXd& d_vs,
+      const Eigen::VectorXd& d_v2
+  ) {
+    if (d_beta != nullptr) {
+      deta_vec.noalias() = X_rm * (*d_beta);
+    } else {
+      deta_vec.setZero();
+    }
+    const double* zs_ptr = ZsL.data();
+    const double* zi_ptr = ZiL.data();
+    const double* zt_ptr = has_testlet ? ZtL.data() : nullptr;
+    for (int n = 0; n < N; ++n) {
+      const double* dvs = d_vs.data() + subj_idx[n] * q_s;
+      const double* dv2_i = d_v2.data() + item_idx[n] * q_i;
+      double acc = 0.0;
+      for (int a = 0; a < q_s; ++a) acc += zs_ptr[a] * dvs[a];
+      for (int a = 0; a < q_i; ++a) acc += zi_ptr[a] * dv2_i[a];
+      zs_ptr += q_s;
+      zi_ptr += q_i;
+      if (has_testlet) {
+        const double* dv2_t = d_v2.data() + dim_i + testlet_idx[n] * q_t;
+        for (int a = 0; a < q_t; ++a) acc += zt_ptr[a] * dv2_t[a];
+        zt_ptr += q_t;
+      }
+      deta_vec[n] += acc;
+    }
+  }
+
+  double eval_data_ll_step(const Eigen::VectorXi& y, double scale, double chance) const {
+    double ll_data = 0.0;
+    const int* y_ptr = y.data();
+    const double* e0_ptr = eta0_vec.data();
+    const double* de_ptr = deta_vec.data();
+    for (int n = 0; n < N; ++n) {
+      double eta = e0_ptr[n] + scale * de_ptr[n];
       eta = std::min(std::max(eta, -25.0), 25.0);
       double p = inv_logit(eta);
       double mu = chance + (1.0 - chance) * p;
       mu = std::min(std::max(mu, chance + 1e-12), 1.0 - 1e-12);
-      ll_data += (y(n) == 1) ? std::log(mu) : std::log1p(-mu);
+      ll_data += (y_ptr[n] == 1) ? std::log(mu) : std::log1p(-mu);
     }
     return ll_data;
+  }
+
+  void invert_L22_lower() {
+    L22_inv.setIdentity();
+    L_22_saved.triangularView<Eigen::Lower>().solveInPlace(L22_inv);
+  }
+
+  void compute_c_lap_fast() {
+    invert_L22_lower();
+    W_mat.noalias() = L22_inv.triangularView<Eigen::Lower>() * G_mat;
+    M_cross.noalias() = L22_inv.triangularView<Eigen::Lower>().transpose() * W_mat;
+
+    for (int s = 0; s < n_subj; ++s) {
+      const int off_s = s * q_s;
+      const auto Ws = W_mat.middleCols(off_s, q_s);
+      const Eigen::MatrixXd& Rs = R_ass[s];
+      V_tmp_s.noalias() = Ws.transpose() * Ws;
+      for (int j = 0; j < q_s; ++j) V_tmp_s(j, j) += 1.0;
+      V_ss_blk[s].noalias() = Rs.transpose() * V_tmp_s * Rs;
+
+      for (int j = 0; j < q_s; ++j) {
+        M_cross.col(off_s + j) *= Rs(j, j);
+        for (int k = j + 1; k < q_s; ++k) {
+          M_cross.col(off_s + j).noalias() += Rs(k, j) * M_cross.col(off_s + k);
+        }
+      }
+    }
+    for (int i = 0; i < n_item; ++i) {
+      const int off_i = i * q_i;
+      const auto Li_sub = L22_inv.block(off_i, off_i, dim_2 - off_i, q_i);
+      V_ii_blk[i].noalias() = Li_sub.transpose() * Li_sub;
+    }
+    if (has_testlet) {
+      for (int t = 0; t < n_testlet; ++t) {
+        const int off_t = dim_i + t * q_t;
+        const auto Lt_sub = L22_inv.block(off_t, off_t, dim_2 - off_t, q_t);
+        V_tt_blk[t].noalias() = Lt_sub.transpose() * Lt_sub;
+      }
+      M_it.noalias() = L22_inv.block(dim_i, 0, dim_t, dim_i).transpose() *
+        L22_inv.block(dim_i, dim_i, dim_t, dim_t);
+    }
+
+    const double* zs_ptr = ZsL.data();
+    const double* zi_ptr = ZiL.data();
+    const double* zt_ptr = has_testlet ? ZtL.data() : nullptr;
+
+    for (int n = 0; n < N; ++n) {
+      const int s = subj_idx[n];
+      const int i = item_idx[n];
+      const int off_s = s * q_s;
+      const int off_i = i * q_i;
+      const Eigen::MatrixXd& Vss = V_ss_blk[s];
+      const Eigen::MatrixXd& Vii = V_ii_blk[i];
+
+      double quad = 0.0;
+      for (int a = 0; a < q_s; ++a) {
+        double tmp = 0.0;
+        for (int b = 0; b < q_s; ++b) tmp += Vss(b, a) * zs_ptr[b];
+        quad += zs_ptr[a] * tmp;
+      }
+      for (int a = 0; a < q_i; ++a) {
+        double tmp = 0.0;
+        for (int b = 0; b < q_i; ++b) tmp += Vii(b, a) * zi_ptr[b];
+        quad += zi_ptr[a] * tmp;
+      }
+      double cross_is = 0.0;
+      for (int a = 0; a < q_s; ++a) {
+        double tmp = 0.0;
+        for (int b = 0; b < q_i; ++b) tmp += M_cross(off_i + b, off_s + a) * zi_ptr[b];
+        cross_is += tmp * zs_ptr[a];
+      }
+      quad -= 2.0 * cross_is;
+
+      if (has_testlet) {
+        const int t = testlet_idx[n];
+        const int off_t_rel = t * q_t;
+        const int off_t = dim_i + off_t_rel;
+        const Eigen::MatrixXd& Vtt = V_tt_blk[t];
+        for (int a = 0; a < q_t; ++a) {
+          double tmp = 0.0;
+          for (int b = 0; b < q_t; ++b) tmp += Vtt(b, a) * zt_ptr[b];
+          quad += zt_ptr[a] * tmp;
+        }
+        double cross_ts = 0.0;
+        for (int a = 0; a < q_s; ++a) {
+          double tmp = 0.0;
+          for (int b = 0; b < q_t; ++b) tmp += M_cross(off_t + b, off_s + a) * zt_ptr[b];
+          cross_ts += tmp * zs_ptr[a];
+        }
+        double cross_it = 0.0;
+        for (int a = 0; a < q_t; ++a) {
+          double tmp = 0.0;
+          for (int b = 0; b < q_i; ++b) tmp += M_it(off_i + b, off_t_rel + a) * zi_ptr[b];
+          cross_it += tmp * zt_ptr[a];
+        }
+        quad += 2.0 * (cross_it - cross_ts);
+        zt_ptr += q_t;
+      }
+
+      c_lap[n] = -0.5 * std::max(quad, 0.0) * wp_vec[n];
+      zs_ptr += q_s;
+      zi_ptr += q_i;
+    }
+
+    cs_vec.setZero();
+    c2_vec.setZero();
+    zs_ptr = ZsL.data();
+    zi_ptr = ZiL.data();
+    zt_ptr = has_testlet ? ZtL.data() : nullptr;
+    for (int n = 0; n < N; ++n) {
+      const double cn = c_lap[n];
+      double* cs_p = cs_vec.data() + subj_idx[n] * q_s;
+      double* c2_p = c2_vec.data() + item_idx[n] * q_i;
+      for (int a = 0; a < q_s; ++a) cs_p[a] += cn * zs_ptr[a];
+      for (int a = 0; a < q_i; ++a) c2_p[a] += cn * zi_ptr[a];
+      zs_ptr += q_s;
+      zi_ptr += q_i;
+      if (has_testlet) {
+        double* ct_p = c2_vec.data() + dim_i + testlet_idx[n] * q_t;
+        for (int a = 0; a < q_t; ++a) ct_p[a] += cn * zt_ptr[a];
+        zt_ptr += q_t;
+      }
+    }
   }
 
   double eval_trials(
@@ -349,45 +574,49 @@ struct GLMMWorkspace {
       double chance,
       bool observed
   ) {
+    Xb_vec.noalias() = X_rm * beta;
     double ll_data = 0.0;
+    const double* zs_ptr = ZsL.data();
+    const double* zi_ptr = ZiL.data();
+    const double* zt_ptr = has_testlet ? ZtL.data() : nullptr;
+
     for (int n = 0; n < N; ++n) {
-      int s = subj_idx(n);
-      int i = item_idx(n);
-      double eta = X_rm.row(n).dot(beta) +
-        ZsL.row(n).dot(v_s.segment(s * q_s, q_s)) +
-        ZiL.row(n).dot(v_2.segment(i * q_i, q_i));
+      const double* vs_p = v_s.data() + subj_idx[n] * q_s;
+      const double* v2_i = v_2.data() + item_idx[n] * q_i;
+      double eta_raw = Xb_vec[n];
+      for (int a = 0; a < q_s; ++a) eta_raw += zs_ptr[a] * vs_p[a];
+      for (int a = 0; a < q_i; ++a) eta_raw += zi_ptr[a] * v2_i[a];
+      zs_ptr += q_s;
+      zi_ptr += q_i;
       if (has_testlet) {
-        int t = testlet_idx(n);
-        eta += ZtL.row(n).dot(v_2.segment(dim_i + t * q_t, q_t));
+        const double* v2_t = v_2.data() + dim_i + testlet_idx[n] * q_t;
+        for (int a = 0; a < q_t; ++a) eta_raw += zt_ptr[a] * v2_t[a];
+        zt_ptr += q_t;
       }
-      eta = std::min(std::max(eta, -25.0), 25.0);
+      eta0_vec[n] = eta_raw;
+      double eta = std::min(std::max(eta_raw, -25.0), 25.0);
 
       double p = inv_logit(eta);
       double omp = 1.0 - p;
       double mu = chance + (1.0 - chance) * p;
       mu = std::min(std::max(mu, chance + 1e-12), 1.0 - 1e-12);
 
-      const bool correct = (y(n) == 1);
+      const bool correct = (y[n] == 1);
       ll_data += correct ? std::log(mu) : std::log1p(-mu);
-      g_vec(n) = correct ? ((1.0 - chance) * p / mu) * omp : -p;
+      g_vec[n] = correct ? ((1.0 - chance) * p / mu) * omp : -p;
       if (observed) {
-        // Exact observed curvature and third derivative of log P(Y = y_n | eta_n)
         const double q = correct ? p / mu : 0.0;
         const double v = q * (1.0 - q);
-        w_vec(n) = p * omp - v;
-        wp_vec(n) = p * omp * (1.0 - 2.0 * p) - v * (1.0 - 2.0 * q);
+        w_vec[n] = p * omp - v;
+        wp_vec[n] = p * omp * (1.0 - 2.0 * p) - v * (1.0 - 2.0 * q);
       } else {
-        // Safeguarded concave curvature:
-        // For y = 0, -d^2/d_eta^2 log(1 - mu) = p*(1 - p) > 0 everywhere even when chance > 0!
-        // For y = 1, use max(observed curvature, Fisher scoring curvature) so search direction
-        // stays strictly positive-definite while preserving exact curvature in concave regions.
         if (chance <= 0.0 || !correct) {
-          w_vec(n) = std::max(p * omp, 1e-9);
+          w_vec[n] = std::max(p * omp, 1e-9);
         } else {
           const double q = p / mu;
           const double w_obs = p * omp - q * (1.0 - q);
           const double w_fs = ((1.0 - chance) * p * p * omp) / mu;
-          w_vec(n) = std::max({w_obs, w_fs, 1e-9});
+          w_vec[n] = std::max({w_obs, w_fs, 1e-9});
         }
       }
     }
@@ -406,10 +635,10 @@ struct GLMMWorkspace {
       double& logdet_out
   ) {
     S_22.setIdentity();
-    Bt.setZero();
+    G_mat.setZero();
     C_bs.setZero();
-    Eigen::MatrixXd C_2b = Eigen::MatrixXd::Zero(dim_2, P);
-    Eigen::MatrixXd H_bb = P_beta;
+    C_2b_buf.setZero();
+    H_bb_buf = P_beta;
 
     rhs_s = -v_s;
     rhs_2 = -v_2;
@@ -418,7 +647,7 @@ struct GLMMWorkspace {
     double logdet_Ass = 0.0;
 
     for (int s = 0; s < n_subj; ++s) {
-      Eigen::MatrixXd Ass = Eigen::MatrixXd::Identity(q_s, q_s);
+      Ass_tmp.setIdentity();
       const int off_s = s * q_s;
       for (int n : subj_trials[s]) {
         const double wn = w_vec[n];
@@ -432,10 +661,10 @@ struct GLMMWorkspace {
           const double w_zsa = wn * zs[a];
           rhs_s[off_s + a] += gn * zs[a];
           for (int b = 0; b < q_s; ++b) {
-            Ass(b, a) += w_zsa * zs[b];
+            Ass_tmp(b, a) += w_zsa * zs[b];
           }
           for (int b = 0; b < q_i; ++b) {
-            Bt(off_i + b, off_s + a) += w_zsa * zi[b];
+            G_mat(off_i + b, off_s + a) += w_zsa * zi[b];
           }
           for (int p = 0; p < P; ++p) {
             C_bs(p, off_s + a) += w_zsa * xn[p];
@@ -449,14 +678,14 @@ struct GLMMWorkspace {
             S_22(off_i + b, off_i + a) += w_zia * zi[b];
           }
           for (int p = 0; p < P; ++p) {
-            C_2b(off_i + a, p) += w_zia * xn[p];
+            C_2b_buf(off_i + a, p) += w_zia * xn[p];
           }
         }
 
         for (int p1 = 0; p1 < P; ++p1) {
           const double w_xp1 = wn * xn[p1];
           for (int p2 = 0; p2 < P; ++p2) {
-            H_bb(p2, p1) += w_xp1 * xn[p2];
+            H_bb_buf(p2, p1) += w_xp1 * xn[p2];
           }
         }
 
@@ -475,27 +704,63 @@ struct GLMMWorkspace {
               S_22(off_t + a, off_i + b) += v_it;
             }
             for (int b = 0; b < q_s; ++b) {
-              Bt(off_t + a, off_s + b) += w_zta * zs[b];
+              G_mat(off_t + a, off_s + b) += w_zta * zs[b];
             }
             for (int p = 0; p < P; ++p) {
-              C_2b(off_t + a, p) += w_zta * xn[p];
+              C_2b_buf(off_t + a, p) += w_zta * xn[p];
             }
           }
         }
       }
 
-      Eigen::LLT<Eigen::MatrixXd> llt_s(Ass);
-      if (llt_s.info() != Eigen::Success) return false;
-      const Eigen::MatrixXd& L_ass = llt_s.matrixL();
-      for (int j = 0; j < q_s; ++j) logdet_Ass += 2.0 * std::log(L_ass(j, j));
-      A_ss_inv[s] = llt_s.solve(Eigen::MatrixXd::Identity(q_s, q_s));
-
-      Bt_Ass_inv.middleCols(off_s, q_s).noalias() = Bt.middleCols(off_s, q_s) * A_ss_inv[s];
-      C_bs_Ass_inv.middleCols(off_s, q_s).noalias() = C_bs.middleCols(off_s, q_s) * A_ss_inv[s];
+      if (q_s == 1) {
+        const double a00 = Ass_tmp(0, 0);
+        if (!(a00 > 0.0)) return false;
+        logdet_Ass += std::log(a00);
+        const double r00 = 1.0 / std::sqrt(a00);
+        R_ass[s](0, 0) = r00;
+        G_mat.col(off_s) *= r00;
+        C_bs.col(off_s) *= r00;
+      } else if (q_s == 2) {
+        const double a00 = Ass_tmp(0, 0), a10 = Ass_tmp(1, 0), a11 = Ass_tmp(1, 1);
+        if (!(a00 > 0.0)) return false;
+        const double l00 = std::sqrt(a00);
+        const double l10 = a10 / l00;
+        const double d11 = a11 - l10 * l10;
+        if (!(d11 > 0.0)) return false;
+        const double l11 = std::sqrt(d11);
+        logdet_Ass += 2.0 * (std::log(l00) + std::log(l11));
+        const double r00 = 1.0 / l00;
+        const double r11 = 1.0 / l11;
+        const double r10 = -l10 * r00 * r11;
+        Eigen::MatrixXd& Rs = R_ass[s];
+        Rs(0, 0) = r00; Rs(0, 1) = 0.0;
+        Rs(1, 0) = r10; Rs(1, 1) = r11;
+        G_mat.col(off_s + 1).noalias() = r10 * G_mat.col(off_s) + r11 * G_mat.col(off_s + 1);
+        G_mat.col(off_s) *= r00;
+        C_bs.col(off_s + 1).noalias() = r10 * C_bs.col(off_s) + r11 * C_bs.col(off_s + 1);
+        C_bs.col(off_s) *= r00;
+      } else {
+        llt_s_ws.compute(Ass_tmp);
+        if (llt_s_ws.info() != Eigen::Success) return false;
+        const auto L_ass = llt_s_ws.matrixL();
+        for (int j = 0; j < q_s; ++j) logdet_Ass += 2.0 * std::log(L_ass(j, j));
+        Eigen::MatrixXd& Rs = R_ass[s];
+        Rs.setIdentity();
+        L_ass.solveInPlace(Rs);
+        for (int j = q_s - 1; j >= 0; --j) {
+          G_mat.col(off_s + j) *= Rs(j, j);
+          C_bs.col(off_s + j) *= Rs(j, j);
+          for (int k = 0; k < j; ++k) {
+            G_mat.col(off_s + j).noalias() += Rs(j, k) * G_mat.col(off_s + k);
+            C_bs.col(off_s + j).noalias() += Rs(j, k) * C_bs.col(off_s + k);
+          }
+        }
+      }
     }
 
-    S_22.noalias() -= Bt_Ass_inv * Bt.transpose();
-    S_2b_saved.noalias() = C_2b - Bt_Ass_inv * C_bs.transpose();
+    S_22.selfadjointView<Eigen::Lower>().rankUpdate(G_mat, -1.0);
+    S_2b_saved.noalias() = C_2b_buf - G_mat * C_bs.transpose();
 
     llt_22.compute(S_22);
     if (llt_22.info() != Eigen::Success) return false;
@@ -503,8 +768,8 @@ struct GLMMWorkspace {
     double logdet_S22 = 0.0;
     for (int j = 0; j < dim_2; ++j) logdet_S22 += 2.0 * std::log(L_22_saved(j, j));
 
-    Eigen::MatrixXd S22_inv_S2b = llt_22.solve(S_2b_saved);
-    H_bb_schur.noalias() = H_bb - C_bs_Ass_inv * C_bs.transpose() - S_2b_saved.transpose() * S22_inv_S2b;
+    S22_inv_S2b_saved.noalias() = llt_22.solve(S_2b_saved);
+    H_bb_schur.noalias() = H_bb_buf - C_bs * C_bs.transpose() - S_2b_saved.transpose() * S22_inv_S2b_saved;
 
     logdet_out = logdet_Ass + logdet_S22;
     return true;
@@ -536,6 +801,24 @@ struct GLMMWorkspace {
     Rcpp::stop("non_pd_hessian: random-effects curvature block");
   }
 
+  Eigen::VectorXd grad_beta_from_factored(
+      const Eigen::VectorXd& rhs_s,
+      const Eigen::VectorXd& rhs_2,
+      const Eigen::VectorXd& rhs_b,
+      const Eigen::LLT<Eigen::MatrixXd>& llt_22,
+      Eigen::VectorXd* out_S22_inv_r2 = nullptr
+  ) {
+    compute_c_lap_fast();
+    apply_R_ass(cs_vec, cs_tilde_buf);
+    apply_R_ass(rhs_s, rs_tilde_buf);
+    S22_inv_c2_buf.noalias() = llt_22.solve(c2_vec - G_mat * cs_tilde_buf);
+    S22_inv_r2_buf.noalias() = llt_22.solve(rhs_2 - G_mat * rs_tilde_buf);
+    if (out_S22_inv_r2 != nullptr) *out_S22_inv_r2 = S22_inv_r2_buf;
+
+    return (rhs_b + X_rm.transpose() * c_lap) -
+      C_bs * (rs_tilde_buf + cs_tilde_buf) - S_2b_saved.transpose() * (S22_inv_r2_buf + S22_inv_c2_buf);
+  }
+
   Eigen::VectorXd compute_laplace_grad_beta(
       const Eigen::VectorXi& y,
       const Eigen::VectorXd& beta_eval,
@@ -545,90 +828,73 @@ struct GLMMWorkspace {
       const Eigen::MatrixXd& P_beta,
       double chance,
       Eigen::VectorXd v_s_cur,
-      Eigen::VectorXd v_2_cur
+      Eigen::VectorXd v_2_cur,
+      int update_zl_mask = 7
   ) {
-    ZsL.noalias() = Zs_rm * L_s_eval;
-    ZiL.noalias() = Zi_rm * L_i_eval;
-    if (has_testlet) ZtL.noalias() = Zt_rm * L_t_eval;
-
-    Eigen::VectorXd rhs_s(dim_s), rhs_2(dim_2), rhs_b(P);
-    Eigen::LLT<Eigen::MatrixXd> llt_22;
+    if (update_zl_mask & 1) ZsL.noalias() = Zs_rm * L_s_eval;
+    if (update_zl_mask & 2) ZiL.noalias() = Zi_rm * L_i_eval;
+    if (has_testlet && (update_zl_mask & 4)) ZtL.noalias() = Zt_rm * L_t_eval;
 
     // Solve conditional mode (v_s, v_2) at fixed (beta_eval, L_*_eval)
-    for (int it = 0; it < 6; ++it) {
-      double ll_cur = eval_trials(y, beta_eval, v_s_cur, v_2_cur, chance, false);
+    bool obs_factored = false;
+    for (int it = 0; it < 8; ++it) {
+      double ll_cur = eval_trials(y, beta_eval, v_s_cur, v_2_cur, chance, true);
       double phi_cur = ll_cur - 0.5 * (v_s_cur.squaredNorm() + v_2_cur.squaredNorm());
-      assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
-      Eigen::VectorXd a(dim_s);
-      for (int s = 0; s < n_subj; ++s) {
-        a.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * rhs_s.segment(s * q_s, q_s);
+      double logdet_tmp = 0.0;
+      bool ok_obs = assemble_and_factor_core(
+        beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, logdet_tmp
+      );
+      double st_max = 0.0;
+      double slope = 0.0;
+      if (ok_obs) {
+        apply_R_ass(rhs_s_buf, rs_tilde_buf);
+        step_2_buf.noalias() = llt_22_grad_ws.solve(rhs_2_buf - G_mat * rs_tilde_buf);
+        step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
+        apply_Rt_ass_in_place(step_s_buf);
+        st_max = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
+        if (st_max < 2e-7) {
+          obs_factored = true;
+          break;
+        }
+        slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
       }
-      Eigen::VectorXd step_2 = llt_22.solve(rhs_2 - Bt * a);
-      Eigen::VectorXd step_s = a - Bt_Ass_inv.transpose() * step_2;
-      double st_max = std::max(step_s.lpNorm<Eigen::Infinity>(), step_2.lpNorm<Eigen::Infinity>());
-      if (st_max < 1e-8) break;
+      if (!ok_obs || !(slope > 0.0)) {
+        ll_cur = eval_trials(y, beta_eval, v_s_cur, v_2_cur, chance, false);
+        assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, true);
+        apply_R_ass(rhs_s_buf, rs_tilde_buf);
+        step_2_buf.noalias() = llt_22_grad_ws.solve(rhs_2_buf - G_mat * rs_tilde_buf);
+        step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
+        apply_Rt_ass_in_place(step_s_buf);
+        st_max = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
+        if (st_max < 2e-7) break;
+        slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
+      }
       double sc = std::min(1.0, 4.0 / st_max);
-      double slope = rhs_s.dot(step_s) + rhs_2.dot(step_2);
+      compute_deta_vec(nullptr, step_s_buf, step_2_buf);
+      const double vs_norm2 = v_s_cur.squaredNorm() + v_2_cur.squaredNorm();
+      const double vs_dot = v_s_cur.dot(step_s_buf) + v_2_cur.dot(step_2_buf);
+      const double step_norm2 = step_s_buf.squaredNorm() + step_2_buf.squaredNorm();
       for (int bt = 0; bt < 8; ++bt) {
-        Eigen::VectorXd vs_try = v_s_cur + sc * step_s;
-        Eigen::VectorXd v2_try = v_2_cur + sc * step_2;
-        double phi_try = eval_data_ll_only(y, beta_eval, vs_try, v2_try, chance) -
-          0.5 * (vs_try.squaredNorm() + v2_try.squaredNorm());
+        double pen_try = vs_norm2 + 2.0 * sc * vs_dot + (sc * sc) * step_norm2;
+        double phi_try = eval_data_ll_step(y, sc, chance) - 0.5 * pen_try;
         if (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0)) {
-          v_s_cur = vs_try;
-          v_2_cur = v2_try;
+          v_s_cur.noalias() += sc * step_s_buf;
+          v_2_cur.noalias() += sc * step_2_buf;
           break;
         }
         sc *= 0.5;
         if (bt == 7) {
-          v_s_cur += sc * step_s;
-          v_2_cur += sc * step_2;
+          v_s_cur.noalias() += sc * step_s_buf;
+          v_2_cur.noalias() += sc * step_2_buf;
         }
       }
     }
 
-    eval_trials(y, beta_eval, v_s_cur, v_2_cur, chance, true);
-    assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
-
-    L22_inv.setIdentity();
-    L_22_saved.triangularView<Eigen::Lower>().solveInPlace(L22_inv);
-    W_mat.noalias() = L22_inv * Bt_Ass_inv;
-
-    for (int n = 0; n < N; ++n) {
-      int s = subj_idx(n), i = item_idx(n);
-      Eigen::VectorXd zs_t = ZsL.row(n).transpose();
-      Eigen::VectorXd zi_t = ZiL.row(n).transpose();
-      double h_s = zs_t.dot(A_ss_inv[s] * zs_t);
-      q_tmp.noalias() = L22_inv.middleCols(i * q_i, q_i) * zi_t -
-        W_mat.middleCols(s * q_s, q_s) * zs_t;
-      if (has_testlet) {
-        int t = testlet_idx(n);
-        q_tmp.noalias() += L22_inv.middleCols(dim_i + t * q_t, q_t) * ZtL.row(n).transpose();
-      }
-      c_lap(n) = -0.5 * (h_s + q_tmp.squaredNorm()) * wp_vec(n);
+    if (!obs_factored) {
+      eval_trials(y, beta_eval, v_s_cur, v_2_cur, chance, true);
+      assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, true);
     }
-
-    cs_vec.setZero();
-    c2_vec.setZero();
-    for (int n = 0; n < N; ++n) {
-      double cn = c_lap(n);
-      cs_vec.segment(subj_idx(n) * q_s, q_s).noalias() += cn * ZsL.row(n).transpose();
-      c2_vec.segment(item_idx(n) * q_i, q_i).noalias() += cn * ZiL.row(n).transpose();
-      if (has_testlet) {
-        c2_vec.segment(dim_i + testlet_idx(n) * q_t, q_t).noalias() += cn * ZtL.row(n).transpose();
-      }
-    }
-
-    Eigen::VectorXd Ass_inv_cs(dim_s), Ass_inv_rs(dim_s);
-    for (int s = 0; s < n_subj; ++s) {
-      Ass_inv_cs.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * cs_vec.segment(s * q_s, q_s);
-      Ass_inv_rs.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * rhs_s.segment(s * q_s, q_s);
-    }
-    Eigen::VectorXd S22_inv_c2 = llt_22.solve(c2_vec - Bt * Ass_inv_cs);
-    Eigen::VectorXd S22_inv_r2 = llt_22.solve(rhs_2 - Bt * Ass_inv_rs);
-
-    return (rhs_b + X_rm.transpose() * c_lap) -
-      C_bs * (Ass_inv_rs + Ass_inv_cs) - S_2b_saved.transpose() * (S22_inv_r2 + S22_inv_c2);
+    return grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws);
   }
 
   FitResult fit(
@@ -722,64 +988,109 @@ struct GLMMWorkspace {
       if (has_testlet) ZtL.noalias() = Zt_rm * L_t;
 
       inner_converged = false;
-      Eigen::VectorXd rhs_s(dim_s), rhs_2(dim_2), rhs_b(P);
-      Eigen::LLT<Eigen::MatrixXd> llt_22;
+      bool obs_factored = false;
 
       for (int it = 0; it < max_pirls_iter; ++it) {
-        double ll_data = eval_trials(y, beta, v_s, v_2, chance, false);
-        double logdet_H = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s, rhs_2, rhs_b, llt_22, false);
-        double phi_cur = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + beta.dot(P_beta * beta));
+        double ll_data = 0.0;
+        double logdet_H = 0.0;
+        double max_step = 0.0;
+        double slope = 0.0;
+        bool used_obs = false;
 
-        Eigen::VectorXd Ass_inv_rs(dim_s);
-        for (int s = 0; s < n_subj; ++s) {
-          Ass_inv_rs.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * rhs_s.segment(s * q_s, q_s);
+        if (chance > 0.0 && (outer_used >= 2 || it >= 2)) {
+          ll_data = eval_trials(y, beta, v_s, v_2, chance, true);
+          bool ok_obs = assemble_and_factor_core(
+            beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, logdet_H
+          );
+          if (ok_obs) {
+            ldlt_b_ws.compute(H_bb_schur);
+            ok_obs = (ldlt_b_ws.info() == Eigen::Success) && (ldlt_b_ws.vectorD().minCoeff() > 1e-8);
+          }
+          if (ok_obs) {
+            apply_R_ass(rhs_s_buf, rs_tilde_buf);
+            r_2_tilde_buf.noalias() = rhs_2_buf - G_mat * rs_tilde_buf;
+            S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
+            r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
+            d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
+            d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
+            d_vs_buf.noalias() = rs_tilde_buf - G_mat.transpose() * d_v2_buf - C_bs.transpose() * d_beta_buf;
+            apply_Rt_ass_in_place(d_vs_buf);
+
+            max_step = std::max({
+              d_beta_buf.lpNorm<Eigen::Infinity>(),
+              d_v2_buf.lpNorm<Eigen::Infinity>(),
+              d_vs_buf.lpNorm<Eigen::Infinity>()
+            });
+            slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
+            if (std::isfinite(max_step) && (max_step < 1.5e-5 || slope > 0.0)) {
+              used_obs = true;
+            }
+          }
         }
-        Eigen::VectorXd r_2_tilde = rhs_2 - Bt * Ass_inv_rs;
-        Eigen::VectorXd S22_inv_r2 = llt_22.solve(r_2_tilde);
-        Eigen::MatrixXd S22_inv_S2b = llt_22.solve(S_2b_saved);
-        Eigen::VectorXd r_b_tilde = rhs_b - C_bs * Ass_inv_rs - S_2b_saved.transpose() * S22_inv_r2;
 
-        Eigen::LDLT<Eigen::MatrixXd> ldlt_b(H_bb_schur);
-        Eigen::VectorXd d_beta = ldlt_b.solve(r_b_tilde);
-        Eigen::VectorXd d_v2 = S22_inv_r2 - S22_inv_S2b * d_beta;
-        Eigen::VectorXd d_vs = Ass_inv_rs - Bt_Ass_inv.transpose() * d_v2 - C_bs_Ass_inv.transpose() * d_beta;
+        if (!used_obs) {
+          ll_data = eval_trials(y, beta, v_s, v_2, chance, false);
+          logdet_H = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, false);
 
-        double max_step = std::max({
-          d_beta.lpNorm<Eigen::Infinity>(),
-          d_v2.lpNorm<Eigen::Infinity>(),
-          d_vs.lpNorm<Eigen::Infinity>()
-        });
+          apply_R_ass(rhs_s_buf, rs_tilde_buf);
+          r_2_tilde_buf.noalias() = rhs_2_buf - G_mat * rs_tilde_buf;
+          S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
+          r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
+
+          ldlt_b_ws.compute(H_bb_schur);
+          d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
+          d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
+          d_vs_buf.noalias() = rs_tilde_buf - G_mat.transpose() * d_v2_buf - C_bs.transpose() * d_beta_buf;
+          apply_Rt_ass_in_place(d_vs_buf);
+
+          max_step = std::max({
+            d_beta_buf.lpNorm<Eigen::Infinity>(),
+            d_v2_buf.lpNorm<Eigen::Infinity>(),
+            d_vs_buf.lpNorm<Eigen::Infinity>()
+          });
+          slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
+        }
+
+        double phi_cur = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + beta.dot(P_beta * beta));
         final_inner_step = max_step;
 
+        if (!std::isfinite(max_step)) {
+          inner_converged = false;
+          break;
+        }
         if (max_step < 1.5e-5 && (it >= 1 || outer_used >= 3)) {
           log_lik_laplace = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
           inner_converged = true;
+          obs_factored = used_obs;
           break;
         }
 
         double step_scale = (max_step > 4.0) ? (4.0 / max_step) : 1.0;
-        double slope = rhs_b.dot(d_beta) + rhs_s.dot(d_vs) + rhs_2.dot(d_v2);
         double accepted_ll = ll_data;
+
+        compute_deta_vec(&d_beta_buf, d_vs_buf, d_v2_buf);
+        const double v_norm2 = v_s.squaredNorm() + v_2.squaredNorm();
+        const double v_dot = v_s.dot(d_vs_buf) + v_2.dot(d_v2_buf);
+        const double dv_norm2 = d_vs_buf.squaredNorm() + d_v2_buf.squaredNorm();
 
         // Armijo backtracking line search on penalized conditional log-posterior
         for (int bt = 0; bt < 10; ++bt) {
-          Eigen::VectorXd b_try = beta + step_scale * d_beta;
-          Eigen::VectorXd v2_try = v_2 + step_scale * d_v2;
-          Eigen::VectorXd vs_try = v_s + step_scale * d_vs;
-          double ll_try = eval_data_ll_only(y, b_try, vs_try, v2_try, chance);
-          double phi_try = ll_try - 0.5 * (vs_try.squaredNorm() + v2_try.squaredNorm() + b_try.dot(P_beta * b_try));
+          b_try_buf.noalias() = beta + step_scale * d_beta_buf;
+          double ll_try = eval_data_ll_step(y, step_scale, chance);
+          double v_pen_try = v_norm2 + 2.0 * step_scale * v_dot + (step_scale * step_scale) * dv_norm2;
+          double phi_try = ll_try - 0.5 * (v_pen_try + b_try_buf.dot(P_beta * b_try_buf));
           if (phi_try >= phi_cur + 1e-4 * step_scale * std::max(slope, 0.0) || (step_scale * max_step) < 1e-7) {
-            beta = b_try;
-            v_2 = v2_try;
-            v_s = vs_try;
+            beta = b_try_buf;
+            v_2.noalias() += step_scale * d_v2_buf;
+            v_s.noalias() += step_scale * d_vs_buf;
             accepted_ll = ll_try;
             break;
           }
           step_scale *= 0.5;
           if (bt == 9) {
-            beta = b_try;
-            v_2 = v2_try;
-            v_s = vs_try;
+            beta = b_try_buf;
+            v_2.noalias() += step_scale * d_v2_buf;
+            v_s.noalias() += step_scale * d_vs_buf;
             accepted_ll = ll_try;
           }
         }
@@ -792,57 +1103,59 @@ struct GLMMWorkspace {
         }
       }
 
-      if (chance > 0.0 && inner_converged) {
+      if (chance > 0.0 && inner_converged && !obs_factored) {
         eval_trials(y, beta, v_s, v_2, chance, true);
-        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
+        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, true);
       }
 
-      L22_inv.setIdentity();
-      L_22_saved.triangularView<Eigen::Lower>().solveInPlace(L22_inv);
-      W_mat.noalias() = L22_inv * Bt_Ass_inv;
+      invert_L22_lower();
+      W_mat.noalias() = L22_inv.triangularView<Eigen::Lower>() * G_mat;
 
       rel_sum_s.setZero();
-      Eigen::MatrixXd sum_uu_s = Eigen::MatrixXd::Zero(q_s, q_s);
+      sum_uu_s_buf.setZero();
       for (int s = 0; s < n_subj; ++s) {
         const int off_s = s * q_s;
-        Eigen::VectorXd us = L_s * v_s.segment(off_s, q_s);
+        us_buf.noalias() = L_s * v_s.segment(off_s, q_s);
         const auto Ws = W_mat.middleCols(off_s, q_s);
-        Eigen::MatrixXd V_vs = A_ss_inv[s] + Ws.transpose() * Ws;
+        const Eigen::MatrixXd& Rs = R_ass[s];
+        V_tmp_s.noalias() = Ws.transpose() * Ws;
+        for (int j = 0; j < q_s; ++j) V_tmp_s(j, j) += 1.0;
+        V_ss_blk[s].noalias() = Rs.transpose() * V_tmp_s * Rs;
+        const Eigen::MatrixXd& V_vs = V_ss_blk[s];
         for (int j = 0; j < q_s; ++j) {
           double rel = std::min(std::max(1.0 - V_vs(j, j), 0.0), 1.0);
           rel_sum_s(j) += 2.0 * rel * rel;
         }
-        sum_uu_s.noalias() += us * us.transpose() + L_s * V_vs * L_s.transpose();
+        sum_uu_s_buf.noalias() += us_buf * us_buf.transpose() + L_s * V_vs * L_s.transpose();
       }
 
       rel_sum_i.setZero();
-      Eigen::MatrixXd sum_uu_i = Eigen::MatrixXd::Zero(q_i, q_i);
+      sum_uu_i_buf.setZero();
       for (int i = 0; i < n_item; ++i) {
         const int off_i = i * q_i;
-        Eigen::VectorXd ui = L_i * v_2.segment(off_i, q_i);
-        const auto Li_cols = L22_inv.middleCols(off_i, q_i);
-        Eigen::MatrixXd V_vi = Li_cols.transpose() * Li_cols;
+        ui_buf.noalias() = L_i * v_2.segment(off_i, q_i);
+        const auto Li_sub = L22_inv.block(off_i, off_i, dim_2 - off_i, q_i);
+        V_tmp_i.noalias() = Li_sub.transpose() * Li_sub;
         for (int j = 0; j < q_i; ++j) {
-          double rel = std::min(std::max(1.0 - V_vi(j, j), 0.0), 1.0);
+          double rel = std::min(std::max(1.0 - V_tmp_i(j, j), 0.0), 1.0);
           rel_sum_i(j) += 2.0 * rel * rel;
         }
-        sum_uu_i.noalias() += ui * ui.transpose() + L_i * V_vi * L_i.transpose();
+        sum_uu_i_buf.noalias() += ui_buf * ui_buf.transpose() + L_i * V_tmp_i * L_i.transpose();
       }
 
       rel_sum_t.setZero();
-      Eigen::MatrixXd sum_uu_t;
       if (has_testlet) {
-        sum_uu_t = Eigen::MatrixXd::Zero(q_t, q_t);
+        sum_uu_t_buf.setZero();
         for (int t = 0; t < n_testlet; ++t) {
           const int off_t = dim_i + t * q_t;
-          Eigen::VectorXd ut = L_t * v_2.segment(off_t, q_t);
-          const auto Lt_cols = L22_inv.middleCols(off_t, q_t);
-          Eigen::MatrixXd V_vt = Lt_cols.transpose() * Lt_cols;
+          ut_buf.noalias() = L_t * v_2.segment(off_t, q_t);
+          const auto Lt_sub = L22_inv.block(off_t, off_t, dim_2 - off_t, q_t);
+          V_tmp_t.noalias() = Lt_sub.transpose() * Lt_sub;
           for (int j = 0; j < q_t; ++j) {
-            double rel = std::min(std::max(1.0 - V_vt(j, j), 0.0), 1.0);
+            double rel = std::min(std::max(1.0 - V_tmp_t(j, j), 0.0), 1.0);
             rel_sum_t(j) += 2.0 * rel * rel;
           }
-          sum_uu_t.noalias() += ut * ut.transpose() + L_t * V_vt * L_t.transpose();
+          sum_uu_t_buf.noalias() += ut_buf * ut_buf.transpose() + L_t * V_tmp_t * L_t.transpose();
         }
       }
 
@@ -853,10 +1166,10 @@ struct GLMMWorkspace {
         return;
       }
 
-      Sig_s_out = update_cov_matrix(sum_uu_s, Sig_s_in, n_subj, corr_mode, regularized, lkj_eta, prior_tau_sd);
-      Sig_i_out = update_cov_matrix(sum_uu_i, Sig_i_in, n_item, corr_mode, regularized, lkj_eta, prior_tau_sd);
+      Sig_s_out = update_cov_matrix(sum_uu_s_buf, Sig_s_in, n_subj, corr_mode, regularized, lkj_eta, prior_tau_sd);
+      Sig_i_out = update_cov_matrix(sum_uu_i_buf, Sig_i_in, n_item, corr_mode, regularized, lkj_eta, prior_tau_sd);
       if (has_testlet) {
-        Sig_t_out = update_cov_matrix(sum_uu_t, Sig_t_in, n_testlet, corr_mode, regularized, lkj_eta, prior_tau_sd);
+        Sig_t_out = update_cov_matrix(sum_uu_t_buf, Sig_t_in, n_testlet, corr_mode, regularized, lkj_eta, prior_tau_sd);
       }
 
       Eigen::MatrixXd map_s = safe_chol(Sig_s_out).triangularView<Eigen::Lower>().solve(L_s);
@@ -990,104 +1303,84 @@ struct GLMMWorkspace {
       ZiL.noalias() = Zi_rm * L_i_fin;
       if (has_testlet) ZtL.noalias() = Zt_rm * L_t_fin;
 
+      Eigen::VectorXd S22_inv_r2(dim_2);
       for (int polish = 0; polish < 3; ++polish) {
         eval_trials(y, beta, v_s, v_2, chance, true);
-        Eigen::VectorXd rhs_s(dim_s), rhs_2(dim_2), rhs_b(P);
-        Eigen::LLT<Eigen::MatrixXd> llt_22;
-        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
+        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
+        Eigen::VectorXd grad_lap_b = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, &S22_inv_r2);
 
-        L22_inv.setIdentity();
-        L_22_saved.triangularView<Eigen::Lower>().solveInPlace(L22_inv);
-        W_mat.noalias() = L22_inv * Bt_Ass_inv;
-
-        for (int n = 0; n < N; ++n) {
-          int s = subj_idx(n), i = item_idx(n);
-          Eigen::VectorXd zs_t = ZsL.row(n).transpose();
-          Eigen::VectorXd zi_t = ZiL.row(n).transpose();
-          double h_s = zs_t.dot(A_ss_inv[s] * zs_t);
-          q_tmp.noalias() = L22_inv.middleCols(i * q_i, q_i) * zi_t -
-            W_mat.middleCols(s * q_s, q_s) * zs_t;
-          if (has_testlet) {
-            int t = testlet_idx(n);
-            q_tmp.noalias() += L22_inv.middleCols(dim_i + t * q_t, q_t) * ZtL.row(n).transpose();
-          }
-          c_lap(n) = -0.5 * (h_s + q_tmp.squaredNorm()) * wp_vec(n);
-        }
-
-        cs_vec.setZero();
-        c2_vec.setZero();
-        for (int n = 0; n < N; ++n) {
-          double cn = c_lap(n);
-          cs_vec.segment(subj_idx(n) * q_s, q_s).noalias() += cn * ZsL.row(n).transpose();
-          c2_vec.segment(item_idx(n) * q_i, q_i).noalias() += cn * ZiL.row(n).transpose();
-          if (has_testlet) {
-            c2_vec.segment(dim_i + testlet_idx(n) * q_t, q_t).noalias() += cn * ZtL.row(n).transpose();
-          }
-        }
-
-        Eigen::VectorXd Ass_inv_cs(dim_s), Ass_inv_rs(dim_s);
-        for (int s = 0; s < n_subj; ++s) {
-          Ass_inv_cs.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * cs_vec.segment(s * q_s, q_s);
-          Ass_inv_rs.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * rhs_s.segment(s * q_s, q_s);
-        }
-        Eigen::VectorXd S22_inv_c2 = llt_22.solve(c2_vec - Bt * Ass_inv_cs);
-        Eigen::VectorXd S22_inv_r2 = llt_22.solve(rhs_2 - Bt * Ass_inv_rs);
-        Eigen::MatrixXd S22_inv_S2b = llt_22.solve(S_2b_saved);
-
-        Eigen::VectorXd grad_lap_b = (rhs_b + X_rm.transpose() * c_lap) -
-          C_bs * (Ass_inv_rs + Ass_inv_cs) - S_2b_saved.transpose() * (S22_inv_r2 + S22_inv_c2);
-
-        Eigen::VectorXd d_beta_lap = H_bb_schur.ldlt().solve(grad_lap_b);
-        double lap_norm = d_beta_lap.lpNorm<Eigen::Infinity>();
+        ldlt_b_ws.compute(H_bb_schur);
+        d_beta_buf.noalias() = ldlt_b_ws.solve(grad_lap_b);
+        double lap_norm = d_beta_buf.lpNorm<Eigen::Infinity>();
         if (lap_norm < 1.5) {
-          Eigen::VectorXd d_v2 = S22_inv_r2 - S22_inv_S2b * d_beta_lap;
-          Eigen::VectorXd d_vs = Ass_inv_rs - Bt_Ass_inv.transpose() * d_v2 - C_bs_Ass_inv.transpose() * d_beta_lap;
-          beta += d_beta_lap;
-          v_2 += d_v2;
-          v_s += d_vs;
+          d_v2_buf.noalias() = S22_inv_r2 - S22_inv_S2b_saved * d_beta_buf;
+          d_vs_buf.noalias() = rs_tilde_buf - G_mat.transpose() * d_v2_buf - C_bs.transpose() * d_beta_buf;
+          apply_Rt_ass_in_place(d_vs_buf);
+          beta += d_beta_buf;
+          v_2 += d_v2_buf;
+          v_s += d_vs_buf;
         }
         if (lap_norm < 1e-5) break;
       }
 
       // Evaluate exact conditional mode, determinant, and Laplace log-likelihood
       // at the final corrected beta and covariance matrices (with Armijo safeguard).
-      Eigen::VectorXd rhs_s(dim_s), rhs_2(dim_2), rhs_b(P);
-      Eigen::LLT<Eigen::MatrixXd> llt_22;
       inner_converged = false;
       for (int it = 0; it < max_pirls_iter; ++it) {
-        double ll_cur = eval_trials(y, beta, v_s, v_2, chance, false);
+        double ll_cur = eval_trials(y, beta, v_s, v_2, chance, true);
         double phi_cur = ll_cur - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm());
-        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
-        Eigen::VectorXd a(dim_s);
-        for (int s = 0; s < n_subj; ++s) {
-          a.segment(s * q_s, q_s).noalias() = A_ss_inv[s] * rhs_s.segment(s * q_s, q_s);
+        double logdet_obs = 0.0;
+        bool ok_obs = assemble_and_factor_core(
+          beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, logdet_obs
+        );
+        double slope = 0.0;
+        if (ok_obs) {
+          apply_R_ass(rhs_s_buf, rs_tilde_buf);
+          step_2_buf.noalias() = llt_22_fin_ws.solve(rhs_2_buf - G_mat * rs_tilde_buf);
+          step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
+          apply_Rt_ass_in_place(step_s_buf);
+          final_inner_step = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
+          if (final_inner_step < 1.5e-5) {
+            log_lik_laplace = ll_cur - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
+            inner_converged = true;
+            break;
+          }
+          slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
         }
-        Eigen::VectorXd step_2 = llt_22.solve(rhs_2 - Bt * a);
-        Eigen::VectorXd step_s = a - Bt_Ass_inv.transpose() * step_2;
-        final_inner_step = std::max(step_s.lpNorm<Eigen::Infinity>(), step_2.lpNorm<Eigen::Infinity>());
-        if (final_inner_step < 1.5e-5) {
-          const double ll_obs = eval_trials(y, beta, v_s, v_2, chance, true);
-          const double logdet_obs = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s, rhs_2, rhs_b, llt_22, true);
-          log_lik_laplace = ll_obs - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
-          inner_converged = true;
-          break;
+        if (!ok_obs || !(slope > 0.0)) {
+          ll_cur = eval_trials(y, beta, v_s, v_2, chance, false);
+          assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
+          apply_R_ass(rhs_s_buf, rs_tilde_buf);
+          step_2_buf.noalias() = llt_22_fin_ws.solve(rhs_2_buf - G_mat * rs_tilde_buf);
+          step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
+          apply_Rt_ass_in_place(step_s_buf);
+          final_inner_step = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
+          if (final_inner_step < 1.5e-5) {
+            const double ll_obs = eval_trials(y, beta, v_s, v_2, chance, true);
+            logdet_obs = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
+            log_lik_laplace = ll_obs - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
+            inner_converged = true;
+            break;
+          }
+          slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
         }
         double sc = std::min(1.0, 4.0 / final_inner_step);
-        double slope = rhs_s.dot(step_s) + rhs_2.dot(step_2);
+        compute_deta_vec(nullptr, step_s_buf, step_2_buf);
+        const double vs_norm2 = v_s.squaredNorm() + v_2.squaredNorm();
+        const double vs_dot = v_s.dot(step_s_buf) + v_2.dot(step_2_buf);
+        const double step_norm2 = step_s_buf.squaredNorm() + step_2_buf.squaredNorm();
         for (int bt = 0; bt < 8; ++bt) {
-          Eigen::VectorXd vs_try = v_s + sc * step_s;
-          Eigen::VectorXd v2_try = v_2 + sc * step_2;
-          double phi_try = eval_data_ll_only(y, beta, vs_try, v2_try, chance) -
-            0.5 * (vs_try.squaredNorm() + v2_try.squaredNorm());
+          double pen_try = vs_norm2 + 2.0 * sc * vs_dot + (sc * sc) * step_norm2;
+          double phi_try = eval_data_ll_step(y, sc, chance) - 0.5 * pen_try;
           if (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0) || (sc * final_inner_step) < 1e-7) {
-            v_s = vs_try;
-            v_2 = v2_try;
+            v_s.noalias() += sc * step_s_buf;
+            v_2.noalias() += sc * step_2_buf;
             break;
           }
           sc *= 0.5;
           if (bt == 7) {
-            v_s += sc * step_s;
-            v_2 += sc * step_2;
+            v_s.noalias() += sc * step_s_buf;
+            v_2.noalias() += sc * step_2_buf;
           }
         }
       }
@@ -1134,7 +1427,7 @@ struct GLMMWorkspace {
       const double eps_b = 5e-4;
 
       const Eigen::VectorXd g_base = compute_laplace_grad_beta(
-        y, beta, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt
+        y, beta, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, 7
       );
 
       Eigen::MatrixXd H_lap_bb(P, P);
@@ -1142,7 +1435,7 @@ struct GLMMWorkspace {
         Eigen::VectorXd b_hi = beta;
         b_hi(p) += eps_b;
         Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-          y, b_hi, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt
+          y, b_hi, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, 0
         );
         H_lap_bb.col(p) = -(g_hi - g_base) / eps_b;
       }
@@ -1167,25 +1460,27 @@ struct GLMMWorkspace {
           var_theta_all(col_k) = res.var_log_tau_s(j);
           Eigen::MatrixXd Ls_hi = safe_chol(scale_cov_single_sd(Sigma_s, j, mult_hi));
           Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            y, beta, Ls_hi, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt
+            y, beta, Ls_hi, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, 1
           );
           res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
         }
+        if (q_s > 0 && (q_i > 0 || q_t > 0)) ZsL.noalias() = Zs_rm * L_s_fin;
 
         for (int j = 0; j < q_i; ++j, ++col_k) {
           var_theta_all(col_k) = res.var_log_tau_i(j);
           Eigen::MatrixXd Li_hi = safe_chol(scale_cov_single_sd(Sigma_i, j, mult_hi));
           Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            y, beta, L_s_fin, Li_hi, L_t_fin, P_beta, chance, v_s_opt, v_2_opt
+            y, beta, L_s_fin, Li_hi, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, 2
           );
           res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
         }
+        if (q_i > 0 && q_t > 0) ZiL.noalias() = Zi_rm * L_i_fin;
 
         for (int j = 0; j < q_t; ++j, ++col_k) {
           var_theta_all(col_k) = res.var_log_tau_t(j);
           Eigen::MatrixXd Lt_hi = safe_chol(scale_cov_single_sd(Sigma_t, j, mult_hi));
           Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            y, beta, L_s_fin, L_i_fin, Lt_hi, P_beta, chance, v_s_opt, v_2_opt
+            y, beta, L_s_fin, L_i_fin, Lt_hi, P_beta, chance, v_s_opt, v_2_opt, 4
           );
           res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
         }

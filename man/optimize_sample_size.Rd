@@ -8,9 +8,7 @@ optimize_sample_size(
   spec,
   n_subj_range,
   n_item_range,
-  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost"),
-  cost = NULL,
-  budget = NULL,
+  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials"),
   scenarios = NULL,
   standard_scenario = NULL,
   method = c("surrogate_gp", "grid"),
@@ -49,18 +47,7 @@ normalized distance from \verb{(min_subj, min_item)}.
 \item \code{"fewer_subj"}: Minimizes participant count \code{N_subj} first, then \code{N_item}.
 \item \code{"fewer_items"}: Minimizes stimulus/item count \code{N_item} first, then \code{N_subj}.
 \item \code{"fewer_trials"}: Minimizes scheduled total trials (\code{N_trials_scheduled}).
-\item \code{"min_cost"}: Minimizes total study cost computed from \code{cost} (selected
-automatically when \code{cost} is supplied and \code{prefer} is omitted).
 }}
-
-\item{cost}{Optional explicit study cost specification: either a named
-numeric vector/list \code{c(subj = ..., item = ..., trial = ..., fixed = 0)}
-giving unit recruitment, item-development, per-trial, and fixed overhead
-costs, or a custom \verb{function(n_subj, n_item, n_trials_scheduled)}.}
-
-\item{budget}{Optional positive numeric maximum total cost. When supplied
-together with \code{cost}, confirmed recommendations must satisfy
-\code{total_cost <= budget} in addition to \code{decision_status == "pass"}.}
 
 \item{scenarios}{Optional named list of \code{"glmmplanr_dgp"} objects (e.g., from
 \code{\link[=scenario_dgps]{scenario_dgps()}} or \code{\link[=sensitivity_dgps]{sensitivity_dgps()}}) for \strong{robust multi-scenario

@@ -856,6 +856,10 @@ fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 20
   sigma <- 0.80
   converged <- FALSE
 
+  n_obs_s <- nrow(M_sub)
+  all_obs <- all(M_sub == 1.0)
+  log_w_mat <- matrix(log_w, nrow = n_obs_s, ncol = length(log_w), byrow = TRUE)
+
   for (it in seq_len(max_iter)) {
     b_old <- b
     sig_old <- sigma
@@ -863,16 +867,24 @@ fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 20
     theta_q <- sigma * z
     eta_jq <- outer(-b, theta_q, "+")
     sp_jq <- ifelse(eta_jq > 0, eta_jq + log1p(exp(-eta_jq)), log1p(exp(eta_jq)))
-    LL <- Y_sub %*% eta_jq - M_sub %*% sp_jq
-    LP <- sweep(LL, 2L, log_w, "+")
-    mx <- apply(LP, 1L, max)
+    LL <- if (all_obs) {
+      sweep(Y_sub %*% eta_jq, 2L, colSums(sp_jq), "-")
+    } else {
+      Y_sub %*% eta_jq - M_sub %*% sp_jq
+    }
+    LP <- LL + log_w_mat
+    mx <- LP[cbind(seq_len(n_obs_s), max.col(LP, ties.method = "first"))]
     W_post <- exp(LP - mx)
     R_iq <- W_post / rowSums(W_post)
 
     # M-step for item difficulties b_j given posterior weights R_iq
-    N_jq <- crossprod(M_sub, R_iq)
+    N_jq <- if (all_obs) {
+      matrix(colSums(R_iq), nrow = length(b), ncol = length(z), byrow = TRUE)
+    } else {
+      crossprod(M_sub, R_iq)
+    }
     for (nw in 1:4) {
-      P_jq <- stats::plogis(outer(-b, theta_q, "+"))
+      P_jq <- 1.0 / (1.0 + exp(-outer(-b, theta_q, "+")))
       grad_b <- rowSums(N_jq * P_jq) - s_sub
       hess_b <- pmax(rowSums(N_jq * P_jq * (1.0 - P_jq)), 1e-8)
       step_b <- pmin(pmax(grad_b / hess_b, -2.0), 2.0)
@@ -884,7 +896,7 @@ fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 20
     eap_i <- as.numeric(R_iq %*% theta_q)
     mu_case <- mean(eap_i)
     b <- b - mu_case
-    var_new <- sum(colSums(R_iq) * (theta_q - mu_case)^2) / nrow(M_sub)
+    var_new <- sum(colSums(R_iq) * (theta_q - mu_case)^2) / n_obs_s
     sigma <- sqrt(max(var_new, 1e-10))
 
     diff_max <- max(max(abs(b - b_old)), abs(sigma - sig_old))
@@ -901,9 +913,13 @@ fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 20
   theta_q <- sigma * z
   eta_jq <- outer(-b, theta_q, "+")
   sp_jq <- ifelse(eta_jq > 0, eta_jq + log1p(exp(-eta_jq)), log1p(exp(eta_jq)))
-  LL <- Y_sub %*% eta_jq - M_sub %*% sp_jq
-  LP <- sweep(LL, 2L, log_w, "+")
-  mx <- apply(LP, 1L, max)
+  LL <- if (all_obs) {
+    sweep(Y_sub %*% eta_jq, 2L, colSums(sp_jq), "-")
+  } else {
+    Y_sub %*% eta_jq - M_sub %*% sp_jq
+  }
+  LP <- LL + log_w_mat
+  mx <- LP[cbind(seq_len(n_obs_s), max.col(LP, ties.method = "first"))]
   W_post <- exp(LP - mx)
   R_iq <- W_post / rowSums(W_post)
   eap_obs <- as.numeric(R_iq %*% theta_q)

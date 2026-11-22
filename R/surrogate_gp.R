@@ -350,97 +350,16 @@ project_2d_monotone_grid <- function(
   sgn * X[cbind(r_idx, c_idx)]
 }
 
-#' Evaluate Total Study Cost Across Candidate Design Points
-#'
-#' @param grid_df Data frame containing `n_subj`, `n_item`, and `n_trials_scheduled`.
-#' @param cost Optional cost specification: either a named numeric vector / list
-#'   with any subset of `c(subj = ..., item = ..., trial = ..., fixed = ...)`
-#'   (aliases `participant`, `stimulus`, `trials` also accepted), or a function
-#'   `function(n_subj, n_item, n_trials_scheduled)` returning numeric costs.
-#' @return Numeric vector of length `nrow(grid_df)`, or `NULL` when `cost` is `NULL`.
-#' @keywords internal
-evaluate_design_cost <- function(grid_df, cost = NULL) {
-  if (is.null(cost)) return(NULL)
-  n <- nrow(grid_df)
-  if (is.function(cost)) {
-    n_args <- length(formals(cost))
-    vals <- if (n_args >= 3L) {
-      cost(grid_df$n_subj, grid_df$n_item, grid_df$n_trials_scheduled)
-    } else if (n_args == 2L) {
-      cost(grid_df$n_subj, grid_df$n_item)
-    } else {
-      cost(grid_df)
-    }
-    if (length(vals) == 1L && n > 1L) {
-      vals <- vapply(seq_len(n), function(i) {
-        if (n_args >= 3L) {
-          cost(grid_df$n_subj[i], grid_df$n_item[i], grid_df$n_trials_scheduled[i])
-        } else if (n_args == 2L) {
-          cost(grid_df$n_subj[i], grid_df$n_item[i])
-        } else {
-          cost(grid_df[i, , drop = FALSE])
-        }
-      }, numeric(1L))
-    }
-    vals <- as.numeric(vals)
-    if (length(vals) != n || any(!is.finite(vals)) || any(vals < 0)) {
-      cli::cli_abort("{.arg cost} function must return finite nonnegative numeric costs for every candidate.")
-    }
-    return(vals)
-  }
-
-  if (is.list(cost)) cost <- unlist(cost, recursive = FALSE)
-  if (!is.numeric(cost) || !length(cost) || is.null(names(cost)) ||
-      any(!nzchar(names(cost))) || any(!is.finite(cost)) || any(cost < 0)) {
-    cli::cli_abort(
-      "{.arg cost} must be a named nonnegative numeric vector/list (e.g. {.code c(subj = 15, item = 40, trial = 0.05, fixed = 0)}) or a cost function."
-    )
-  }
-
-  nms <- tolower(trimws(names(cost)))
-  nms[nms %in% c("participant", "participants", "person", "persons", "n_subj")] <- "subj"
-  nms[nms %in% c("items", "stimulus", "stimuli", "n_item")] <- "item"
-  nms[nms %in% c("trials", "obs", "n_trials", "n_trials_scheduled")] <- "trial"
-  unknown <- setdiff(nms, c("subj", "item", "trial", "fixed"))
-  if (length(unknown)) {
-    cli::cli_abort("Unknown name(s) in {.arg cost}: {.val {unknown}}. Use {.val {c('subj', 'item', 'trial', 'fixed')}}.")
-  }
-  if (anyDuplicated(nms)) {
-    cli::cli_abort("Duplicate cost component names in {.arg cost}.")
-  }
-  names(cost) <- nms
-
-  c_subj <- if ("subj" %in% nms) unname(cost["subj"]) else 0.0
-  c_item <- if ("item" %in% nms) unname(cost["item"]) else 0.0
-  c_trial <- if ("trial" %in% nms) unname(cost["trial"]) else 0.0
-  c_fixed <- if ("fixed" %in% nms) unname(cost["fixed"]) else 0.0
-
-  if (c_subj <= 0 && c_item <= 0 && c_trial <= 0) {
-    cli::cli_abort("{.arg cost} must assign a positive unit cost to at least one of {.field subj}, {.field item}, or {.field trial}.")
-  }
-
-  as.numeric(c_fixed + c_subj * grid_df$n_subj + c_item * grid_df$n_item +
-               c_trial * grid_df$n_trials_scheduled)
-}
-
-#' Compute Sample-Size Effort or Cost Score for `prefer` Ranking
+#' Compute Sample-Size Effort Score for `prefer` Ranking
 #' @keywords internal
 compute_preference_score <- function(
   grid_df,
-  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost")
+  prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials")
 ) {
   prefer <- match.arg(prefer)
   u_s <- normalize_unit(grid_df$n_subj)
   u_i <- normalize_unit(grid_df$n_item)
   u_t <- normalize_unit(grid_df$n_trials_scheduled)
-
-  if (prefer == "min_cost") {
-    if ("total_cost" %in% names(grid_df) && any(is.finite(grid_df$total_cost))) {
-      u_c <- normalize_unit(grid_df$total_cost)
-      return(u_c + 0.005 * sqrt(0.5 * (u_s^2 + u_i^2)))
-    }
-    prefer <- "fewer_trials"
-  }
 
   switch(
     prefer,
@@ -451,7 +370,7 @@ compute_preference_score <- function(
   )
 }
 
-#' Compute Contour-Straddle + Preference/Budget-Aware Acquisition Scores Over Grid
+#' Compute Contour-Straddle + Preference-Aware Acquisition Scores Over Grid
 #' @keywords internal
 compute_surrogate_acquisition <- function(
   grid_df,
@@ -486,20 +405,15 @@ compute_surrogate_acquisition <- function(
   }
 
   eff_score <- compute_preference_score(grid_df, prefer = prefer)
-  in_budget <- if ("within_budget" %in% names(grid_df)) grid_df$within_budget else rep(TRUE, nrow(grid_df))
-  plausible <- which(p_feas >= 0.35 & in_budget)
-  if (!length(plausible)) plausible <- which(p_feas >= 0.35)
-  e_ref <- if (length(plausible) > 0L) min(eff_score[plausible]) else max(eff_score[in_budget], eff_score)
+  plausible <- which(p_feas >= 0.35)
+  e_ref <- if (length(plausible) > 0L) min(eff_score[plausible]) else max(eff_score)
 
   # Contour straddle peaks right along the target contour
   contour_straddle <- 4.0 * p_feas * (1.0 - p_feas) * (0.25 + unc)
 
-  # Prioritize the lower-effort / lower-cost Pareto frontier and budget-admissible region
+  # Prioritize the lower-effort Pareto frontier
   excess_eff <- pmax(eff_score - e_ref, 0.0)
   pref_weight <- ifelse(eff_score <= e_ref, 1.20, 1.0) * exp(-1.8 * excess_eff)
-  if (any(in_budget) && any(!in_budget)) {
-    pref_weight[!in_budget] <- 0.08 * pref_weight[!in_budget]
-  }
 
   acq <- contour_straddle * pref_weight + 0.03 * unc
   acq[evaluated_mask] <- -Inf

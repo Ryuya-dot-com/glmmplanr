@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>glmmplanr — Interactive Recipe Gallery &amp; Cost Explorer</title>
+  <title>glmmplanr — Interactive Recipe Gallery</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -144,7 +144,7 @@
       <span class="badge">Interactive Package Showcase</span>
       <h1><code>glmmplanr</code> Interactive Design &amp; Precision Gallery</h1>
       <p class="subtitle">
-        Explore five verified sample size and precision planning workflows bridging crossed binary experiments and Explanatory Item Response Models — powered by real Monte Carlo evaluations from <code>glmmplanr</code>.
+        Explore four verified sample size and precision planning workflows bridging crossed binary experiments and Explanatory Item Response Models — powered by real Monte Carlo evaluations from <code>glmmplanr</code>.
       </p>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
@@ -169,12 +169,7 @@
       <div class="tab-desc">4 items/passage across +6 / +8 / +10 pp</div>
     </button>
     <button class="tab-btn" onclick="selectTab(3)">
-      <div class="tab-num">Recipe 4 • Research Economics</div>
-      <div class="tab-title">2D Cost &amp; Budget Optimizer</div>
-      <div class="tab-desc">Live sliders for optimal allocation reversal</div>
-    </button>
-    <button class="tab-btn" onclick="selectTab(4)">
-      <div class="tab-num">Recipe 5 • Psychometrics</div>
+      <div class="tab-num">Recipe 4 • Psychometrics</div>
       <div class="tab-title">Random vs. Fixed-Bank Rasch</div>
       <div class="tab-desc">Bank RMSE vs. worst-item anchor precision</div>
     </button>
@@ -371,62 +366,8 @@ res3 &lt;- optimize_sample_size(
     </div>
   </section>
 
-  <!-- TAB 3: RECIPE 4 (LIVE COST OPTIMIZER) -->
+  <!-- TAB 3: RECIPE 4 -->
   <section id="tab-3" class="tab-pane hidden">
-    <div class="grid-2">
-      <div class="card">
-        <h2>Live 2D Cost &amp; Budget Allocation Explorer (<code>switch_preference()</code>)</h2>
-        <p class="muted">
-          Drag unit costs or click a research paradigm preset to re-optimize across the 135 verified designs in real time — zero re-simulation required.
-        </p>
-        <div style="display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 14px;">
-          <button class="btn active" id="preset-lab" onclick="applyCostPreset(60, 8, 0.02, 200, 3200, 'preset-lab')">In-Lab Eye-Tracking ($60/subj, $8/item)</button>
-          <button class="btn" id="preset-irt" onclick="applyCostPreset(6, 85, 0.01, 200, 3200, 'preset-irt')">Field IRT Item Piloting ($6/subj, $85/item)</button>
-          <button class="btn" id="preset-online" onclick="applyCostPreset(14, 24, 0.01, 200, 2000, 'preset-online')">Online Crowdsourced ($14/subj, $24/item)</button>
-        </div>
-
-        <div class="heatmap-wrap" id="r4Heatmap"></div>
-      </div>
-
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <div class="card">
-          <h3>Unit Cost &amp; Grant Budget Controls</h3>
-          <div class="slider-group">
-            <div class="slider-head"><span>Per-Participant Cost (<code>subj</code>)</span><span id="c-subj-lbl">$60</span></div>
-            <input type="range" id="c-subj" min="2" max="120" step="2" value="60" oninput="updateCostExplorer()" />
-          </div>
-          <div class="slider-group">
-            <div class="slider-head"><span>Per-Item Authoring Cost (<code>item</code>)</span><span id="c-item-lbl">$8</span></div>
-            <input type="range" id="c-item" min="2" max="150" step="1" value="8" oninput="updateCostExplorer()" />
-          </div>
-          <div class="slider-group">
-            <div class="slider-head"><span>Per-Trial Cost (<code>trial</code>)</span><span id="c-trial-lbl">$0.02</span></div>
-            <input type="range" id="c-trial" min="0" max="0.20" step="0.01" value="0.02" oninput="updateCostExplorer()" />
-          </div>
-          <div class="slider-group">
-            <div class="slider-head"><span>Fixed Study Overhead (<code>fixed</code>)</span><span id="c-fixed-lbl">$200</span></div>
-            <input type="range" id="c-fixed" min="0" max="1000" step="50" value="200" oninput="updateCostExplorer()" />
-          </div>
-          <div class="slider-group">
-            <div class="slider-head"><span>Total Grant Budget Cap (<code>budget</code>)</span><span id="c-budget-lbl">$3,200</span></div>
-            <input type="range" id="c-budget" min="1200" max="6000" step="100" value="3200" oninput="updateCostExplorer()" />
-          </div>
-          <div id="r4WinnerBox" style="margin-top:12px;"></div>
-        </div>
-
-        <div class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h3>Generated R Call</h3>
-            <button class="btn" onclick="copyCode('code-r4', this)">Copy R Code</button>
-          </div>
-          <pre class="code" id="code-r4"></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- TAB 4: RECIPE 5 -->
-  <section id="tab-4" class="tab-pane hidden">
     <div class="grid-2">
       <div class="card">
         <h2>Random-Item vs. Fixed-Item-Bank Rasch Calibration</h2>
@@ -835,88 +776,6 @@ function renderR2andR3() {
   `).join("");
 }
 
-function applyCostPreset(cs, ci, ct, cf, b, btnId) {
-  document.getElementById("c-subj").value = cs;
-  document.getElementById("c-item").value = ci;
-  document.getElementById("c-trial").value = ct;
-  document.getElementById("c-fixed").value = cf;
-  document.getElementById("c-budget").value = b;
-  ["preset-lab","preset-irt","preset-online"].forEach(id => document.getElementById(id).classList.toggle("active", id===btnId));
-  updateCostExplorer();
-}
-
-function updateCostExplorer() {
-  const cs = parseFloat(document.getElementById("c-subj").value);
-  const ci = parseFloat(document.getElementById("c-item").value);
-  const ct = parseFloat(document.getElementById("c-trial").value);
-  const cf = parseFloat(document.getElementById("c-fixed").value);
-  const budget = parseFloat(document.getElementById("c-budget").value);
-
-  document.getElementById("c-subj-lbl").innerText = "$" + cs;
-  document.getElementById("c-item-lbl").innerText = "$" + ci;
-  document.getElementById("c-trial-lbl").innerText = "$" + ct.toFixed(2);
-  document.getElementById("c-fixed-lbl").innerText = "$" + cf;
-  document.getElementById("c-budget-lbl").innerText = "$" + budget.toLocaleString();
-
-  const withCost = GRID_R1.map(d => ({...d, cost: cf + cs * d.s + ci * d.i + ct * d.tr}));
-  const passAll = withCost.filter(d => d.st === "pass").sort((a,b) => a.cost - b.cost || a.tr - b.tr);
-  const passBudget = passAll.filter(d => d.cost <= budget);
-  const feasible = passBudget.length > 0;
-  const winner = feasible ? passBudget[0] : passAll[0];
-
-  const minC = Math.min(...withCost.map(d => d.cost));
-  const maxC = Math.max(...withCost.map(d => d.cost));
-
-  const subjs = [24,28,32,36,40,44,48,52,56,60,64,68,72,76,80];
-  const items = [48,44,40,36,32,28,24,20,16];
-  let html = `<table class="hm-table"><thead><tr><th>Items \\ Subj</th>`;
-  subjs.forEach(s => html += `<th>${s}</th>`);
-  html += `</tr></thead><tbody>`;
-  items.forEach(it => {
-    html += `<tr><th>${it}</th>`;
-    subjs.forEach(s => {
-      const d = withCost.find(x => x.s === s && x.i === it);
-      const inB = d.cost <= budget;
-      let bg = inB ? "rgba(148,163,184,0.28)" : "rgba(100,116,139,0.12)";
-      let fg = "var(--muted)";
-      if (d.st === "pass" && inB) {
-        const t = (d.cost - minC) / Math.max(1, budget - minC);
-        bg = `rgb(${Math.round(16 + t*30)}, ${Math.round(155 - t*45)}, ${Math.round(115 - t*20)})`;
-        fg = "#fff";
-      } else if (d.st === "pass" && !inB) {
-        bg = "rgba(217,119,6,0.28)";
-        fg = "var(--text)";
-      }
-      const isWin = winner && winner.s === s && winner.i === it;
-      html += `<td class="hm-cell ${d.par?'pareto':''} ${isWin?'winner':''}" style="background:${bg}; color:${fg};" title="(${s}, ${it}): $${d.cost.toFixed(0)} | ${d.st.toUpperCase()} | Power ${(d.p*100).toFixed(1)}%">$${Math.round(d.cost/100)/10}k</td>`;
-    });
-    html += `</tr>`;
-  });
-  html += `</tbody></table><div class="muted" style="margin-top:8px;">Green = Budget-feasible <code>PASS</code> | Amber = Over-budget <code>PASS</code> | Gray = Fails power/width target | Red outline = Optimal minimum-cost choice</div>`;
-  document.getElementById("r4Heatmap").innerHTML = html;
-
-  document.getElementById("r4WinnerBox").innerHTML = feasible ? `
-    <div class="kpi-row">
-      <div class="kpi"><div class="kpi-label">Min-Cost Winner</div><div class="kpi-val" style="color:var(--pass);">${winner.s} &times; ${winner.i}</div><div class="kpi-sub">${winner.tr} trials</div></div>
-      <div class="kpi"><div class="kpi-label">Total Cost</div><div class="kpi-val">$${winner.cost.toFixed(0)}</div><div class="kpi-sub">Saves $${(budget - winner.cost).toFixed(0)}</div></div>
-      <div class="kpi"><div class="kpi-label">Verified Power</div><div class="kpi-val">${(winner.p*100).toFixed(1)}%</div><div class="kpi-sub">CI ${winner.w.toFixed(1)} pp</div></div>
-    </div>
-  ` : `
-    <div class="report-box" style="border-left-color:var(--warn);">
-      <strong>Budget Insufficient ($${budget.toLocaleString()}):</strong> No verified <code>PASS</code> design fits under cap. Cheapest passing fallback (<code>min_cost_over_budget</code>) is <strong>${winner.s} subjects &times; ${winner.i} items</strong> at <strong>$${winner.cost.toFixed(2)}</strong> (+$${(winner.cost - budget).toFixed(2)} over cap).
-    </div>
-  `;
-
-  document.getElementById("code-r4").innerText =
-`res_cost <- switch_preference(
-  res1,
-  prefer = "min_cost",
-  cost   = c(subj = ${cs}, item = ${ci}, trial = ${ct.toFixed(2)}, fixed = ${cf}),
-  budget = ${budget}
-)
-plot(res_cost, type = "contour", metric = "cost")`;
-}
-
 function setRaschMode(mode) {
   document.getElementById("rasch-mode-fixed").classList.toggle("active", mode === "fixed");
   document.getElementById("rasch-mode-rand").classList.toggle("active", mode === "random");
@@ -956,7 +815,6 @@ document.getElementById("r1Report").innerText = R1_REPORT;
 renderR1();
 updateNC();
 renderR2andR3();
-updateCostExplorer();
 setRaschMode("fixed");
 </script>
 </body>

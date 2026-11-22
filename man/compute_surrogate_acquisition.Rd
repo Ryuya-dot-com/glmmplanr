@@ -2,7 +2,7 @@
 % Please edit documentation in R/surrogate_gp.R
 \name{compute_surrogate_acquisition}
 \alias{compute_surrogate_acquisition}
-\title{Compute Contour-Straddle + Preference/Budget-Aware Acquisition Scores Over Grid}
+\title{Compute Contour-Straddle + Preference-Aware Acquisition Scores Over Grid}
 \usage{
 compute_surrogate_acquisition(
   grid_df,
@@ -16,6 +16,6 @@ compute_surrogate_acquisition(
 )
 }
 \description{
-Compute Contour-Straddle + Preference/Budget-Aware Acquisition Scores Over Grid
+Compute Contour-Straddle + Preference-Aware Acquisition Scores Over Grid
 }
 \keyword{internal}

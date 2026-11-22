@@ -166,7 +166,7 @@ test_that("3AFC calibration and coverage meet the small regression fixture", {
   expect_gte(ev3$prob_coverage, 0.82)
 })
 
-test_that("Features 1-3: Percentage-point precision, indeterminate top-up, and multi-scenario budget premium", {
+test_that("Features 1-3: Percentage-point precision, indeterminate top-up, and multi-scenario robustness increment", {
   # Morris et al. (2019) borderline decision check: 801/1000 and 799/1000 are BOTH indeterminate!
   ci_801 <- glmmplanr:::wilson_mc_ci(801L, 1000L, conf_level = 0.95)
   ci_799 <- glmmplanr:::wilson_mc_ci(799L, 1000L, conf_level = 0.95)

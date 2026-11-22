@@ -5,7 +5,6 @@
 #   - man/figures/gallery_01_latin_square_3afc.png
 #   - man/figures/gallery_02_incomplete_block_dgp.png
 #   - man/figures/gallery_03_testlet_robustness.png
-#   - man/figures/gallery_04_cost_reversal.png
 #   - man/figures/gallery_05_rasch_calibration.png
 #   - gallery_payload.json in tempdir() (or --json-out=PATH)
 # ==============================================================================
@@ -82,7 +81,7 @@ cat(sprintf("=== Building glmmplanr Gallery (workers = %d) ===\n", workers_n))
 # ------------------------------------------------------------------------------
 # RECIPE 1: Psycholinguistics — 2x2 Latin-Square 3AFC Vocabulary Experiment
 # ------------------------------------------------------------------------------
-cat("[1/5] Recipe 1: Balanced 2x2 Latin-Square 3AFC Experiment...\n")
+cat("[1/4] Recipe 1: Balanced 2x2 Latin-Square 3AFC Experiment...\n")
 des1 <- design_crossed(
   factors = list(
     exposure = c("incidental", "intentional"),
@@ -152,7 +151,7 @@ save_two_panel("man/figures/gallery_01_latin_square_3afc.png", p1_left, p1_right
 # ------------------------------------------------------------------------------
 # RECIPE 2: Behavioral Experiment — Between-Subject Incomplete-Block & Calibration
 # ------------------------------------------------------------------------------
-cat("[2/5] Recipe 2: Between-Subject Incomplete-Block & Non-Collapsibility...\n")
+cat("[2/4] Recipe 2: Between-Subject Incomplete-Block & Non-Collapsibility...\n")
 des2 <- design_crossed(
   factors             = list(arm = c("control", "intervention")),
   allocation          = "between_subj",
@@ -289,7 +288,7 @@ save_two_panel("man/figures/gallery_02_incomplete_block_dgp.png", p2_left, p2_ri
 # ------------------------------------------------------------------------------
 # RECIPE 3: Reading Comprehension & Explanatory IRT — Testlets & Multi-Scenario
 # ------------------------------------------------------------------------------
-cat("[3/5] Recipe 3: Testlet-Nested Passages & Multi-Scenario Robustness...\n")
+cat("[3/4] Recipe 3: Testlet-Nested Passages & Multi-Scenario Robustness...\n")
 des3 <- design_testlet(
   factors      = list(glossing = c("none", "marginal_gloss")),
   testlet_size = 4L,
@@ -405,39 +404,9 @@ p3_right <- ggplot(sens3, aes(x = factor(sprintf("%.2fx", slope_multiplier)), y 
 save_two_panel("man/figures/gallery_03_testlet_robustness.png", p3_left, p3_right)
 
 # ------------------------------------------------------------------------------
-# RECIPE 4: Two-Dimensional Cost & Budget Optimization — Allocation Reversal
+# RECIPE 4: Psychometrics — Random-Item vs. Fixed-Item-Bank Rasch Calibration
 # ------------------------------------------------------------------------------
-cat("[4/5] Recipe 4: Cost & Budget Allocation Reversal (Lab vs. Field IRT)...\n")
-cost_lab <- c(subj = 60, item = 8, trial = 0.02, fixed = 200)
-cost_irt <- c(subj = 6, item = 85, trial = 0.01, fixed = 200)
-
-res4_lab <- switch_preference(res1, prefer = "min_cost", cost = cost_lab, budget = 3200)
-res4_irt <- switch_preference(res1, prefer = "min_cost", cost = cost_irt, budget = 3200)
-
-p4_left <- plot(res4_lab, type = "contour", metric = "cost") +
-  labs(
-    title = "A. In-Lab Psycholinguistics ($60/subj, $8/item)",
-    subtitle = sprintf(
-      "Budget $3,200 | Winner: (%d, %d) | Cost = $%.0f | Power = %.1f%%",
-      res4_lab$optimal$n_subj, res4_lab$optimal$n_item,
-      res4_lab$optimal$total_cost, res4_lab$optimal$power * 100
-    )
-  )
-p4_right <- plot(res4_irt, type = "contour", metric = "cost") +
-  labs(
-    title = "B. Field IRT Item Piloting ($6/subj, $85/item)",
-    subtitle = sprintf(
-      "Budget $3,200 | Reverses to: (%d, %d) | Cost = $%.0f | Power = %.1f%%",
-      res4_irt$optimal$n_subj, res4_irt$optimal$n_item,
-      res4_irt$optimal$total_cost, res4_irt$optimal$power * 100
-    )
-  )
-save_two_panel("man/figures/gallery_04_cost_reversal.png", p4_left, p4_right)
-
-# ------------------------------------------------------------------------------
-# RECIPE 5: Psychometrics — Random-Item vs. Fixed-Item-Bank Rasch Calibration
-# ------------------------------------------------------------------------------
-cat("[5/5] Recipe 5: Random-Item vs. Fixed-Item-Bank Rasch Calibration...\n")
+cat("[4/4] Recipe 4: Random-Item vs. Fixed-Item-Bank Rasch Calibration...\n")
 des5 <- design_crossed(list(), allocation = "crossed")
 dgp5 <- calibrate_dgp(des5, cell_probs = 0.65, chance = 0, subj_sd = 0.85, item_sd = 0.65)
 rasch_grid5 <- expand.grid(n_subj = c(60L, 90L, 120L, 160L), n_item = c(16L, 24L, 36L))
@@ -586,12 +555,6 @@ payload <- list(
     report_en = report_plan(res3, lang = "en")
   ),
   recipe4 = list(
-    lab_optimal = as.list(res4_lab$optimal[1L, c("n_subj", "n_item", "total_cost", "power", "prob_ci_width_mean_pp")]),
-    irt_optimal = as.list(res4_irt$optimal[1L, c("n_subj", "n_item", "total_cost", "power", "prob_ci_width_mean_pp")]),
-    report_lab_en = report_plan(res4_lab, lang = "en"),
-    report_irt_en = report_plan(res4_irt, lang = "en")
-  ),
-  recipe5 = list(
     random_rasch = rj5[, c("n_subj", "n_item", "nsim", "attainment", "mc_lo", "mc_hi", "decision")],
     fixed_bank = b_comb5[, c("estimator", "target", "n_subj", "n_item", "n_extreme_item_reps", "attainment", "mc_lo", "mc_hi", "decision")]
   )

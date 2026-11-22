@@ -22,7 +22,7 @@ test_that("Universal Kriging propagates trend-parameter covariance in GP surroga
   expect_gt(gp_w$sd_logw[idx_unobs], gp_w$sd_logw[idx_eval])
 })
 
-test_that("Cost and budget optimization shifts Pareto selection and identifies over-budget minimum-cost PASS", {
+test_that("switch_preference re-ranks verified Pareto designs instantaneously without re-simulation", {
   des <- design_crossed(
     factors = list(exposure = c("incidental", "intentional")),
     allocation = "latin_square"
@@ -39,12 +39,11 @@ test_that("Cost and budget optimization shifts Pareto selection and identifies o
     engine = "cpp_laplace", on_singular = "flag_only"
   )
 
-  # Cheap subjects / expensive items -> favors fewer items, more subjects
-  res_exp_items <- optimize_sample_size(
+  res_bal <- optimize_sample_size(
     spec,
     n_subj_range = c(24L, 44L, 64L),
     n_item_range = c(12L, 24L, 36L),
-    cost = c(subj = 10, item = 250, trial = 0.1, fixed = 100),
+    prefer = "fewer_items",
     method = "grid",
     nsim_final = 24L,
     nsim_topup = 0L,
@@ -52,39 +51,12 @@ test_that("Cost and budget optimization shifts Pareto selection and identifies o
     seed = 404L,
     verbose = FALSE
   )
-  expect_identical(res_exp_items$prefer, "min_cost")
-  expect_true("total_cost" %in% names(res_exp_items$optimal))
-  expect_true(is.finite(res_exp_items$optimal$total_cost))
-
-  # Re-rank same verified surface with expensive subjects / cheap items
-  res_exp_subj <- switch_preference(
-    res_exp_items,
-    cost = c(subj = 250, item = 10, trial = 0.1, fixed = 100)
-  )
-  expect_lte(res_exp_items$optimal$n_item, res_exp_subj$optimal$n_item)
-  expect_gte(res_exp_items$optimal$n_subj, res_exp_subj$optimal$n_subj)
-
-  # Custom cost function equivalence
-  fn_cost <- function(n_subj, n_item, n_trials_scheduled) {
-    100 + 250 * n_subj + 10 * n_item + 0.1 * n_trials_scheduled
-  }
-  res_fn <- switch_preference(res_exp_items, cost = fn_cost)
-  expect_equal(res_fn$surface$total_cost, res_exp_subj$surface$total_cost, tolerance = 1e-10)
-
-  # Tight budget below the minimum PASS cost flags infeasibility and reports min_cost_over_budget
-  min_pass_cost <- min(res_exp_subj$verified$total_cost[res_exp_subj$verified$decision_status == "pass"])
-  tight_budget <- min_pass_cost - 50
-  res_tight <- switch_preference(res_exp_subj, budget = tight_budget)
-  expect_false(res_tight$feasible)
-  expect_false(is.null(res_tight$min_cost_over_budget))
-  expect_equal(res_tight$min_cost_over_budget$total_cost, min_pass_cost, tolerance = 1e-10)
-
-  expect_s3_class(plot(res_tight, type = "contour", metric = "cost"), "ggplot")
-  expect_s3_class(as_gt(res_tight), "gt_tbl")
-  rep_en <- report_plan(res_tight, lang = "en", print_output = FALSE)
-  rep_ja <- report_plan(res_tight, lang = "ja", print_output = FALSE)
-  expect_match(rep_en, "minimum-cost verified PASS")
-  expect_match(rep_ja, "最小費用で合格")
+  res_subj <- switch_preference(res_bal, prefer = "fewer_subj")
+  expect_identical(res_subj$prefer, "fewer_subj")
+  expect_lte(res_bal$optimal$n_item, res_subj$optimal$n_item)
+  expect_gte(res_bal$optimal$n_subj, res_subj$optimal$n_subj)
+  expect_s3_class(plot(res_subj, type = "contour"), "ggplot")
+  expect_s3_class(as_gt(res_subj), "gt_tbl")
 })
 
 test_that("Marginal joint_delta SE and C++ batch bootstrap SE agree and preserve worker-invariance", {

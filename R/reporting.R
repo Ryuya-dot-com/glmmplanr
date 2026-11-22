@@ -52,8 +52,6 @@ as_gt.glmmplanr_result <- function(
     )
   }
 
-  has_cost <- !is.null(x$cost) && ("total_cost" %in% names(ver)) && any(is.finite(ver$total_cost))
-
   ver_clean <- data.frame(
     section = "Stage-2 Verified Candidate & Pareto Designs",
     label = role_lbl,
@@ -61,7 +59,6 @@ as_gt.glmmplanr_result <- function(
     n_item = ver$n_item,
     n_trials_scheduled = ver$n_trials_scheduled,
     n_trials_expected = ver$n_trials_expected,
-    total_cost = if (has_cost) ver$total_cost else NA_real_,
     decision = toupper(ver$decision_status),
     eff_power_ci = fmt_mc_pow(ver$power, ver$power_mc_lo, ver$power_mc_hi),
     conditional_power = ver$conditional_power,
@@ -81,7 +78,6 @@ as_gt.glmmplanr_result <- function(
   if (!is.null(x$sensitivity)) {
     s <- x$sensitivity
     cap <- paste0(toupper(substring(s$scenario, 1L, 1L)), substring(s$scenario, 2L))
-    opt_cost <- if (has_cost && ("total_cost" %in% names(x$optimal))) x$optimal$total_cost[1L] else NA_real_
     sens_clean <- data.frame(
       section = sprintf(
         "Random-Slope Sensitivity at (N_subj = %d, N_item = %d)",
@@ -92,7 +88,6 @@ as_gt.glmmplanr_result <- function(
       n_item = s$n_item,
       n_trials_scheduled = s$n_trials_scheduled,
       n_trials_expected = s$n_trials_expected,
-      total_cost = rep(opt_cost, nrow(s)),
       decision = toupper(s$decision_status),
       eff_power_ci = fmt_mc_pow(s$power, s$power_mc_lo, s$power_mc_hi),
       conditional_power = s$conditional_power,
@@ -130,7 +125,6 @@ as_gt.glmmplanr_result <- function(
         n_item = pick_rows$n_item,
         n_trials_scheduled = pick_rows$n_trials_scheduled,
         n_trials_expected = pick_rows$n_trials_expected,
-        total_cost = if (has_cost && ("total_cost" %in% names(pick_rows))) pick_rows$total_cost else NA_real_,
         decision = toupper(pick_rows$decision_status),
         eff_power_ci = fmt_mc_pow(pick_rows$power, pick_rows$power_mc_lo, pick_rows$power_mc_hi),
         conditional_power = pick_rows$conditional_power,
@@ -155,9 +149,6 @@ as_gt.glmmplanr_result <- function(
     combined = do.call(rbind, Filter(Negate(is.null), list(ver_clean, rob_clean, sens_clean)))
   )
 
-  if (!has_cost) {
-    tbl_df$total_cost <- NULL
-  }
   if (all(is.na(tbl_df$aipe_prob))) {
     tbl_df$aipe_prob <- tbl_df$joint_prob <- NULL
     has_aipe <- FALSE
@@ -165,7 +156,7 @@ as_gt.glmmplanr_result <- function(
     has_aipe <- TRUE
   }
 
-  size_cols <- c("n_subj", "n_item", "n_trials_scheduled", "n_trials_expected", if (has_cost) "total_cost")
+  size_cols <- c("n_subj", "n_item", "n_trials_scheduled", "n_trials_expected")
 
   gt_obj <- gt::gt(tbl_df, groupname_col = "section", rowname_col = "label") |>
     gt::tab_header(
@@ -210,12 +201,6 @@ as_gt.glmmplanr_result <- function(
     gt::fmt_number(columns = "prob_ci_width_pp", decimals = 2) |>
     gt::fmt_number(columns = "logit_ci_width", decimals = 3) |>
     gt::sub_missing(missing_text = "-")
-
-  if (has_cost) {
-    gt_obj <- gt_obj |>
-      gt::cols_label(total_cost = "Study Cost") |>
-      gt::fmt_number(columns = "total_cost", decimals = 2, use_seps = TRUE)
-  }
 
   if (has_aipe) {
     gt_obj <- gt_obj |>
@@ -285,8 +270,8 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
 #'     showing the exact minimum participants required at each item count.
 #'   * `"surface3d"`: Interactive `plotly` 3D response surface.
 #' @param metric Surface metric to render: `"power"` (default), `"ci_width"`
-#'   (on `x$spec$scale`), `"prob_ci_width_pp"` (95% CI width in percentage
-#'   points), or `"cost"` (total study cost when `cost` is specified).
+#'   (on `x$spec$scale`), or `"prob_ci_width_pp"` (95% CI width in percentage
+#'   points).
 #' @param show_pareto_frontier Logical; overlay the non-dominated `(N_subj, N_item)`
 #'   Pareto frontier on `"contour"` plots (default `TRUE`).
 #' @param ... Additional arguments (unused).
@@ -295,17 +280,12 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
 plot.glmmplanr_result <- function(
   x,
   type = c("contour", "surface3d", "pareto"),
-  metric = c("power", "ci_width", "prob_ci_width_pp", "cost"),
+  metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
   ...
 ) {
   type <- match.arg(type)
   metric <- match.arg(metric)
-  if (metric == "cost" && (is.null(x$cost) || !("total_cost" %in% names(x$surface)))) {
-    cli::cli_abort(
-      "Supply {.arg cost} in {.fn optimize_sample_size} or {.fn switch_preference} to plot {.code metric = 'cost'}."
-    )
-  }
 
   if (type == "contour") {
     return(plot_contour_2d(x, metric = metric, show_pareto_frontier = show_pareto_frontier))
@@ -326,15 +306,13 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
     metric,
     power = "pred_power",
     ci_width = "pred_ci_width",
-    prob_ci_width_pp = "pred_prob_ci_width_pp",
-    cost = "total_cost"
+    prob_ci_width_pp = "pred_prob_ci_width_pp"
   )
   fill_lbl <- switch(
     metric,
     power = "Predicted\nPower",
     ci_width = sprintf("CI\n(%s)", x$spec$scale),
-    prob_ci_width_pp = "CI\n(pp)",
-    cost = "Study\nCost"
+    prob_ci_width_pp = "CI\n(pp)"
   )
 
   p <- ggplot2::ggplot(
@@ -396,18 +374,6 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
           breaks = x$spec$ci_assurance,
           color = "#fde047",
           linetype = "dashed",
-          linewidth = 1.15
-        )
-      }
-    }
-    if (!is.null(x$budget) && ("total_cost" %in% names(surf)) && any(is.finite(surf$total_cost))) {
-      c_rng <- range(surf$total_cost, na.rm = TRUE)
-      if (x$budget > c_rng[1L] && x$budget < c_rng[2L]) {
-        p <- p + ggplot2::geom_contour(
-          ggplot2::aes(z = .data$total_cost),
-          breaks = x$budget,
-          color = "#fb923c",
-          linetype = "dotted",
           linewidth = 1.15
         )
       }
@@ -508,15 +474,13 @@ plot_surface_3d <- function(x, metric = "power") {
     metric,
     power = "pred_power",
     ci_width = "pred_ci_width",
-    prob_ci_width_pp = "pred_prob_ci_width_pp",
-    cost = "total_cost"
+    prob_ci_width_pp = "pred_prob_ci_width_pp"
   )
   z_title <- switch(
     metric,
     power = "Power",
     ci_width = sprintf("CI Width (%s)", x$spec$scale),
-    prob_ci_width_pp = "CI Width (pp)",
-    cost = "Study Cost"
+    prob_ci_width_pp = "CI Width (pp)"
   )
 
   Z_mat <- matrix(NA_real_, nrow = length(i_vals), ncol = length(s_vals))
@@ -551,15 +515,12 @@ plot_surface_3d <- function(x, metric = "power") {
     metric,
     power = opt$power,
     ci_width = opt$ci_width_mean,
-    prob_ci_width_pp = opt$prob_ci_width_mean_pp,
-    cost = opt$total_cost
+    prob_ci_width_pp = opt$prob_ci_width_mean_pp
   )
   thr_val <- if (metric == "power") {
     x$spec$power_min
   } else if (metric == "ci_width") {
     x$spec$ci_width
-  } else if (metric == "cost") {
-    x$budget
   } else if (x$spec$scale == "pp") {
     x$spec$ci_width
   } else {
@@ -774,25 +735,6 @@ report_plan <- function(x, lang = c("en", "ja"), print_output = TRUE) {
   cov_lbl_en <- if (sp$scale == "logit") "logit coverage" else sprintf("%s probability coverage", sp$prob_estimand)
   cov_lbl_ja <- if (sp$scale == "logit") "logit\u88ab\u8986\u7387" else sprintf("%s\u78ba\u7387\u88ab\u8986\u7387", ifelse(sp$prob_estimand == "marginal", "\u5468\u8fba", "\u6761\u4ef6\u4ed8\u304d"))
 
-  has_cost <- !is.null(x$cost) && ("total_cost" %in% names(opt)) && is.finite(opt$total_cost)
-  if (has_cost) {
-    cost_fmt <- format(round(opt$total_cost, 2), big.mark = ",")
-    if (!is.null(x$budget)) {
-      b_fmt <- format(round(x$budget, 2), big.mark = ",")
-      details <- c(details, if (lang == "ja") {
-        sprintf("\u7dcf\u7814\u7a76\u8cbb\u7528\u306f %s\uff08\u4e88\u7b97\u4e0a\u9650 %s\uff09\u3067\u3059\u3002", cost_fmt, b_fmt)
-      } else {
-        sprintf("Total study cost was %s against a budget cap of %s.", cost_fmt, b_fmt)
-      })
-    } else {
-      details <- c(details, if (lang == "ja") {
-        sprintf("\u7dcf\u7814\u7a76\u8cbb\u7528\u306f %s \u3067\u3059\u3002", cost_fmt)
-      } else {
-        sprintf("Total study cost was %s.", cost_fmt)
-      })
-    }
-  }
-
   if (!isTRUE(x$feasible)) {
     infeas_att_en <- switch(
       sp$criterion,
@@ -820,16 +762,6 @@ report_plan <- function(x, lang = c("en", "ja"), print_output = TRUE) {
         "The candidate is %d participants x %d items (%s, %d replications). ",
         "%s, and mean %s interval width was %.2f percentage points (%.3f logit)."),
         opt$n_subj, opt$n_item, opt$decision_status, opt$nsim, infeas_att_en, prob_label_en, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean)
-    }
-    if (!is.null(x$min_cost_over_budget) && !is.null(x$budget)) {
-      ov <- x$min_cost_over_budget
-      txt <- paste(txt, if (lang == "ja") {
-        sprintf("\u4e88\u7b97\u8d85\u904e\u306e\u3046\u3061\u6700\u5c0f\u8cbb\u7528\u3067\u5408\u683c\uff08PASS\uff09\u3068\u306a\u3063\u305f\u8a2d\u8a08\u306f %d\u4eba\u00d7%d\u9805\u76ee\uff08\u8cbb\u7528 %s\uff09\u3067\u3057\u305f\u3002",
-                ov$n_subj, ov$n_item, format(round(ov$total_cost, 2), big.mark = ","))
-      } else {
-        sprintf("The minimum-cost verified PASS design exceeding budget was %d participants x %d items (cost = %s).",
-                ov$n_subj, ov$n_item, format(round(ov$total_cost, 2), big.mark = ","))
-      })
     }
     if (!is.null(x$robust)) {
       txt <- paste(txt, if (lang == "ja") "\u5168\u30b7\u30ca\u30ea\u30aa\u3092\u6e80\u305f\u3059\u8a2d\u8a08\u306e\u7a4d\u307f\u5897\u3057\u91cf\u306f\u672a\u78ba\u5b9a\u3067\u3059\u3002" else

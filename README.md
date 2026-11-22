@@ -5,9 +5,9 @@
 [![R >= 4.1.0](https://img.shields.io/badge/R-%3E%3D%204.1.0-276DC3.svg)](https://www.r-project.org/)
 [![Backend: RcppEigen](https://img.shields.io/badge/Backend-C%2B%2B%20%2F%20RcppEigen-059669.svg)](src/glmm_laplace.cpp)
 
-`glmmplanr` is an end-to-end R package for planning **two-dimensional ($N_{\text{subj}} \times N_{\text{item}}$) sample sizes, estimation precision, and study budgets** in crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models (EIRMs).
+`glmmplanr` is an end-to-end R package for planning **two-dimensional ($N_{\text{subj}} \times N_{\text{item}}$) sample sizes and estimation precision** in crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models (EIRMs).
 
-Without requiring either a pre-fitted pilot model or custom data-generation loops, `glmmplanr` translates **declarative experimental/assessment schedules (Latin-square, incomplete-block, testlet) $\times$ substantive marginal percentage-point effects** directly into **verified Pareto-optimal and cost-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs** with explicit Monte Carlo confidence bounds.
+Without requiring either a pre-fitted pilot model or custom data-generation loops, `glmmplanr` translates **declarative experimental/assessment schedules (Latin-square, incomplete-block, testlet) $\times$ substantive marginal percentage-point effects** directly into **verified non-dominated Pareto-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs** with explicit Monte Carlo confidence bounds.
 
 In studies where participants judge binary preferences (e.g., endorse = `1`, reject = `0`), set `chance = 0` to plan marginal endorsement differences across conditions. When each participant sees only a subset of an item bank, specify the total bank size via `n_item` and the number of distinct items presented per participant via `items_per_subject`. Cluster-randomized school interventions and longitudinal daily-diary designs require different correlation structures; see [Scope Across Research Designs](inst/validation-guide.md#cross-field-designs).
 
@@ -27,15 +27,15 @@ After installation, inspect the bundled validation conditions and benchmarks via
 
 ## Visual Recipe Gallery & Interactive Explorer
 
-Explore five complete domain case studies — **(1) Psycholinguistic $2 \times 2$ Latin-Square 3AFC Experiments**, **(2) Between-Subject Incomplete-Block Designs & Logistic Non-Collapsibility**, **(3) Testlet-Nested Reading Passages & Multi-Scenario Robustness**, **(4) Two-Dimensional Cost & Budget Allocation Reversal**, and **(5) Random-Item vs. Fixed-Item-Bank Rasch Calibration** — with publication-ready figures, copy-ready R scripts, and Registered Report justifications:
+Explore four complete domain case studies — **(1) Psycholinguistic $2 \times 2$ Latin-Square 3AFC Experiments**, **(2) Between-Subject Incomplete-Block Designs & Logistic Non-Collapsibility**, **(3) Testlet-Nested Reading Passages & Multi-Scenario Robustness**, and **(4) Random-Item vs. Fixed-Item-Bank Rasch Calibration** — with publication-ready figures, copy-ready R scripts, and Registered Report justifications:
 
 - **GitHub Visual Recipe Gallery**: [`inst/gallery/GALLERY.md`](inst/gallery/GALLERY.md)
-- **Interactive HTML Explorer** (135-cell hover surface, live Gauss-Hermite non-collapsibility calculator, and real-time unit-cost / grant-budget sliders): [**Launch Online Demo**](https://ryuya-dot-com.github.io/glmmplanr/) or open locally from R via:
+- **Interactive HTML Explorer** (135-cell hover surface, live Pareto trade-off switcher, and real-time Gauss-Hermite non-collapsibility calculator): [**Launch Online Demo**](https://ryuya-dot-com.github.io/glmmplanr/) or open locally from R via:
   ```r
   browseURL(system.file("gallery", "index.html", package = "glmmplanr"))
   ```
 
-![Optimal Allocation Reversal Under Asymmetric Study Costs](man/figures/gallery_04_cost_reversal.png)
+![2D Power & Precision Surface and Non-Dominated Pareto Frontier](man/figures/gallery_01_latin_square_3afc.png)
 
 ---
 
@@ -65,10 +65,9 @@ Explore five complete domain case studies — **(1) Psycholinguistic $2 \times 2
    - `criterion = "both"` enforces separate thresholds on power (`power_min`) and width attainment (`ci_assurance`), whereas `criterion = "joint"` compares same-replication simultaneous detection and width attainment (`joint_prob`) against `power_min`.
    - Independent coverage benchmarks on $64 \times 20$ designs are documented in [Marginal Interval Coverage Recheck](inst/validation-guide.md#coverage-recheck). Because pointwise Wilson intervals do not guarantee simultaneous familywise coverage across an entire search, confirm final pre-registered designs at a fresh seed and prespecified `nsim` via `validate_design_point()`, which evaluates paired null (`detection` = Type I error) and planned (`detection` = power) operating characteristics ([Morris et al., 2019](https://doi.org/10.1002/sim.8086)).
 
-5. **Pareto Frontiers, 2D Study Cost / Budget Optimization, and Multi-Scenario Robustness (`prefer`, `cost`, `budget`, `scenario_dgps()`, `switch_preference()`)**
-   - Enumerates non-dominated **Pareto-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs** and supports instant zero-resimulation rule switching via `prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials", "min_cost")`.
-   - Supplying `cost = c(subj = 60, item = 8, trial = 0.02, fixed = 200)` (or any custom cost function `function(n_subj, n_item, n_trials_scheduled)`) and an optional `budget` cap identifies the minimum-cost passing design within budget — or reports the cheapest passing fallback (`min_cost_over_budget`) when the budget is insufficient.
-   - Quantifies exact sample-size and cost increments (`+delta_subj`, `+delta_item`, `+delta_cost`) required to move from a standard assumption (e.g., `+8 pp`) to an all-scenario robust plan (e.g., `+5 / +8 / +10 pp`).
+5. **Pareto Frontiers, Instant Preference Switching, and Multi-Scenario Robustness (`prefer`, `scenario_dgps()`, `switch_preference()`)**
+   - Enumerates non-dominated **Pareto-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs** and supports instant zero-resimulation rule switching via `prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials")`.
+   - Quantifies exact sample-size increments (`+delta_subj`, `+delta_item`, `+delta_trials`) required to move from a standard assumption (e.g., `+8 pp`) to an all-scenario robust plan (e.g., `+5 / +8 / +10 pp`).
 
 6. **High-Throughput Parallel C++ Search & Live Progress / ETA (`glmm_laplace.cpp`, `early_stop`, `verbose`)**
    - Combines L1-contiguous `RowMajor` trial assembly, variance/correlation-decoupled SQUAREM acceleration, batch C++ parametric bootstrap, `mirai` non-forked daemon pools, Stage-2 futility stopping (`early_stop`), and live `cli` progress bars with elapsed time and ETA (`verbose = TRUE`).
@@ -132,7 +131,7 @@ subset(patterns, pattern %in% c("all_correct", "all_incorrect", "unobserved"))
 
 ---
 
-## Quickstart: Percentage-Point Precision, Cost Optimization & Multi-Scenario Robustness
+## Quickstart: Percentage-Point Precision & Multi-Scenario Robustness
 
 ```r
 library(glmmplanr)
@@ -181,7 +180,7 @@ spec <- dgp |>
 # Optional: prespecified null + planned confirmation at a fixed candidate design
 # validate_design_point(spec, n_subj = 48, n_item = 32, nsim = 200, seed = 74011)
 
-# 4. Optimize across +5 / +8 / +10 pp scenarios with study cost & budget tracking
+# 4. Optimize across +5 / +8 / +10 pp scenarios
 scens <- scenario_dgps(
   dgp,
   effect          = "exposure",
@@ -193,8 +192,6 @@ plan_res <- spec |>
     n_subj_range      = c(24, 120),
     n_item_range      = c(16, 64),
     prefer            = "balanced",
-    cost              = c(subj = 60, item = 8, trial = 0.02, fixed = 200),
-    budget            = 4500,
     scenarios         = scens,
     standard_scenario = "diff_8pp",
     method            = "surrogate_gp",
@@ -205,15 +202,14 @@ plan_res <- spec |>
     seed              = 20261119
   )
 
-# Instantaneously switch preference rules or unit-cost regimes without re-simulating
-switch_preference(plan_res, prefer = "min_cost")
+# Instantaneously switch trade-off preferences without re-simulating
+switch_preference(plan_res, prefer = "fewer_subj")
 switch_preference(plan_res, prefer = "fewer_items")
 
 # 5. Publication tables, 2D contours / Pareto curves / 3D surfaces, and Methods text
 summary(plan_res)
 as_gt(plan_res)
 plot(plan_res, type = "contour", metric = "prob_ci_width_pp")
-plot(plan_res, type = "contour", metric = "cost")
 plot(plan_res, type = "pareto")
 plot(plan_res, type = "surface3d", metric = "power")
 report_plan(plan_res, lang = "en")
@@ -225,4 +221,4 @@ report_plan(plan_res, lang = "en")
 
 `glmmplanr` is open-source software released under the **[MIT License](https://github.com/Ryuya-dot-com/glmmplanr/blob/main/LICENSE.md)** (Copyright © 2026 Ryuya Komuro).
 
-You are completely free to use, copy, modify, merge, publish, and distribute this software for academic, educational, or commercial purposes. **However, the software is provided "AS IS", without warranty of any kind, express or implied.** Sample size, precision, and cost outputs depend on user-supplied data-generating assumptions, model specifications, and Monte Carlo tolerances; **users assume sole responsibility** for validating assumptions, interpreting simulation diagnostics, and making design, ethical, or financial decisions in their own research.
+You are completely free to use, copy, modify, merge, publish, and distribute this software for academic, educational, or commercial purposes. **However, the software is provided "AS IS", without warranty of any kind, express or implied.** Sample size and precision outputs depend on user-supplied data-generating assumptions, model specifications, and Monte Carlo tolerances; **users assume sole responsibility** for validating assumptions, interpreting simulation diagnostics, and making design, ethical, or financial decisions in their own research.

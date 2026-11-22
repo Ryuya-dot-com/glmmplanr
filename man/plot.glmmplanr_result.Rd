@@ -7,7 +7,7 @@
 \method{plot}{glmmplanr_result}(
   x,
   type = c("contour", "surface3d", "pareto"),
-  metric = c("power", "ci_width", "prob_ci_width_pp", "cost"),
+  metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
   ...
 )
@@ -26,8 +26,8 @@ showing the exact minimum participants required at each item count.
 }}
 
 \item{metric}{Surface metric to render: \code{"power"} (default), \code{"ci_width"}
-(on \code{x$spec$scale}), \code{"prob_ci_width_pp"} (95\% CI width in percentage
-points), or \code{"cost"} (total study cost when \code{cost} is specified).}
+(on \code{x$spec$scale}), or \code{"prob_ci_width_pp"} (95\% CI width in percentage
+points).}
 
 \item{show_pareto_frontier}{Logical; overlay the non-dominated \verb{(N_subj, N_item)}
 Pareto frontier on \code{"contour"} plots (default \code{TRUE}).}

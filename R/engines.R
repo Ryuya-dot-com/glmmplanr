@@ -1,3 +1,11 @@
+compact_idx0 <- function(ids) {
+  mx <- max(ids)
+  present <- logical(mx)
+  present[ids] <- TRUE
+  map <- cumsum(present)
+  list(idx0 = map[ids] - 1L, n = map[mx])
+}
+
 #' Fit a Single Simulated Dataset with the Configured GLMM Engine
 #'
 #' Returns point estimates and standard errors on both the conditional logit
@@ -87,14 +95,13 @@ fit_single_dataset <- function(
   }
 
   cpp_boot_ctx <- if (engine_use %in% c("cpp_laplace", "bayes_laplace")) {
-    s_fac <- as.integer(factor(df$subj_id))
-    i_fac <- as.integer(factor(df$item_id))
-    t_fac <- if (ncol(Z_t) > 0L) as.integer(factor(df$testlet_id)) else integer(0)
+    cs <- compact_idx0(df$subj_id)
+    ci <- compact_idx0(df$item_id)
+    ct <- if (ncol(Z_t) > 0L) compact_idx0(df$testlet_id) else list(idx0 = integer(0), n = 0L)
     list(
-      X = X, s_idx0 = s_fac - 1L, Z_s = Z_s, n_s = max(s_fac),
-      i_idx0 = i_fac - 1L, Z_i = Z_i, n_i = max(i_fac),
-      t_idx0 = if (ncol(Z_t) > 0L) (t_fac - 1L) else integer(0),
-      Z_t = Z_t, n_t = if (ncol(Z_t) > 0L) max(t_fac) else 0L,
+      X = X, s_idx0 = cs$idx0, Z_s = Z_s, n_s = cs$n,
+      i_idx0 = ci$idx0, Z_i = Z_i, n_i = ci$n,
+      t_idx0 = ct$idx0, Z_t = Z_t, n_t = ct$n,
       corr_mode = corr_mode, regularized = (engine_use == "bayes_laplace"),
       eff_idx = eff_idx
     )
@@ -257,31 +264,22 @@ fit_via_cpp <- function(
   df, X, Z_s, Z_i, Z_t, chance, corr_mode, regularized, spec, fast_stage, eff_idx,
   warm = NULL
 ) {
-  s_fac <- as.integer(factor(df$subj_id))
-  i_fac <- as.integer(factor(df$item_id))
-  n_s <- max(s_fac)
-  n_i <- max(i_fac)
-  if (ncol(Z_t) > 0L) {
-    t_fac <- as.integer(factor(df$testlet_id))
-    n_t <- max(t_fac)
-    t_idx0 <- t_fac - 1L
-  } else {
-    n_t <- 0L
-    t_idx0 <- integer(0)
-  }
+  cs <- compact_idx0(df$subj_id)
+  ci <- compact_idx0(df$item_id)
+  ct <- if (ncol(Z_t) > 0L) compact_idx0(df$testlet_id) else list(idx0 = integer(0), n = 0L)
 
   run_cpp_glmm_core(
     y = as.integer(df$y),
     X = X,
-    s_idx0 = s_fac - 1L,
+    s_idx0 = cs$idx0,
     Z_s = Z_s,
-    n_s = n_s,
-    i_idx0 = i_fac - 1L,
+    n_s = cs$n,
+    i_idx0 = ci$idx0,
     Z_i = Z_i,
-    n_i = n_i,
-    t_idx0 = t_idx0,
+    n_i = ci$n,
+    t_idx0 = ct$idx0,
     Z_t = Z_t,
-    n_t = n_t,
+    n_t = ct$n,
     chance = chance,
     corr_mode = corr_mode,
     regularized = regularized,
@@ -497,14 +495,16 @@ fit_via_cpp_cached <- function(
     Z_s <- Z_s_full[kp, , drop = FALSE]
     Z_i <- Z_i_full[kp, , drop = FALSE]
     Z_t <- Z_t_full[kp, , drop = FALSE]
-    s_idx0 <- as.integer(factor(cache$sid[kp])) - 1L
-    n_s <- max(s_idx0) + 1L
-    i_idx0 <- as.integer(factor(cache$iid[kp])) - 1L
-    n_i <- max(i_idx0) + 1L
+    cs <- compact_idx0(cache$sid[kp])
+    s_idx0 <- cs$idx0
+    n_s <- cs$n
+    ci <- compact_idx0(cache$iid[kp])
+    i_idx0 <- ci$idx0
+    n_i <- ci$n
     if (ncol(Z_t) > 0L) {
-      t_fac <- as.integer(factor(cache$tid[kp]))
-      n_t <- max(t_fac)
-      t_idx0 <- t_fac - 1L
+      ct <- compact_idx0(cache$tid[kp])
+      n_t <- ct$n
+      t_idx0 <- ct$idx0
     } else {
       n_t <- 0L
       t_idx0 <- integer(0)
