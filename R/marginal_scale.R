@@ -16,6 +16,9 @@
 #' @param custom_weights Optional numeric vector of length `design$n_cells` (named
 #'   or unnamed) overriding automatic contrast extraction.
 #' @return Named numeric vector of cell contrast weights of length `design$n_cells`.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' cell_contrast_weights(des, "condition")
 #' @export
 cell_contrast_weights <- function(design, effect_col, custom_weights = NULL) {
   if (!inherits(design, "glmmplanr_design")) {
@@ -54,8 +57,13 @@ cell_contrast_weights <- function(design, effect_col, custom_weights = NULL) {
 #' @param estimand Either `"marginal"` (default; integrates out subject, item,
 #'   and optional testlet random effects via Gauss-Hermite quadrature) or
 #'   `"conditional"` (evaluates at average cluster random effects \eqn{u = 0}).
-#' @return Numeric scalar giving the true probability contrast \eqn{\Delta P \in (-1, 1)}
+#' @return Numeric scalar giving the weighted sum of cell probabilities
 #'   (multiply by `100` for percentage points).
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' w <- cell_contrast_weights(des, "condition")
+#' c(marginal = true_prob_effect(dgp, w), conditional = true_prob_effect(dgp, w, "conditional"))
 #' @export
 true_prob_effect <- function(
   dgp,
@@ -100,7 +108,7 @@ dgp_cell_probabilities <- function(dgp, estimand) {
 #' random-effect variance components \eqn{\theta = \log \tau} analytically,
 #' accounting for non-collapsibility cross-covariance via `J_beta_theta`.
 #'
-#' @keywords internal
+#' @noRd
 estimate_prob_effect_delta <- function(
   beta,
   vcov_beta,
@@ -283,6 +291,11 @@ cell_probs_from_diffs <- function(design, baseline_prob, effects_pp = numeric(0)
 #' @param slope_multipliers Optional numeric vector (length 1 or matching
 #'   `effect_diffs_pp`) scaling random-slope SDs in each scenario (default `1.0`).
 #' @return A named list of `"glmmplanr_dgp"` objects.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' models <- scenario_dgps(dgp, "condition", c(smaller = 5, larger = 10))
+#' lapply(models, function(x) x$target_cell_probs)
 #' @export
 scenario_dgps <- function(
   base_dgp,

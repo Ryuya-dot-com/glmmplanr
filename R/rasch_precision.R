@@ -33,7 +33,7 @@
 #' @param parallel_backend Parallel backend (`"auto"`, `"mirai"`, `"multicore"`,
 #'   or `"sequential"`).
 #' @param verbose Logical; display live progress bar with ETA (default `FALSE`).
-#' @return A list with `summary` (per-target and joint attainment, counts, Wilson
+#' @return A `glmmplanr_rasch` list (see [rasch_plan_methods]) with `summary` (per-target and joint attainment, counts, Wilson
 #'   bounds, and decision), `pareto` (non-dominated designs passing the joint
 #'   criterion), `replications` (errors and fit diagnostics), and the settings.
 #'   The `rmse` column is the root mean square of the evaluable replication
@@ -47,7 +47,7 @@
 #' dgp <- calibrate_dgp(design, 0.65, subj_sd = 0.8, item_sd = 0.6)
 #' plan <- plan_rasch_precision(dgp, data.frame(n_subj = 48, n_item = 12),
 #'                              c(difficulty = 0.30), nsim = 4)
-#' plan$summary
+#' as.data.frame(plan)
 #' @export
 plan_rasch_precision <- function(
   dgp,
@@ -62,6 +62,9 @@ plan_rasch_precision <- function(
   parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   verbose = FALSE
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("plan_rasch_precision", environment(), match.call()))
+  }
   if (!inherits(dgp, "glmmplanr_dgp") || dgp$chance != 0 ||
       length(dgp$design$factor_names) || dgp$design$has_testlet) {
     cli::cli_abort("Supply a Rasch DGP with {.code factors = list()}, {.code chance = 0}, and person and item intercepts.")
@@ -186,44 +189,31 @@ plan_rasch_precision <- function(
   }
   summary <- do.call(rbind, summaries)
   passing <- summary$target == "joint" & summary$decision == "pass"
-  list(
+  structure(list(
     summary = summary,
+    engine = engine,
     pareto = extract_2d_pareto(summary[passing, , drop = FALSE]),
     replications = do.call(rbind, samples),
     max_error = max_error,
     assurance = assurance,
     seed = seed,
     mc_conf_level = mc_conf_level
-  )
+  ), class = "glmmplanr_rasch")
 }
 
-rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
-  data <- draw$trials
-  result <- data.frame(
-    ability = NA_real_, difficulty = NA_real_, difficulty_max_abs_error = NA_real_,
-    person_sd = NA_real_, item_sd = NA_real_, person_variance = NA_real_, item_variance = NA_real_,
-    singular = NA, fit_error = NA_character_
-  )
-  if (length(unique(data$y)) < 2L) {
-    result$fit_error <- "Fewer than two observed response values"
-    return(result)
-  }
-
-  n_subj <- nrow(draw$subj)
-  n_item <- nrow(draw$item)
-
+fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "lme4", control = NULL) {
   if (identical(engine, "cpp_laplace")) {
-    n_obs <- nrow(data)
+    n_obs <- nrow(trials)
     ones <- matrix(1.0, nrow = n_obs, ncol = 1L)
     fit <- tryCatch(
       cpp_fit_crossed_glmm(
-        y = as.integer(data$y),
+        y = as.integer(trials$y),
         X = ones,
         Z_subj = ones,
-        subj_idx = as.integer(data$subj_id) - 1L,
+        subj_idx = as.integer(trials$subj_id) - 1L,
         n_subj = n_subj,
         Z_item = ones,
-        item_idx = as.integer(data$item_id) - 1L,
+        item_idx = as.integer(trials$item_id) - 1L,
         n_item = n_item,
         Z_testlet = matrix(0.0, nrow = n_obs, ncol = 0L),
         testlet_idx = integer(n_obs),
@@ -244,73 +234,95 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
       error = identity
     )
     if (inherits(fit, "error")) {
-      result$fit_error <- conditionMessage(fit)
-      return(result)
+      return(list(error = conditionMessage(fit)))
     }
     if (!isTRUE(fit$converged)) {
-      result$fit_error <- paste0("C++ Laplace status: ", fit$status)
-      return(result)
+      return(list(error = paste0("C++ Laplace status: ", fit$status)))
     }
-    result$singular <- isTRUE(fit$singular)
     ability <- as.numeric(fit$u_subj[, 1L])
     item <- as.numeric(fit$u_item[, 1L])
-    ability[tabulate(data$subj_id, nbins = n_subj) == 0L] <- NA_real_
-    item[tabulate(data$item_id, nbins = n_item) == 0L] <- NA_real_
-
-    result$ability <- sqrt(mean((ability - draw$subj[, 1L])^2))
-    difficulty <- -as.numeric(fit$beta[1L]) - item
-    truth <- -unname(dgp$beta[1L]) - draw$item[, 1L]
-    difficulty_error <- difficulty - truth
-    result$difficulty <- sqrt(mean(difficulty_error^2))
-    result$difficulty_max_abs_error <- max(abs(difficulty_error))
-
+    ability[tabulate(trials$subj_id, nbins = n_subj) == 0L] <- NA_real_
+    item[tabulate(trials$item_id, nbins = n_item) == 0L] <- NA_real_
     v_s <- as.numeric(fit$Sigma_subj[1L, 1L])
     v_i <- as.numeric(fit$Sigma_item[1L, 1L])
     if (v_s <= 1e-8) v_s <- 0.0
     if (v_i <= 1e-8) v_i <- 0.0
-    result$person_variance <- abs(v_s - dgp$tau_subj[1L]^2)
-    result$item_variance <- abs(v_i - dgp$tau_item[1L]^2)
-    result$person_sd <- abs(sqrt(v_s) - dgp$tau_subj[1L])
-    result$item_sd <- abs(sqrt(v_i) - dgp$tau_item[1L])
-    return(result)
+    return(list(
+      error = NA_character_,
+      singular = isTRUE(fit$singular),
+      intercept = as.numeric(fit$beta[1L]),
+      ability = ability,
+      item = item,
+      person_var = v_s,
+      item_var = v_i
+    ))
   }
 
   if (is.null(control)) control <- lme4::glmerControl(optimizer = "bobyqa")
   warnings <- character()
   fit <- tryCatch(withCallingHandlers(
-    suppressMessages(lme4::glmer(y ~ 1 + (1 | subj) + (1 | item), data = data,
+    suppressMessages(lme4::glmer(y ~ 1 + (1 | subj) + (1 | item), data = trials,
                                  family = stats::binomial(), control = control)),
     warning = function(w) {
       warnings <<- c(warnings, conditionMessage(w))
       invokeRestart("muffleWarning")
     }), error = identity)
   if (inherits(fit, "error")) {
-    result$fit_error <- conditionMessage(fit)
-    return(result)
+    return(list(error = conditionMessage(fit)))
   }
   conv <- fit@optinfo$conv
   diagnostics <- c(warnings, conv$lme4$messages)
   diagnostics <- diagnostics[!grepl("boundary \\(singular\\) fit", diagnostics)]
   if (any(c(conv$opt, conv$lme4$code) != 0) || length(diagnostics)) {
-    result$fit_error <- paste(c("Fit diagnostic", unique(diagnostics)), collapse = " / ")
-    return(result)
+    return(list(error = paste(c("Fit diagnostic", unique(diagnostics)), collapse = " / ")))
   }
-  result$singular <- lme4::isSingular(fit)
   modes <- lme4::ranef(fit, condVar = FALSE)
   # Preserve planned integer IDs when glmer drops an unobserved level.
   ability <- modes$subj[match(seq_len(n_subj), rownames(modes$subj)), 1L]
   item <- modes$item[match(seq_len(n_item), rownames(modes$item)), 1L]
-  result$ability <- sqrt(mean((ability - draw$subj[, 1L])^2))
-  difficulty <- -unname(lme4::fixef(fit)[1L]) - item
+  variance <- lme4::VarCorr(fit)
+  list(
+    error = NA_character_,
+    singular = lme4::isSingular(fit),
+    intercept = unname(lme4::fixef(fit)[1L]),
+    ability = ability,
+    item = item,
+    person_var = as.numeric(variance$subj[1L, 1L]),
+    item_var = as.numeric(variance$item[1L, 1L])
+  )
+}
+
+rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
+  data <- draw$trials
+  result <- data.frame(
+    ability = NA_real_, difficulty = NA_real_, difficulty_max_abs_error = NA_real_,
+    person_sd = NA_real_, item_sd = NA_real_, person_variance = NA_real_, item_variance = NA_real_,
+    singular = NA, fit_error = NA_character_
+  )
+  if (length(unique(data$y)) < 2L) {
+    result$fit_error <- "Fewer than two observed response values"
+    return(result)
+  }
+
+  n_subj <- nrow(draw$subj)
+  n_item <- nrow(draw$item)
+  fit <- fit_rasch_random_intercept_model(data, n_subj, n_item, engine = engine, control = control)
+  if (!is.na(fit$error)) {
+    result$fit_error <- fit$error
+    return(result)
+  }
+
+  result$singular <- fit$singular
+  result$ability <- sqrt(mean((fit$ability - draw$subj[, 1L])^2))
+  difficulty <- -fit$intercept - fit$item
   truth <- -unname(dgp$beta[1L]) - draw$item[, 1L]
   difficulty_error <- difficulty - truth
   result$difficulty <- sqrt(mean(difficulty_error^2))
   result$difficulty_max_abs_error <- max(abs(difficulty_error))
-  variance <- lme4::VarCorr(fit)
-  result$person_variance <- abs(variance$subj[1L, 1L] - dgp$tau_subj[1L]^2)
-  result$item_variance <- abs(variance$item[1L, 1L] - dgp$tau_item[1L]^2)
-  result$person_sd <- abs(sqrt(variance$subj[1L, 1L]) - dgp$tau_subj[1L])
-  result$item_sd <- abs(sqrt(variance$item[1L, 1L]) - dgp$tau_item[1L])
+  result$person_variance <- abs(fit$person_var - dgp$tau_subj[1L]^2)
+  result$item_variance <- abs(fit$item_var - dgp$tau_item[1L]^2)
+  result$person_sd <- abs(sqrt(fit$person_var) - dgp$tau_subj[1L])
+  result$item_sd <- abs(sqrt(fit$item_var) - dgp$tau_item[1L])
   result
 }
 
@@ -321,8 +333,22 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
 #' across replications, whereas examinee abilities \eqn{\theta_i \sim N(0, \sigma_p^2)}
 #' are drawn anew in every replication). Supports both fixed-item Marginal
 #' Maximum Likelihood (`method = "fixed_item"`) and random-item Empirical Bayes
-#' shrinkage (`method = "random_item"`), accounting explicitly for extreme
-#' all-correct / all-incorrect item failures in the assurance denominator.
+#' shrinkage (`method = "random_item"`).
+#'
+#' In fixed-item calibration, an examinee with all responses correct or all
+#' incorrect contributes to the likelihood if they answered at least one item
+#' with both response categories. Their ability is scored by the posterior mean
+#' (EAP) under the fitted normal ability distribution. A person with no such
+#' responses has missing ability. A constant item has missing difficulty, and
+#' an item with no responses has missing difficulty under either method.
+#' A missing estimate counts as a miss for each target that requires it.
+#' If the entire dataset contains fewer than two observed response categories,
+#' the replication fails under both methods. All planned replications remain
+#' in the assurance denominator.
+#'
+#' The zero mean of the examinee population identifies the origin. Comparisons
+#' across populations with unknown mean shifts require a linking design, for
+#' example common anchor items.
 #'
 #' @param item_difficulties Numeric vector of at least two finite true item
 #'   difficulties (in logits) defining the fixed item bank.
@@ -350,8 +376,10 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
 #'     difficulty targets unevaluable (counted as misses in the `nsim`
 #'     assurance denominator).
 #'   * `"random_item"`: Crossed random-intercept GLMM (`y ~ 1 + (1 | subj) + (1 | item)`),
-#'     yielding finite Empirical Bayes shrunken item difficulties even when an
-#'     administered extreme item has zero correct or zero incorrect responses.
+#'     estimating person and item effects by empirical Bayes conditional modes.
+#'     When the fit succeeds, an administered item with zero correct or zero
+#'     incorrect responses receives a finite difficulty. Shrinkage toward the
+#'     bank mean can be substantial for extreme items.
 #' @param engine Estimation engine: `"auto"` (default; selects `"mml"` for
 #'   `method = "fixed_item"` and `"cpp_laplace"` for `method = "random_item"`),
 #'   `"mml"` (built-in 21-point Gauss-Hermite MML-EM solver), `"tam"`
@@ -367,13 +395,15 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
 #' @param parallel_backend Parallel backend (`"auto"`, `"mirai"`, `"multicore"`,
 #'   or `"sequential"`).
 #' @param verbose Logical; display live progress bar with ETA (default `FALSE`).
-#' @return A list with:
+#' @return A `glmmplanr_rasch` list (see [rasch_plan_methods]) with:
 #'   * `summary`: Per-target and `joint` attainment, `n_extreme_item_reps`,
 #'     `n_evaluable`, `rmse`, Wilson bounds (`mc_lo`, `mc_hi`), and `decision`.
 #'   * `recommended_n_subj`: Smallest candidate `n_subj` achieving `PASS` on
 #'     `target == "joint"` (`NA_integer_` if none pass).
 #'   * `item_summary`: Per-item bias, RMSE, MAE, finite-estimate count, and
 #'     all-zero / all-one counts across replications at each `n_subj`.
+#'     `n_scheduled` and `component` describe the pre-missingness schedule
+#'     (see [generate_design_schedule()]).
 #'   * `replications`: Replication-level error and diagnostic table.
 #' @examples
 #' bank <- seq(-2.0, 2.0, length.out = 12)
@@ -384,7 +414,7 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
 #'   method = "fixed_item",
 #'   nsim = 10L
 #' )
-#' fb$summary
+#' summary(fb)
 #' @export
 plan_rasch_fixed_bank <- function(
   item_difficulties,
@@ -405,6 +435,9 @@ plan_rasch_fixed_bank <- function(
   parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   verbose = FALSE
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("plan_rasch_fixed_bank", environment(), match.call()))
+  }
   method <- match.arg(method)
   engine <- match.arg(engine)
   parallel_backend <- match.arg(parallel_backend)
@@ -504,7 +537,7 @@ plan_rasch_fixed_bank <- function(
 
   worker_fn <- function(tsk) {
     ns <- tsk$n_subj
-    schedule <- generate_design_schedule(des, ns, n_item)
+    schedule <- generate_design_schedule(des, ns, n_item, diagnostics = tsk$rep_idx[1L] == 1L)
     nb <- length(tsk$rep_idx)
     rows <- vector("list", nb)
     b_est_mat <- matrix(NA_real_, nrow = nb, ncol = n_item)
@@ -528,6 +561,7 @@ plan_rasch_fixed_bank <- function(
       pt_idx = tsk$pt_idx,
       rep_idx = tsk$rep_idx,
       df = do.call(rbind, rows),
+      item_exposure = schedule$item_exposure,
       b_est = b_est_mat,
       item_zero = zero_mat,
       item_all1 = all1_mat
@@ -539,7 +573,7 @@ plan_rasch_fixed_bank <- function(
     stage_label = sprintf("Fixed-Bank Rasch (%s)", method), verbose = verbose
   )
 
-  by_pt_rows <- vector("list", n_pts)
+  exposure <- by_pt_rows <- vector("list", n_pts)
   by_pt_b <- lapply(seq_len(n_pts), function(i) matrix(NA_real_, nrow = nsim, ncol = n_item))
   by_pt_z <- lapply(seq_len(n_pts), function(i) matrix(FALSE, nrow = nsim, ncol = n_item))
   by_pt_a <- lapply(seq_len(n_pts), function(i) matrix(FALSE, nrow = nsim, ncol = n_item))
@@ -547,6 +581,7 @@ plan_rasch_fixed_bank <- function(
   for (cr in chunk_out) {
     p_i <- cr$pt_idx
     if (is.null(by_pt_rows[[p_i]])) by_pt_rows[[p_i]] <- vector("list", nsim)
+    if (!is.null(cr$item_exposure)) exposure[[p_i]] <- cr$item_exposure
     ix <- cr$rep_idx
     for (k in seq_along(ix)) {
       by_pt_rows[[p_i]][[ix[k]]] <- cr$df[k, , drop = FALSE]
@@ -611,6 +646,8 @@ plan_rasch_fixed_bank <- function(
     item_summaries[[i]] <- data.frame(
       n_subj = ns,
       item_id = seq_len(n_item),
+      n_scheduled = exposure[[i]]$n_scheduled,
+      component = exposure[[i]]$component,
       true_difficulty = b_true,
       n_finite = colSums(is.finite(err_mat)),
       n_zero_correct = colSums(by_pt_z[[i]]),
@@ -632,7 +669,7 @@ plan_rasch_fixed_bank <- function(
   joint_pass <- summary_df$n_subj[summary_df$target == "joint" & summary_df$decision == "pass"]
   rec_n <- if (length(joint_pass)) min(joint_pass) else NA_integer_
 
-  list(
+  structure(list(
     summary = summary_df,
     recommended_n_subj = rec_n,
     item_summary = do.call(rbind, item_summaries),
@@ -645,7 +682,7 @@ plan_rasch_fixed_bank <- function(
     assurance = assurance,
     seed = seed,
     mc_conf_level = mc_conf_level
-  )
+  ), class = "glmmplanr_rasch")
 }
 
 simulate_fixed_bank_trials <- function(des, schedule, b_true, person_sd) {
@@ -673,93 +710,31 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
     stringsAsFactors = FALSE
   )
 
+  counts <- unit_response_counts(tr$item_id, tr$y == 1L, ni)
+  n_obs_item <- counts$observed
+  item_zero <- counts$all_incorrect
+  item_all1 <- counts$all_correct
+  metrics$extreme_item <- any(counts$unobserved | item_zero | item_all1)
   if (nrow(tr) == 0L || length(unique(tr$y)) < 2L) {
     metrics$fit_error <- "Fewer than two observed response values"
     return(list(
       metrics = metrics,
       b_est = rep(NA_real_, ni),
-      item_zero = rep(FALSE, ni),
-      item_all1 = rep(FALSE, ni)
+      item_zero = item_zero,
+      item_all1 = item_all1
     ))
   }
 
-  n_obs_item <- tabulate(tr$item_id, nbins = ni)
-  s_obs_item <- as.numeric(rowsum(tr$y, factor(tr$item_id, levels = seq_len(ni)), reorder = FALSE))
-  s_obs_item[is.na(s_obs_item)] <- 0.0
-  item_zero <- (n_obs_item > 0L) & (s_obs_item == 0.0)
-  item_all1 <- (n_obs_item > 0L) & (s_obs_item == n_obs_item)
-  metrics$extreme_item <- any(n_obs_item == 0L | item_zero | item_all1)
-
   if (method == "random_item") {
-    # Construct synthetic draw compatible with rasch_recovery_errors
-    fake_dgp <- list(
-      beta = c(`(Intercept)` = -mean(b_true)),
-      tau_subj = person_sd,
-      tau_item = stats::sd(b_true)
-    )
-    fake_draw <- list(
-      trials = tr,
-      subj = matrix(sim$theta, ncol = 1L),
-      item = matrix(mean(b_true) - b_true, ncol = 1L)
-    )
-    # Extract difficulty estimates directly so item_summary is populated too
-    if (engine == "cpp_laplace") {
-      n_obs <- nrow(tr)
-      ones <- matrix(1.0, nrow = n_obs, ncol = 1L)
-      fit <- tryCatch(
-        cpp_fit_crossed_glmm(
-          y = as.integer(tr$y), X = ones,
-          Z_subj = ones, subj_idx = as.integer(tr$subj_id) - 1L, n_subj = ns,
-          Z_item = ones, item_idx = as.integer(tr$item_id) - 1L, n_item = ni,
-          Z_testlet = matrix(0.0, nrow = n_obs, ncol = 0L),
-          testlet_idx = integer(n_obs), n_testlet = 0L,
-          chance = 0.0, corr_mode = 0L, regularized = FALSE,
-          lkj_eta = 2.0, prior_tau_sd = 0.0, prior_beta_sd = 0.0,
-          max_em_iter = 160L, max_pirls_iter = 25L, tol = 1e-4,
-          fix_cov = FALSE, compute_joint_vcov = FALSE, return_ranef = TRUE
-        ),
-        error = identity
-      )
-      if (inherits(fit, "error") || !isTRUE(fit$converged)) {
-        metrics$fit_error <- if (inherits(fit, "error")) conditionMessage(fit) else paste0("C++ Laplace status: ", fit$status)
-        return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
-      }
-      metrics$singular <- isTRUE(fit$singular)
-      ab_est <- as.numeric(fit$u_subj[, 1L])
-      it_est <- as.numeric(fit$u_item[, 1L])
-      ab_est[tabulate(tr$subj_id, nbins = ns) == 0L] <- NA_real_
-      it_est[n_obs_item == 0L] <- NA_real_
-      b_est <- -as.numeric(fit$beta[1L]) - it_est
-      v_s <- as.numeric(fit$Sigma_subj[1L, 1L])
-      if (v_s <= 1e-8) v_s <- 0.0
-    } else {
-      if (is.null(control)) control <- lme4::glmerControl(optimizer = "bobyqa")
-      warnings <- character()
-      fit <- tryCatch(withCallingHandlers(
-        suppressMessages(lme4::glmer(y ~ 1 + (1 | subj) + (1 | item), data = tr,
-                                     family = stats::binomial(), control = control)),
-        warning = function(w) {
-          warnings <<- c(warnings, conditionMessage(w))
-          invokeRestart("muffleWarning")
-        }), error = identity)
-      if (inherits(fit, "error")) {
-        metrics$fit_error <- conditionMessage(fit)
-        return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
-      }
-      conv <- fit@optinfo$conv
-      diagnostics <- c(warnings, conv$lme4$messages)
-      diagnostics <- diagnostics[!grepl("boundary \\(singular\\) fit", diagnostics)]
-      if (any(c(conv$opt, conv$lme4$code) != 0) || length(diagnostics)) {
-        metrics$fit_error <- paste(c("Fit diagnostic", unique(diagnostics)), collapse = " / ")
-        return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
-      }
-      metrics$singular <- lme4::isSingular(fit)
-      modes <- lme4::ranef(fit, condVar = FALSE)
-      ab_est <- modes$subj[match(seq_len(ns), rownames(modes$subj)), 1L]
-      it_est <- modes$item[match(seq_len(ni), rownames(modes$item)), 1L]
-      b_est <- -unname(lme4::fixef(fit)[1L]) - it_est
-      v_s <- as.numeric(lme4::VarCorr(fit)$subj[1L, 1L])
+    fit <- fit_rasch_random_intercept_model(tr, n_subj = ns, n_item = ni, engine = engine, control = control)
+    if (!is.na(fit$error)) {
+      metrics$fit_error <- fit$error
+      return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
     }
+    metrics$singular <- fit$singular
+    ab_est <- fit$ability
+    b_est <- -fit$intercept - fit$item
+    v_s <- fit$person_var
 
     b_err <- b_est - b_true
     metrics$ability <- sqrt(mean((ab_est - sim$theta)^2))
@@ -782,7 +757,7 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
     item_names <- sprintf("i%04d", seq_len(ni))
     resp <- matrix(NA_integer_, nrow = ns, ncol = ni, dimnames = list(NULL, item_names))
     resp[cbind(tr$subj_id, tr$item_id)] <- as.integer(tr$y)
-    obs_s <- which(rowSums(!is.na(resp)) > 0L)
+    obs_s <- which(rowSums(!is.na(resp[, estimable, drop = FALSE])) > 0L)
     if (length(obs_s) < 2L) {
       metrics$fit_error <- "Fewer than two observed participants"
       return(list(metrics = metrics, b_est = b_est, item_zero = item_zero, item_all1 = item_all1))
@@ -836,12 +811,12 @@ fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 20
   M[idx] <- 1.0
   Y[idx] <- as.numeric(trials$y)
 
-  obs_s <- which(rowSums(M) > 0)
+  est_j <- which(estimable)
+  obs_s <- which(rowSums(M[, est_j, drop = FALSE]) > 0)
   if (length(obs_s) < 2L) {
     return(list(error = "Fewer than two observed participants"))
   }
 
-  est_j <- which(estimable)
   M_sub <- M[obs_s, est_j, drop = FALSE]
   Y_sub <- Y[obs_s, est_j, drop = FALSE]
   n_sub <- colSums(M_sub)

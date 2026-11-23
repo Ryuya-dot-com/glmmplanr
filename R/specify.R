@@ -7,6 +7,15 @@
 #' `"prob"`) scale, along with the estimation backend, estimation-failure
 #' accounting policy, and Monte Carlo uncertainty confidence level.
 #'
+#' For a population difference such as 60% versus 70%, choose `scale = "pp"`
+#' (10 percentage points). The default targets a conditional logit coefficient.
+#' For a quick marginal pp grid, set `prob_se_method = "joint_delta"`.
+#' A surrogate search already screens cheaply in Stage 1. Final grid or
+#' surrogate verification with the default bootstrap can require 99 refits
+#' per simulated study. To check one selected pair with bootstrap intervals,
+#' specify the final method and call [validate_design_point()] with a fresh seed.
+#' [formula()] and [family()] give the planned model structure and analysis link.
+#'
 #' @param dgp A `"glmmplanr_dgp"` object produced by [calibrate_dgp()].
 #' @param effect Character string naming the focal fixed effect (e.g.,
 #'   `"exposure"`, `"spacing"`, or `"exposure:spacing"`). Both factor-level term
@@ -72,8 +81,15 @@
 #'   intervals used to classify borderline candidates as `"pass"`,
 #'   `"indeterminate"`, or `"fail"` (default `0.95`; Morris et al., 2019).
 #' @param engine Primary estimation backend: `"glmmTMB"`, `"lme4_fast"`,
-#'   `"lme4"`, `"stan_laplace"`, `"stan_hmc"`, `"bayes_laplace"`, or
-#'   `"cpp_laplace"`.
+#'   `"lme4"`, `"stan_hmc"`, `"bayes_laplace"`, `"cpp_laplace"`, or legacy alias
+#'   `"stan_laplace"` (deprecated; executes full HMC/NUTS via `"stan_hmc"`
+#'   rather than Laplace approximation). Unpenalized engines flag separation if
+#'   all observed responses in any fixed-effect design cell are 0 or all are 1.
+#'   Each cell has its own linear predictor in the factorial model. The primary
+#'   fit is then invalid, and a bootstrap refit with this pattern is also
+#'   invalid. Regularized engines can return finite estimates in these cases.
+#'   Check sensitivity to the fixed-effect prior. An individual participant or
+#'   item with a constant response pattern can contribute to either fit.
 #' @param stage1_engine Fast estimation backend used during Stage-1 surrogate
 #'   exploration before Stage-2 verification.
 #' @param stage1_re Random-effect covariance structure used during fast Stage-1
@@ -88,11 +104,19 @@
 #' @param analysis_link Link function used in the analysis model: `"match_dgp"`
 #'   (default) or `"logit"`.
 #' @param lkj_eta Shape parameter \eqn{\eta} for the LKJ correlation prior in
-#'   Bayesian / regularized engines (default `2.0`).
+#'   Stan (default `2.0`); in `"bayes_laplace"`, controls unit-diagonal
+#'   correlation shrinkage \eqn{n / (n + 2\max(\eta - 1, 0))} toward the
+#'   identity matrix.
 #' @param prior_beta_sd Weakly informative Normal prior SD on non-intercept
 #'   fixed effects in Bayesian engines (default `2.5`).
-#' @param prior_tau_sd Prior scale for random-effect SDs in Bayesian engines
-#'   (default `1.5`).
+#' @param prior_tau_sd Scale parameter for the Half-Student-t(\eqn{\nu = 3})
+#'   prior on random-effect SDs in both Stan (`"stan_hmc"`) and the built-in
+#'   regularized Laplace engine (`"bayes_laplace"`), default `1.5`. Whereas
+#'   Stan performs full joint HMC/NUTS over \eqn{(\beta, \tau, L, z)},
+#'   `"bayes_laplace"` uses an EM-Laplace approximation with exact
+#'   \eqn{\log \tau}-space Half-Student-t(3) MAP variance updates and
+#'   LKJ-scaled correlation shrinkage, so finite-sample intervals can still
+#'   differ between the two engines.
 #' @param prob_boot Number of parametric bootstrap refits per final marginal
 #'   probability-scale replication when `prob_se_method = "bootstrap"`
 #'   (default `99`). At least 90% of refits must succeed.
@@ -104,6 +128,11 @@
 #'     uncertainty in fixed effects \eqn{\beta} and random-effect log-SDs
 #'     \eqn{\theta = \log \tau} (also used automatically in Stage-1 screening).
 #' @return An S3 object of class `"glmmplanr_spec"`.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' spec <- specify_target(dgp, "condition", scale = "pp", criterion = "ci_width", ci_width = 12)
+#' spec$true_effect_target
 #' @export
 specify_target <- function(
   dgp,
@@ -138,6 +167,12 @@ specify_target <- function(
   if (!is.numeric(prob_boot) || length(prob_boot) != 1L || !is.finite(prob_boot) ||
       prob_boot < 2 || prob_boot > .Machine$integer.max || prob_boot != floor(prob_boot)) {
     cli::cli_abort("{.arg prob_boot} must be an integer of at least 2.")
+  }
+  for (scale_name in c("lkj_eta", "prior_beta_sd", "prior_tau_sd")) {
+    value <- get(scale_name, inherits = FALSE)
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) || value <= 0) {
+      cli::cli_abort("{.arg {scale_name}} must be a finite positive scalar.")
+    }
   }
   engine_was_missing <- missing(engine)
   scale <- match.arg(scale)
@@ -223,9 +258,17 @@ specify_target <- function(
     cli::cli_abort("{.arg mc_conf_level} must lie strictly in (0.5, 1).")
   }
 
+  if (identical(engine, "stan_laplace") && !engine_was_missing) {
+    cli::cli_warn(c(
+      "{.code engine = 'stan_laplace'} is a deprecated alias for {.code 'stan_hmc'}.",
+      "i" = "It runs full Stan HMC/NUTS rather than Laplace approximation. Specify {.code engine = 'stan_hmc'} for Stan HMC or {.code engine = 'bayes_laplace'} for C++ regularized Laplace."
+    ))
+  }
+
   resolved_engine <- resolve_available_engine(
     engine, chance = chance_use, notify = !engine_was_missing
   )
+  engine_fallback <- !identical(resolved_engine, engine)
   if (is.null(stage1_engine)) {
     stage1_engine <- if (resolved_engine %in% c("stan_laplace", "stan_hmc", "bayes_laplace")) {
       "bayes_laplace"
@@ -261,6 +304,7 @@ specify_target <- function(
       mc_conf_level = mc_conf_level,
       requested_engine = engine,
       engine = resolved_engine,
+      engine_fallback = engine_fallback,
       stage1_engine = stage1_engine,
       stage1_re = resolved_stage1_re,
       on_singular = on_singular,
@@ -328,8 +372,7 @@ resolve_available_engine <- function(engine, chance = 0.0, notify = TRUE) {
     if (requireNamespace("glmmTMB", quietly = TRUE)) {
       return("glmmTMB")
     }
-    if (notify && is.null(.glmmplanr_env$notified$glmmTMB)) {
-      .glmmplanr_env$notified$glmmTMB <- TRUE
+    if (notify) {
       cli::cli_inform(c(
         "i" = "{.pkg glmmTMB} is not installed; delegating {.val glmmTMB} to glmmplanr's compiled C++ Laplace engine ({.val cpp_laplace})."
       ))
@@ -340,10 +383,10 @@ resolve_available_engine <- function(engine, chance = 0.0, notify = TRUE) {
     if (has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE)) {
       return(engine)
     }
-    if (notify && is.null(.glmmplanr_env$notified[[engine]])) {
-      .glmmplanr_env$notified[[engine]] <- TRUE
-      cli::cli_inform(c(
-        "i" = "No Stan backend ({.pkg cmdstanr}/{.pkg rstan}) is installed; delegating {.val {engine}} to glmmplanr's compiled C++ Bayesian Laplace engine ({.val bayes_laplace})."
+    if (notify) {
+      cli::cli_warn(c(
+        "No Stan backend ({.pkg cmdstanr}/{.pkg rstan}) is installed; falling back from {.val {engine}} to {.val bayes_laplace}.",
+        "i" = "{.val bayes_laplace} uses EM-Laplace approximation rather than HMC/NUTS; finite-sample interval widths can differ from Stan."
       ))
     }
     return("bayes_laplace")
@@ -351,6 +394,7 @@ resolve_available_engine <- function(engine, chance = 0.0, notify = TRUE) {
   engine
 }
 
+#' @rdname print.glmmplanr_design
 #' @export
 print.glmmplanr_spec <- function(x, ...) {
   cli::cli_h2("glmmplanr Target & Estimation Specification")
@@ -375,5 +419,7 @@ print.glmmplanr_spec <- function(x, ...) {
     "Failure accounting: {.val {x$failure_policy}} | MC confidence level: {round(x$mc_conf_level * 100, 1)}%",
     "Engine: Stage 1 = {.val {x$stage1_engine}} -> Final = {.val {x$engine}} (requested: {.val {x$requested_engine}})"
   ))
+  cli::cli_text("{analysis_description(x)}")
+  cli::cli_text("Model: {.code {deparse1(stats::formula(x))}}")
   invisible(x)
 }

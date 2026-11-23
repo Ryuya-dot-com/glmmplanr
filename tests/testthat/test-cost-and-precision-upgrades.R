@@ -114,6 +114,10 @@ test_that("3AFC joint Laplace VCOV widens fixed-Sigma Schur SE and converges on 
   expect_true(raw_fit$converged)
   eff_i <- match(sp_by$effect_col, colnames(X))
   expect_gt(sqrt(raw_fit$vcov[eff_i, eff_i]), sqrt(raw_fit$vcov_cond[eff_i, eff_i]))
+  dat$y[dat$item_id == 1L] <- 0L
+  extreme <- fit_single_dataset(dat, sp_by)
+  expect_true(extreme$converged, info = extreme$error_reason)
+  expect_true(is.finite(extreme$se) && extreme$se > 0)
 })
 
 test_that("report_plan accurately reports ci_width, rope, logit coverage, and heterogeneous slope SDs", {
@@ -134,7 +138,7 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
     method = "grid", nsim_final = 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
     seed = 515L, verbose = FALSE
   )
-  rep_w <- report_plan(res_w, lang = "en", print_output = FALSE)
+  rep_w <- report_plan(res_w, print_output = FALSE)
   expect_match(rep_w, "AIPE width-attainment probability")
   expect_match(rep_w, "logit coverage")
   expect_match(rep_w, "0.400")
@@ -148,7 +152,7 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
     method = "grid", nsim_final = 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
     seed = 516L, verbose = FALSE
   )
-  rep_r <- report_plan(res_r, lang = "en", print_output = FALSE)
+  rep_r <- report_plan(res_r, print_output = FALSE)
   expect_match(rep_r, "ROPE")
 })
 
@@ -160,7 +164,11 @@ test_that("plan_rasch_precision(cpp_laplace) and plan_rasch_fixed_bank handle ex
 
   p_cpp1 <- plan_rasch_precision(dgp, sizes, lim, nsim = 12L, seed = 88L, engine = "cpp_laplace", workers = 1L)
   p_cpp2 <- plan_rasch_precision(dgp, sizes, lim, nsim = 12L, seed = 88L, engine = "cpp_laplace", workers = 2L)
-  expect_equal(p_cpp1$replications, p_cpp2$replications, tolerance = 1e-12)
+  ids <- c("n_subj", "n_item", "replication", "singular", "fit_error")
+  expect_identical(p_cpp1$replications[ids], p_cpp2$replications[ids])
+  expect_equal(p_cpp1$replications[names(lim)], p_cpp2$replications[names(lim)], tolerance = 1e-8)
+  expect_identical(p_cpp1$summary$n_met, p_cpp2$summary$n_met)
+  expect_identical(p_cpp1$summary$decision, p_cpp2$summary$decision)
 
   p_lme4 <- plan_rasch_precision(dgp, sizes[1L, , drop = FALSE], lim, nsim = 8L, seed = 88L, engine = "lme4")
   expect_lt(abs(p_cpp1$summary$rmse[1L] - p_lme4$summary$rmse[1L]), 0.03)

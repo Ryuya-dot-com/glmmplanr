@@ -24,3 +24,7 @@ Maps between linear predictor \eqn{\eta \in (-\infty, \infty)} and response
 probability \eqn{P \in (g, 1)} with lower guessing asymptote \eqn{g \in [0, 1)}:
 \eqn{P = g + (1 - g)\,\mathrm{logit}^{-1}(\eta)}.
 }
+\examples{
+eta <- mafc_qlogis(0.7, chance = 1/3)
+mafc_plogis(eta, chance = 1/3)
+}

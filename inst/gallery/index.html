@@ -148,6 +148,7 @@
       </p>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
+      <a class="btn" href="../doc/planning-workflows.html">Workflow guide</a>
       <button class="btn" id="themeBtn" onclick="toggleTheme()">Toggle Dark / Light</button>
     </div>
   </div>
@@ -225,17 +226,18 @@ dgp1 &lt;- calibrate_dgp(
 )
 spec1 &lt;- specify_target(
   dgp1, effect = "exposure", scale = "pp", criterion = "both",
-  power_min = 0.80, ci_width = 12.0, engine = "bayes_laplace"
+  power_min = 0.80, ci_width = 12.0, prob_se_method = "joint_delta", engine = "bayes_laplace"
 )
 res1 &lt;- optimize_sample_size(
   spec1, n_subj_range = c(24, 80), n_item_range = c(16, 48),
-  prefer = "balanced", workers = 4, seed = 810101
+  prefer = "balanced", method = "grid", nsim_init = 60, nsim_final = 180,
+  nsim_topup = 80, workers = 2, seed = 810101
 )</pre>
         </div>
       </div>
     </div>
     <div class="card" style="margin-top:16px;">
-      <h3>Auto-Generated Registered Report Justification (<code>report_plan(res1, lang = "en")</code>)</h3>
+      <h3>Sample Size Justification (<code>report_plan(res1)</code>)</h3>
       <div class="report-box" id="r1Report"></div>
     </div>
   </section>
@@ -268,7 +270,7 @@ res1 &lt;- optimize_sample_size(
           <span class="muted" style="align-self:center; font-weight:600;">Guessing Floor <i>g</i>:</span>
           <button class="btn active" id="g-0" onclick="setGuess(0, 'g-0')">Binary (g = 0)</button>
           <button class="btn" id="g-25" onclick="setGuess(0.25, 'g-25')">4AFC (g = 0.25)</button>
-          <button class="btn" id="g-33" onclick="setGuess(0.3333333, 'g-33')">3AFC (g = 1/3)</button>
+          <button class="btn" id="g-33" onclick="setGuess(1/3, 'g-33')">3AFC (g = 1/3)</button>
         </div>
         <div id="ncReadout"></div>
       </div>
@@ -276,7 +278,7 @@ res1 &lt;- optimize_sample_size(
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div class="card">
           <h3>Incomplete-Block Pre-Registration Check (<code>validate_design_point</code>)</h3>
-          <p class="muted">32-item stimulus bank, <code>items_per_subject = 16</code> (50% partial presentation), 4% participant dropout + 5% trial missingness (140 replications/point).</p>
+          <p class="muted">32-item stimulus bank, <code>items_per_subject = 16</code> (50% partial presentation), 4% participant dropout + 5% trial missingness (140 replications/point). At 96 participants the lower power bound is 79.8%, leaving the 80% target unresolved.</p>
           <table class="data-tbl" id="r2Table"></table>
         </div>
         <div class="card">
@@ -294,7 +296,9 @@ dgp2 &lt;- calibrate_dgp(
   des2, cell_probs = c(control = 0.60, intervention = 0.72),
   subj_sd = 1.05, item_sd = 0.80, slope_sd_ratio = 0
 )
-spec2 &lt;- specify_target(dgp2, effect = "arm", scale = "pp", power_min = 0.80)
+spec2 &lt;- specify_target(dgp2, effect = "arm", scale = "pp", criterion = "power",
+  power_min = 0.80, prob_estimand = "marginal", prob_se_method = "joint_delta",
+  engine = "bayes_laplace")
 validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030)</pre>
         </div>
       </div>
@@ -344,22 +348,52 @@ validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030
             <button class="btn" onclick="copyCode('code-r3', this)">Copy R Code</button>
           </div>
           <pre class="code" id="code-r3">des3 &lt;- design_testlet(
-  factors = list(glossing = c("none", "marginal_gloss")),
-  testlet_size = 4L, attrition = 0.03
+  factors      = list(glossing = c("none", "marginal_gloss")),
+  testlet_size = 4L,
+  contrast     = "sum",
+  attrition    = 0.03
 )
+probs3 &lt;- cell_probs_from_diffs(des3, baseline_prob = 0.66, effects_pp = c(glossing = 8))
 dgp3 &lt;- calibrate_dgp(
-  des3, cell_probs = c(none = 0.62, marginal_gloss = 0.70),
-  chance = 0.25, subj_sd = 0.75, item_sd = 0.50,
-  testlet_sd = 0.45, participant_testlet_sd = 0.30
+  des3,
+  cell_probs             = probs3,
+  chance                 = 0.25,
+  subj_sd                = 0.75,
+  item_sd                = 0.50,
+  testlet_sd             = 0.45,
+  participant_testlet_sd = 0.30,
+  slope_sd_ratio         = 0.20,
+  corr_structure         = 0.10
+)
+spec3 &lt;- specify_target(
+  dgp3,
+  effect         = "glossing",
+  scale          = "pp",
+  prob_estimand  = "marginal",
+  criterion      = "power",
+  power_min      = 0.80,
+  prob_se_method = "joint_delta",
+  engine         = "bayes_laplace"
 )
 scens3 &lt;- scenario_dgps(
-  dgp3, effect = "glossing",
+  dgp3,
+  effect          = "glossing",
   effect_diffs_pp = c(conservative_6pp = 6, standard_8pp = 8, optimistic_10pp = 10)
 )
 res3 &lt;- optimize_sample_size(
-  specify_target(dgp3, "glossing", scale = "pp", power_min = 0.80),
-  n_subj_range = c(24, 72), n_item_range = c(16, 48),
-  scenarios = scens3, standard_scenario = "standard_8pp", seed = 830303
+  spec3,
+  n_subj_range      = c(24, 72),
+  n_item_range      = c(16, 48),
+  prefer            = "balanced",
+  scenarios         = scens3,
+  standard_scenario = "standard_8pp",
+  method            = "grid",
+  nsim_init         = 50,
+  nsim_final        = 150,
+  nsim_topup        = 60,
+  workers           = 2L,
+  seed              = 830303,
+  verbose           = FALSE
 )</pre>
         </div>
       </div>
@@ -672,18 +706,16 @@ function setR1Prefer(p) {
   renderR1();
 }
 
-// Gauss-Hermite 11-node quadrature for live Non-Collapsibility Calculator
-const GH_X = [-3.66847, -2.78329, -2.02595, -1.32656, -0.65681, 0, 0.65681, 1.32656, 2.02595, 2.78329, 3.66847];
-const GH_W = [0.0000014, 0.000154, 0.00453, 0.04992, 0.22715, 0.43649, 0.22715, 0.04992, 0.00453, 0.000154, 0.0000014];
-
+// Integrate over a standard normal. Outside +/-9 SD the omitted mass is below 3e-19.
 function margProb(eta, totSd, g) {
+  const step = 0.075;
   let acc = 0;
-  for (let k = 0; k < GH_X.length; k++) {
-    const z = eta + Math.SQRT2 * totSd * GH_X[k];
-    const pl = 1 / (1 + Math.exp(-z));
-    acc += GH_W[k] * (g + (1 - g) * pl);
+  for (let k = 0; k <= 240; k++) {
+    const z = (k - 120) * step;
+    const weight = (k === 0 || k === 240) ? 1 : (k % 2 === 0 ? 2 : 4);
+    acc += weight * Math.exp(-z * z / 2) / (1 + Math.exp(-eta - totSd * z));
   }
-  return acc;
+  return g + (1 - g) * acc * step / (3 * Math.sqrt(2 * Math.PI));
 }
 
 function invertMarg(targetP, totSd, g) {
@@ -730,7 +762,7 @@ function updateNC() {
 
   document.getElementById("ncReadout").innerHTML = `
     <div class="kpi-row">
-      <div class="kpi"><div class="kpi-label">Calibrated &beta;</div><div class="kpi-val" style="color:var(--primary);">${betaCal.toFixed(3)}</div><div class="kpi-sub">Exact +${targetDiffPp.toFixed(1)} pp marginal</div></div>
+      <div class="kpi"><div class="kpi-label">Calibrated &beta;</div><div class="kpi-val" style="color:var(--primary);">${betaCal.toFixed(3)}</div><div class="kpi-sub">Target +${targetDiffPp.toFixed(1)} pp marginal</div></div>
       <div class="kpi"><div class="kpi-label">Naive qlogis &beta;</div><div class="kpi-val">${betaNaive.toFixed(3)}</div><div class="kpi-sub">${((betaCal/betaNaive - 1)*100).toFixed(0)}% slope gap</div></div>
       <div class="kpi"><div class="kpi-label">Naive Marginal Diff</div><div class="kpi-val" style="color:var(--fail);">+${naiveDiffPp.toFixed(1)} pp</div><div class="kpi-sub">Distorted by ${(naiveDiffPp - targetDiffPp).toFixed(1)} pp</div></div>
     </div>

@@ -17,6 +17,8 @@ optimize_sample_size(
   nsim_init = 80L,
   nsim_final = 1000L,
   nsim_topup = 0L,
+  topup_policy = c("independent", "pooled"),
+  mc_adjustment = c("none", "bonferroni"),
   n_verify = 4L,
   early_stop = TRUE,
   nsim_sensitivity = 200L,
@@ -77,6 +79,26 @@ Carlo replications automatically run on Stage-2 candidates whose Monte
 Carlo confidence interval straddles the target (\code{decision_status == "indeterminate"}),
 default \code{0L}.}
 
+\item{topup_policy}{How top-up replications are evaluated when \code{nsim_topup > 0L}:
+\itemize{
+\item \code{"independent"} (default): Evaluates \code{"indeterminate"} candidates solely
+on the fresh independent top-up batch without pooling with Stage-2
+replications, avoiding optional-stopping bias in the Wilson bounds.
+\item \code{"pooled"}: Pools Stage-2 and top-up replications for exploratory precision
+narrowing (emits a warning and flags \code{search_meta$adaptive_pooled = TRUE}
+because data-adaptive pooling invalidates nominal fixed-sample Wilson
+coverage).
+}}
+
+\item{mc_adjustment}{Multiplicity adjustment applied to Stage-2 Wilson Monte
+Carlo intervals across verified candidates (and scenarios):
+\itemize{
+\item \code{"none"} (default): Pointwise \code{spec$mc_conf_level} Wilson intervals.
+\item \code{"bonferroni"}: Simultaneous Bonferroni-adjusted Wilson confidence level
+\code{1 - (1 - spec$mc_conf_level) / m} across the \code{m} verified Stage-2
+candidate (or candidate-by-scenario) decisions.
+}}
+
 \item{n_verify}{Number of Pareto-frontier candidate designs verified at
 \code{nsim_final} replications in Stage 2 (default \code{4L}).}
 
@@ -109,7 +131,8 @@ requires \code{decision_status == "pass"} in every requested scenario.
 If \code{feasible} is false, \code{optimal} identifies a diagnostic candidate and
 \code{optimal_high_confidence} is null. \code{verified_pareto} contains confirmed designs.
 \code{verified} includes the response-pattern diagnostics of \code{\link[=evaluate_design_point]{evaluate_design_point()}}.
-After a top-up of an older plan, \code{pattern_nsim} counts only diagnosed replications.
+When pooling with a saved plan that omits response-pattern counts,
+\code{pattern_nsim} counts only diagnosed replications.
 }
 \description{
 Searches the balanced \verb{(N_subj, N_item)} lattice using a monotone anisotropic
@@ -121,4 +144,15 @@ Carlo uncertainty (\code{"pass"} / \code{"indeterminate"} / \code{"fail"}), opti
 pre-specified independent top-up replications, and multi-scenario robustness.
 For person abilities, item difficulties, or population variance components
 in a random-item Rasch model, use \code{\link[=plan_rasch_precision]{plan_rasch_precision()}}.
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+spec <- specify_target(dgp, "condition", criterion = "power",
+                       engine = "bayes_laplace", analysis_re = "intercept_only")
+# Five replications demonstrate the output. Use more to make a design decision.
+plan <- optimize_sample_size(spec, c(16, 18), 8, method = "grid",
+  nsim_init = 5L, nsim_final = 5L, n_verify = 2L, nsim_sensitivity = 0L,
+  workers = 1L, verbose = FALSE)
+plan$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 }

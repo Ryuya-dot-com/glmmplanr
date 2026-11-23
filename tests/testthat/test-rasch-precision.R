@@ -78,6 +78,9 @@ test_that("Rasch search validates its inputs and retains only non-dominated pass
   g <- calibrate_dgp(design_crossed(list()), 0.6, subj_sd = 0.6, item_sd = 0.6)
   sizes <- data.frame(n_subj = c(40, 32, 40), n_item = c(12, 12, 12))
   plan <- plan_rasch_precision(g, sizes, c(ability = 10), nsim = 3, assurance = 0.2)
+  expect_match(report_plan(plan, FALSE), "Non-dominated passing designs.*32 x 12")
+  expect_s3_class(plot(plan), "ggplot")
+  expect_error(plot(plan, type = "items"), "fixed bank")
   expect_equal(plan$pareto$n_subj, 32)
   expect_equal(nrow(plan$replications), 6L)
   expect_equal(plan, plan_rasch_precision(g, sizes[3:1, ], c(ability = 10), nsim = 3, assurance = 0.2))
@@ -93,5 +96,71 @@ test_that("Rasch search validates its inputs and retains only non-dominated pass
                        calibrate_dgp(design_crossed(list()), 0.65, chance = 1/3,
                                      subj_sd = 0.8, item_sd = 0.6))) {
     expect_error(plan_rasch_precision(invalid, sizes, c(ability = 1)), "Rasch")
+  }
+})
+
+test_that("fixed-bank diagnostics count each item's observed rows, including failed fits", {
+  b <- seq(-1.5, 1.5, length.out = 6L)
+  des <- design_crossed(list(), allocation = "crossed", items_per_subject = 2L)
+  schedule <- generate_design_schedule(des, 12L, length(b))
+  stream <- derive_rep_substreams(allocate_stage_point_streams(1L, 1L, 1L, 1L)[[1L]], 1L)[[1L]]
+  sim <- with_rng_stream(stream, simulate_fixed_bank_trials(des, schedule, b, .8))
+  trials <- sim$trials
+  n <- tabulate(trials$item_id, length(b))
+  yes <- tabulate(trials$item_id[trials$y == 1], length(b))
+  out <- plan_rasch_fixed_bank(b, 12L, c(difficulty = 1), items_per_subject = 2L,
+                               nsim = 1L, seed = 1L)
+  expect_equal(out$item_summary$n_zero_correct, as.integer(n > 0 & yes == 0))
+  expect_equal(out$item_summary$n_all_correct, as.integer(n > 0 & n == yes))
+  for (value in 0:1) {
+    sim$trials <- trials[trials$item_id != 2L, ]
+    sim$trials$y[] <- value
+    obs <- tabulate(sim$trials$item_id, length(b)) > 0L
+    fit <- eval_fixed_bank_replication(sim, b, .8, "fixed_item", "mml")
+    expect_true(fit$metrics$extreme_item)
+    expect_identical(fit$item_all1, obs & value == 1)
+    expect_identical(fit$item_zero, obs & value == 0)
+  }
+})
+
+test_that("fixed-bank EAP at both extreme scores agrees with adaptive integration", {
+  set.seed(400)
+  n <- 48L
+  b <- seq(-1.5, 1.5, length.out = 12L)
+  theta <- rnorm(n)
+  tr <- expand.grid(subj_id = seq_len(n), item_id = seq_along(b))
+  tr$y <- rbinom(nrow(tr), 1L, plogis(theta[tr$subj_id] - b[tr$item_id]))
+  tr$y[tr$subj_id == 1L] <- 0L
+  tr$y[tr$subj_id == 2L] <- 1L
+  fit <- fit_rasch_fixed_mml(tr, n, length(b), rep(TRUE, length(b)))
+  expect_true(is.na(fit$error))
+  for (value in 0:1) {
+    posterior <- function(x) {
+      likelihood <- vapply(x, function(t) prod(plogis(t - fit$b_est, lower.tail = value == 1L)),
+                           numeric(1))
+      likelihood * dnorm(x, sd = sqrt(fit$person_var))
+    }
+    mass <- integrate(posterior, -Inf, Inf, abs.tol = 1e-10)$value
+    mean_theta <- integrate(function(x) x * posterior(x), -Inf, Inf, abs.tol = 1e-10)$value / mass
+    expect_lt(abs(fit$ability[value + 1L] - mean_theta), 5e-5)
+  }
+})
+
+test_that("a participant with only constant items has no fixed-bank ability estimate", {
+  b <- seq(-1.4, 1.4, length.out = 8L)
+  design <- design_crossed(list(), items_per_subject = 3L)
+  schedule <- generate_design_schedule(design, 40L, 8L)
+  stream <- derive_rep_substreams(allocate_stage_point_streams(1L, 1L, 1L, 1L)[[1L]], 1L)[[1L]]
+  sim <- with_rng_stream(stream, simulate_fixed_bank_trials(design, schedule, b, .8))
+  sim$trials <- rbind(sim$trials[c("subj_id", "item_id", "y")],
+                      data.frame(subj_id = 41L, item_id = 9L, y = 1L))
+  sim$n_subj <- 41L
+  sim$n_item <- 9L
+  sim$theta <- c(sim$theta, 0)
+  for (engine in c("mml", if (requireNamespace("TAM", quietly = TRUE)) "tam")) {
+    fit <- eval_fixed_bank_replication(sim, c(b, 0), .8, "fixed_item", engine)
+    expect_true(is.na(fit$metrics$ability))
+    expect_true(is.na(fit$b_est[9L]))
+    expect_true(all(is.finite(fit$b_est[1:8])))
   }
 })

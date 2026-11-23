@@ -33,9 +33,9 @@ data {
   int<lower=0, upper=1> marginal;
   real<lower=0, upper=0.99> chance;
   int<lower=0, upper=1> corr_mode;
-  real<lower=0.5> lkj_eta;
-  real<lower=0.1> prior_beta_sd;
-  real<lower=0.1> prior_tau_sd;
+  real<lower=0> lkj_eta;
+  real<lower=0> prior_beta_sd;
+  real<lower=0> prior_tau_sd;
 }
 parameters {
   vector[P] beta;

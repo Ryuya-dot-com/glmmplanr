@@ -52,3 +52,16 @@ test_that("C++ Laplace, Regularized Bayes Laplace, and lme4 engines run and prod
   expect_equal(nrow(st), 4L)
   expect_s3_class(as_gt(st), "gt_tbl")
 })
+
+test_that("the regularized engine distinguishes small prior scales", {
+  des <- design_crossed(list(arm = c("a", "b")), allocation = "between_subj",
+                        contrast = "treatment")
+  dgp <- calibrate_dgp(des, c(.72, .80), subj_sd = .8, item_sd = .6, slope_sd_ratio = 0)
+  width <- function(s) {
+    spec <- specify_target(dgp, "arm", engine = "bayes_laplace", prior_tau_sd = s,
+                           on_singular = "flag_only")
+    evaluate_design_point(spec, 32, 12, nsim = 3, stream_seeds = 881)$logit_ci_width_mean
+  }
+  expect_lt(width(.1), width(.5))
+  expect_error(width(0), "prior_tau_sd")
+})

@@ -60,8 +60,10 @@ responses have no finite fixed-item MLE (\code{NA_real_}), rendering bank-wide
 difficulty targets unevaluable (counted as misses in the \code{nsim}
 assurance denominator).
 \item \code{"random_item"}: Crossed random-intercept GLMM (\code{y ~ 1 + (1 | subj) + (1 | item)}),
-yielding finite Empirical Bayes shrunken item difficulties even when an
-administered extreme item has zero correct or zero incorrect responses.
+estimating person and item effects by empirical Bayes conditional modes.
+When the fit succeeds, an administered item with zero correct or zero
+incorrect responses receives a finite difficulty. Shrinkage toward the
+bank mean can be substantial for extreme items.
 }}
 
 \item{engine}{Estimation engine: \code{"auto"} (default; selects \code{"mml"} for
@@ -88,7 +90,7 @@ or \code{"sequential"}).}
 \item{verbose}{Logical; display live progress bar with ETA (default \code{FALSE}).}
 }
 \value{
-A list with:
+A \code{glmmplanr_rasch} list (see \link{rasch_plan_methods}) with:
 \itemize{
 \item \code{summary}: Per-target and \code{joint} attainment, \code{n_extreme_item_reps},
 \code{n_evaluable}, \code{rmse}, Wilson bounds (\code{mc_lo}, \code{mc_hi}), and \code{decision}.
@@ -96,6 +98,8 @@ A list with:
 \code{target == "joint"} (\code{NA_integer_} if none pass).
 \item \code{item_summary}: Per-item bias, RMSE, MAE, finite-estimate count, and
 all-zero / all-one counts across replications at each \code{n_subj}.
+\code{n_scheduled} and \code{component} describe the pre-missingness schedule
+(see \code{\link[=generate_design_schedule]{generate_design_schedule()}}).
 \item \code{replications}: Replication-level error and diagnostic table.
 }
 }
@@ -105,8 +109,23 @@ pre-specified vector of item difficulties \code{item_difficulties} (held constan
 across replications, whereas examinee abilities \eqn{\theta_i \sim N(0, \sigma_p^2)}
 are drawn anew in every replication). Supports both fixed-item Marginal
 Maximum Likelihood (\code{method = "fixed_item"}) and random-item Empirical Bayes
-shrinkage (\code{method = "random_item"}), accounting explicitly for extreme
-all-correct / all-incorrect item failures in the assurance denominator.
+shrinkage (\code{method = "random_item"}).
+}
+\details{
+In fixed-item calibration, an examinee with all responses correct or all
+incorrect contributes to the likelihood if they answered at least one item
+with both response categories. Their ability is scored by the posterior mean
+(EAP) under the fitted normal ability distribution. A person with no such
+responses has missing ability. A constant item has missing difficulty, and
+an item with no responses has missing difficulty under either method.
+A missing estimate counts as a miss for each target that requires it.
+If the entire dataset contains fewer than two observed response categories,
+the replication fails under both methods. All planned replications remain
+in the assurance denominator.
+
+The zero mean of the examinee population identifies the origin. Comparisons
+across populations with unknown mean shifts require a linking design, for
+example common anchor items.
 }
 \examples{
 bank <- seq(-2.0, 2.0, length.out = 12)
@@ -117,5 +136,5 @@ fb <- plan_rasch_fixed_bank(
   method = "fixed_item",
   nsim = 10L
 )
-fb$summary
+summary(fb)
 }

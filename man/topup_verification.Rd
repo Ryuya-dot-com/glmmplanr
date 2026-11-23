@@ -7,6 +7,7 @@
 topup_verification(
   result,
   nsim_extra = 1000L,
+  topup_policy = c("independent", "pooled"),
   workers = result$search_meta$workers,
   parallel_backend = "auto",
   verbose = TRUE
@@ -17,6 +18,17 @@ topup_verification(
 
 \item{nsim_extra}{Positive integer number of independent additional
 replications per borderline candidate (default \code{1000L}).}
+
+\item{topup_policy}{How top-up replications are used to update borderline
+candidates:
+\itemize{
+\item \code{"independent"} (default): Evaluates each \code{"indeterminate"} candidate
+solely on the fresh \code{nsim_extra} batch without pooling prior Stage-2
+draws, preserving nominal fixed-sample Wilson coverage.
+\item \code{"pooled"}: Pools prior and new replications (emits a warning and flags
+\code{search_meta$adaptive_pooled = TRUE} because data-adaptive pooling
+invalidates nominal fixed-sample Wilson coverage).
+}}
 
 \item{workers}{Integer number of parallel workers.}
 
@@ -33,4 +45,10 @@ Executes \code{nsim_extra} fresh, independent Monte Carlo replications (using a
 new L'Ecuyer-CMRG top-level stage slot) on any \code{"indeterminate"} candidates in
 an existing \code{"glmmplanr_result"} object to narrow simulation uncertainty near
 the target threshold.
+}
+\examples{
+# Create the five-replication demonstration plan from the optimizer help.
+example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+more <- topup_verification(plan, nsim_extra = 5L, verbose = FALSE)
+more$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 }

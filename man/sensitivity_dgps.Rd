@@ -23,3 +23,9 @@ Scales random slope SDs by multipliers (e.g., \code{0.7}, \code{1.0}, \code{1.4}
 recalibrates conditional fixed effects so marginal cell probabilities remain
 invariant across sensitivity levels.
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+models <- sensitivity_dgps(dgp)
+vapply(models, function(x) unname(x$tau_subj[2L]), numeric(1))
+}

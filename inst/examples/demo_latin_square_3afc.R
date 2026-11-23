@@ -29,6 +29,8 @@ dgp <- des |>
     corr_structure  = 0.20
   )
 
+check_dgp(dgp, plot = FALSE)$marginal_effects
+
 # 3. Design directly in percentage points: Power >= 80% & 95% CI width <= 12 pp
 spec <- dgp |>
   specify_target(
@@ -64,12 +66,12 @@ plan_res <- spec |>
     seed              = 20261119
   )
 
-# 5. Summary, Pareto switching, gt table, 2D/3D plots, and EN/JA reports
+# 5. Summary, Pareto switching, gt table, 2D/3D plots, and the sample size report
 summary(plan_res)
+head(as.data.frame(plan_res)[c("n_subj", "n_item", "power", "decision_status")])
 switch_preference(plan_res, prefer = "fewer_items")
 as_gt(plan_res)
 plot(plan_res, type = "contour", metric = "prob_ci_width_pp")
 plot(plan_res, type = "pareto")
 plot(plan_res, type = "surface3d", metric = "power")
-report_plan(plan_res, lang = "ja")
-report_plan(plan_res, lang = "en")
+report_plan(plan_res)

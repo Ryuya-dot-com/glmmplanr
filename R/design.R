@@ -286,6 +286,9 @@ design_crossed <- function(
 #' @param testlet_size Integer \eqn{\ge 2} giving the number of items nested per
 #'   passage/testlet (default `4`).
 #' @return An object of class `"glmmplanr_design"`.
+#' @examples
+#' des <- design_testlet(list(condition = c("a", "b")), testlet_size = 4L)
+#' des$k_item
 #' @export
 design_testlet <- function(
   factors,
@@ -313,7 +316,7 @@ design_testlet <- function(
 }
 
 #' Build a Factor Contrast Matrix
-#' @keywords internal
+#' @noRd
 build_contrast_matrix <- function(levels_chr, scheme = c("sum", "helmert", "treatment")) {
   scheme <- match.arg(scheme)
   L <- length(levels_chr)
@@ -340,7 +343,7 @@ build_contrast_matrix <- function(levels_chr, scheme = c("sum", "helmert", "trea
 }
 
 #' Map Term Labels (e.g. "exposure:spacing") to Model Matrix Columns
-#' @keywords internal
+#' @noRd
 build_effect_map <- function(fixed_rhs, cells, X_cells) {
   assign_idx <- attr(X_cells, "assign")
   term_labels <- attr(stats::terms(fixed_rhs), "term.labels")
@@ -358,6 +361,8 @@ build_effect_map <- function(fixed_rhs, cells, X_cells) {
 #' @param k Positive integer multiplicity required for exact list balance.
 #' @param arg_name Name for error reporting.
 #' @return Sorted integer vector of valid multiples of `k` (or full min/max grid).
+#' @examples
+#' valid_multiples(c(10, 20), k = 4)
 #' @export
 valid_multiples <- function(n_range, k, arg_name = "n_range") {
   k <- as.integer(k)
@@ -397,11 +402,20 @@ valid_multiples <- function(n_range, k, arg_name = "n_range") {
 #'   of `design$k_item`).
 #' @param strict Logical; if `TRUE` (default), abort if `n_subj` or `n_item` is
 #'   not an exact multiple of `k_subj` / `k_item`.
+#' @param diagnostics If TRUE, include `item_exposure` with one row per planned
+#'   item. `n_scheduled` counts trials before missingness or dropout. Items share
+#'   a `component` if a chain of participants was scheduled to see them in common.
+#'   Unscheduled items each form an isolated component.
 #' @return A list containing the trial schedule data frame `trials` (with
 #'   `subj_id`, `item_id`, `testlet_id`, `list_id`, `cell_id`, and factor
 #'   columns) plus row index mappings into `design$X_cells`.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' schedule <- generate_design_schedule(des, n_subj = 4, n_item = 4)
+#' head(schedule$trials)
 #' @export
-generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE) {
+generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diagnostics = FALSE) {
+  if (!rlang::is_bool(diagnostics)) cli::cli_abort("{.arg diagnostics} must be TRUE or FALSE.")
   if (!inherits(design, "glmmplanr_design")) {
     cli::cli_abort("{.arg design} must be a {.cls glmmplanr_design} object.")
   }
@@ -473,6 +487,9 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE) {
     cli::cli_abort("{.arg n_item} must be at least {.arg items_per_subject} ({m}).")
   }
   if (!is.null(m) && m < n_item) {
+    if (uses_box_muller()) {
+      return(isolated_seeded_call("generate_design_schedule", environment(), match.call()))
+    }
     # Draw whole passages, with ordinary items as passages of size one.
     size <- design$testlet_size
     passages <- with_rng_stream(design$item_seed,
@@ -518,7 +535,7 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE) {
     trials[[fn]] <- design$cells[[fn]][cell_id]
   }
 
-  list(
+  schedule <- list(
     trials = trials,
     n_subj = n_subj,
     n_item = n_item,
@@ -527,6 +544,27 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE) {
     n_trials_scheduled = nrow(trials),
     n_trials_expected = compute_expected_trials(design, n_subj, n_item)
   )
+  if (diagnostics) {
+    components <- if (is.null(m) || m == n_item) rep.int(1L, n_item) else {
+      item_components(trials, n_item)
+    }
+    schedule$item_exposure <- data.frame(item_id = item_ids,
+      n_scheduled = tabulate(trials$item_id, n_item), component = components)
+  }
+  schedule
+}
+
+item_components <- function(trials, n_item) {
+  parent <- seq_len(n_item)
+  root <- function(i) {
+    while (parent[i] != i) i <- parent[i]
+    i
+  }
+  for (items in split(trials$item_id, trials$subj_id)) {
+    roots <- unique(vapply(unique(items), root, integer(1)))
+    parent[roots] <- min(roots)
+  }
+  vapply(seq_len(n_item), root, integer(1))
 }
 
 #' Compute Exact Scheduled Trials and Post-Attrition Expected Observations
@@ -541,6 +579,10 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE) {
 #' @param n_subj Integer scalar or vector of subject counts.
 #' @param n_item Integer scalar or vector of item counts.
 #' @return Integer vector matching `n_subj` and `n_item`.
+#' @examples
+#' des <- design_crossed(list(), attrition = 0.1)
+#' compute_scheduled_trials(des, 20, 10)
+#' compute_expected_trials(des, 20, 10)
 #' @export
 compute_scheduled_trials <- function(design, n_subj, n_item) {
   if (!inherits(design, "glmmplanr_design")) {
@@ -612,6 +654,19 @@ build_cell_lookup <- function(design, bs_grid, bi_grid, ls_grid) {
   arr
 }
 
+#' Print or Summarize a Planning Object
+#'
+#' The print methods display the design, calibration, target, or selected plan.
+#' A plan summary also displays available response-pattern counts, verified
+#' designs, and sensitivity results.
+#' @name print.glmmplanr_design
+#' @param x,object A design, calibrated generator, generator check, target
+#'   specification, or planning result of the corresponding class.
+#' @param ... Additional arguments passed to the method.
+#' @return The input object with its original class, invisibly.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' print(des)
 #' @export
 print.glmmplanr_design <- function(x, ...) {
   cli::cli_h2("glmmplanr Experimental Design")

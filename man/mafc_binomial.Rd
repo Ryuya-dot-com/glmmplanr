@@ -18,3 +18,7 @@ An object of class \code{"family"}.
 Constructs a \code{family} object compatible with \code{\link[stats:glm]{stats::glm()}} and
 \code{\link[lme4:glmer]{lme4::glmer()}} for binary responses with known lower asymptote \code{chance}.
 }
+\examples{
+family <- mafc_binomial(chance = 1/3)
+family$linkinv(0)
+}

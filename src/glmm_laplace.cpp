@@ -9,6 +9,9 @@
 
 namespace {
 
+// The Laplace determinant is first-order sensitive to error in the conditional mode.
+constexpr double conditional_mode_tol = 2e-7;
+
 using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 inline double inv_logit(double x) {
@@ -87,15 +90,23 @@ Eigen::MatrixXd update_cov_matrix(
     return es.eigenvectors() * ev.asDiagonal() * es.eigenvectors().transpose();
   }
 
-  double s0_sq = std::max(prior_tau_sd * prior_tau_sd, 0.25);
+  // Exact MAP update in theta_j = log(tau_j) coordinates under the Half-Student-t(df = 3, scale = prior_tau_sd)
+  // prior matching inst/stan/crossed_binomial_mafc.stan:
+  //   d/d(theta_j) [ -n*theta_j - 0.5*S_jj*exp(-2*theta_j) + theta_j - 2*log(1 + exp(2*theta_j)/(3*s0^2)) ] = 0
+  // yields the strictly positive root of:
+  //   (n + 3) * v^2 + (3*(n - 1)*s0^2 - S_jj) * v - 3*s0^2*S_jj = 0,  v = tau_j^2.
+  const double df_t = 3.0;
+  const double df_s0_sq = df_t * prior_tau_sd * prior_tau_sd;
+  const double a_quad = static_cast<double>(n_clusters) + df_t;
   Eigen::VectorXd new_sd(q);
   for (int j = 0; j < q; ++j) {
-    double a_exp = (j == 0) ? 1.0 : 0.75;
-    double c_lin = static_cast<double>(n_clusters) - a_exp;
-    double s_jj = std::max(S(j, j), 1e-8);
-    double inv_s0 = 1.0 / s0_sq;
-    double disc = c_lin * c_lin + 4.0 * inv_s0 * s_jj;
-    double v_hat = (-c_lin + std::sqrt(std::max(disc, 0.0))) / (2.0 * inv_s0);
+    const double s_jj = std::max(S(j, j), 1e-8);
+    const double b_quad = static_cast<double>(n_clusters - 1) * df_s0_sq - s_jj;
+    const double c_pos = df_s0_sq * s_jj;
+    const double disc = std::sqrt(b_quad * b_quad + 4.0 * a_quad * c_pos);
+    const double v_hat = (b_quad >= 0.0)
+      ? (2.0 * c_pos) / (b_quad + disc)
+      : (-b_quad + disc) / (2.0 * a_quad);
     new_sd(j) = std::sqrt(std::max(v_hat, 1e-6));
   }
 
@@ -103,10 +114,11 @@ Eigen::MatrixXd update_cov_matrix(
     return (new_sd.array().square()).matrix().asDiagonal();
   }
 
+  // Unit-diagonal LKJ(eta)-scaled correlation shrinkage approximation around I_q
   Eigen::VectorXd emp_sd = S.diagonal().cwiseMax(1e-10).cwiseSqrt();
   Eigen::MatrixXd R = Eigen::MatrixXd::Identity(q, q);
   double shrink = static_cast<double>(n_clusters) /
-    (static_cast<double>(n_clusters) + 2.0 * std::max(lkj_eta - 1.0, 0.0) + static_cast<double>(q));
+    (static_cast<double>(n_clusters) + 2.0 * std::max(lkj_eta - 1.0, 0.0));
   shrink = std::min(std::max(shrink, 0.0), 0.995);
 
   for (int r = 0; r < q; ++r) {
@@ -852,7 +864,7 @@ struct GLMMWorkspace {
         step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
         apply_Rt_ass_in_place(step_s_buf);
         st_max = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
-        if (st_max < 2e-7) {
+        if (st_max < conditional_mode_tol) {
           obs_factored = true;
           break;
         }
@@ -866,7 +878,7 @@ struct GLMMWorkspace {
         step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
         apply_Rt_ass_in_place(step_s_buf);
         st_max = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
-        if (st_max < 2e-7) break;
+        if (st_max < conditional_mode_tol) break;
         slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
       }
       double sc = std::min(1.0, 4.0 / st_max);
@@ -874,18 +886,30 @@ struct GLMMWorkspace {
       const double vs_norm2 = v_s_cur.squaredNorm() + v_2_cur.squaredNorm();
       const double vs_dot = v_s_cur.dot(step_s_buf) + v_2_cur.dot(step_2_buf);
       const double step_norm2 = step_s_buf.squaredNorm() + step_2_buf.squaredNorm();
+      bool accepted_bt = false;
+      double best_sc = 0.0;
+      double best_phi = phi_cur;
       for (int bt = 0; bt < 8; ++bt) {
         double pen_try = vs_norm2 + 2.0 * sc * vs_dot + (sc * sc) * step_norm2;
         double phi_try = eval_data_ll_step(y, sc, chance) - 0.5 * pen_try;
-        if (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0)) {
+        if (std::isfinite(phi_try) && phi_try > best_phi) {
+          best_phi = phi_try;
+          best_sc = sc;
+        }
+        if (std::isfinite(phi_try) && phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0)) {
           v_s_cur.noalias() += sc * step_s_buf;
           v_2_cur.noalias() += sc * step_2_buf;
+          accepted_bt = true;
           break;
         }
         sc *= 0.5;
-        if (bt == 7) {
-          v_s_cur.noalias() += sc * step_s_buf;
-          v_2_cur.noalias() += sc * step_2_buf;
+      }
+      if (!accepted_bt) {
+        if (best_sc > 0.0) {
+          v_s_cur.noalias() += best_sc * step_s_buf;
+          v_2_cur.noalias() += best_sc * step_2_buf;
+        } else {
+          break;
         }
       }
     }
@@ -1073,25 +1097,46 @@ struct GLMMWorkspace {
         const double v_dot = v_s.dot(d_vs_buf) + v_2.dot(d_v2_buf);
         const double dv_norm2 = d_vs_buf.squaredNorm() + d_v2_buf.squaredNorm();
 
-        // Armijo backtracking line search on penalized conditional log-posterior
+        // Armijo backtracking line search on penalized conditional log-posterior.
+        // Never mix step_scale values across (beta, v_s, v_2) or accept worsening steps.
+        bool accepted_bt = false;
+        double best_scale = 0.0;
+        double best_phi = phi_cur;
+        double best_ll = ll_data;
         for (int bt = 0; bt < 10; ++bt) {
           b_try_buf.noalias() = beta + step_scale * d_beta_buf;
           double ll_try = eval_data_ll_step(y, step_scale, chance);
           double v_pen_try = v_norm2 + 2.0 * step_scale * v_dot + (step_scale * step_scale) * dv_norm2;
           double phi_try = ll_try - 0.5 * (v_pen_try + b_try_buf.dot(P_beta * b_try_buf));
-          if (phi_try >= phi_cur + 1e-4 * step_scale * std::max(slope, 0.0) || (step_scale * max_step) < 1e-7) {
+          if (std::isfinite(phi_try) && phi_try > best_phi) {
+            best_phi = phi_try;
+            best_scale = step_scale;
+            best_ll = ll_try;
+          }
+          if (std::isfinite(phi_try) &&
+              (phi_try >= phi_cur + 1e-4 * step_scale * std::max(slope, 0.0) ||
+               ((step_scale * max_step) < 1e-7 && phi_try >= phi_cur))) {
             beta = b_try_buf;
             v_2.noalias() += step_scale * d_v2_buf;
             v_s.noalias() += step_scale * d_vs_buf;
             accepted_ll = ll_try;
+            accepted_bt = true;
             break;
           }
           step_scale *= 0.5;
-          if (bt == 9) {
-            beta = b_try_buf;
+        }
+        if (!accepted_bt) {
+          if (best_scale > 0.0) {
+            step_scale = best_scale;
+            beta.noalias() += step_scale * d_beta_buf;
             v_2.noalias() += step_scale * d_v2_buf;
             v_s.noalias() += step_scale * d_vs_buf;
-            accepted_ll = ll_try;
+            accepted_ll = best_ll;
+          } else {
+            step_scale = 0.0;
+            accepted_ll = ll_data;
+            log_lik_laplace = accepted_ll - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
+            break;
           }
         }
 
@@ -1340,7 +1385,7 @@ struct GLMMWorkspace {
           step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
           apply_Rt_ass_in_place(step_s_buf);
           final_inner_step = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
-          if (final_inner_step < 1.5e-5) {
+          if (final_inner_step < conditional_mode_tol) {
             log_lik_laplace = ll_cur - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
             inner_converged = true;
             break;
@@ -1355,7 +1400,7 @@ struct GLMMWorkspace {
           step_s_buf.noalias() = rs_tilde_buf - G_mat.transpose() * step_2_buf;
           apply_Rt_ass_in_place(step_s_buf);
           final_inner_step = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
-          if (final_inner_step < 1.5e-5) {
+          if (final_inner_step < conditional_mode_tol) {
             const double ll_obs = eval_trials(y, beta, v_s, v_2, chance, true);
             logdet_obs = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
             log_lik_laplace = ll_obs - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
@@ -1369,18 +1414,32 @@ struct GLMMWorkspace {
         const double vs_norm2 = v_s.squaredNorm() + v_2.squaredNorm();
         const double vs_dot = v_s.dot(step_s_buf) + v_2.dot(step_2_buf);
         const double step_norm2 = step_s_buf.squaredNorm() + step_2_buf.squaredNorm();
+        bool accepted_bt = false;
+        double best_sc = 0.0;
+        double best_phi = phi_cur;
         for (int bt = 0; bt < 8; ++bt) {
           double pen_try = vs_norm2 + 2.0 * sc * vs_dot + (sc * sc) * step_norm2;
           double phi_try = eval_data_ll_step(y, sc, chance) - 0.5 * pen_try;
-          if (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0) || (sc * final_inner_step) < 1e-7) {
+          if (std::isfinite(phi_try) && phi_try > best_phi) {
+            best_phi = phi_try;
+            best_sc = sc;
+          }
+          if (std::isfinite(phi_try) &&
+              (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0) ||
+               ((sc * final_inner_step) < 1e-7 && phi_try >= phi_cur))) {
             v_s.noalias() += sc * step_s_buf;
             v_2.noalias() += sc * step_2_buf;
+            accepted_bt = true;
             break;
           }
           sc *= 0.5;
-          if (bt == 7) {
-            v_s.noalias() += sc * step_s_buf;
-            v_2.noalias() += sc * step_2_buf;
+        }
+        if (!accepted_bt) {
+          if (best_sc > 0.0) {
+            v_s.noalias() += best_sc * step_s_buf;
+            v_2.noalias() += best_sc * step_2_buf;
+          } else {
+            break;
           }
         }
       }
@@ -1393,18 +1452,19 @@ struct GLMMWorkspace {
     Eigen::MatrixXd vcov_cond = es_cond.eigenvectors() * ev_cond.cwiseInverse().asDiagonal() *
       es_cond.eigenvectors().transpose();
 
-    // Asymptotic variances of log(tau) from per-cluster reliability & prior curvature
-    double s0_sq = std::max(prior_tau_sd * prior_tau_sd, 0.25);
+    // Asymptotic variances of log(tau) from per-cluster reliability & consistent
+    // Half-Student-t(df = 3, scale = prior_tau_sd) prior curvature on theta = log(tau):
+    //   -d^2/d(theta)^2 [ theta - 2*log(1 + exp(2*theta)/(3*s0^2)) ] = 8*r / (1 + r)^2
+    double s0_sq = prior_tau_sd * prior_tau_sd;
     auto make_var_log_tau = [&](const Eigen::MatrixXd& Sig, const Eigen::VectorXd& rel_sum) {
       int q = Sig.rows();
       Eigen::VectorXd out(q);
       for (int j = 0; j < q; ++j) {
         double tau2 = std::max(Sig(j, j), 1e-10);
         double info_prior = 0.0;
-        if (regularized) {
-          // Half-Student-t(df=3, scale=s0) prior curvature on log(tau) + boundary stabilization
+        if (regularized && s0_sq > 0.0) {
           double r = tau2 / (3.0 * s0_sq);
-          info_prior = (8.0 * r) / ((1.0 + r) * (1.0 + r)) + 2.0 * (tau2 / s0_sq);
+          info_prior = (8.0 * r) / ((1.0 + r) * (1.0 + r));
         }
         double info_tot = std::max(rel_sum(j) + info_prior, 0.75);
         out(j) = 1.0 / info_tot;
@@ -1685,11 +1745,31 @@ Rcpp::List cpp_fit_crossed_glmm(
   );
 }
 
+// The factorial fixed-effects model gives each design cell its own linear predictor.
+// A cell with only one observed response category has a monotone likelihood.
+// [[Rcpp::export(rng = false)]]
+int cpp_constant_response_cell(const Eigen::VectorXi& y, const Eigen::VectorXi& cell_id,
+                               int n_cells) {
+  if (y.size() != cell_id.size() || n_cells < 1) Rcpp::stop("Invalid response cell dimensions");
+  std::vector<bool> correct(n_cells, false), incorrect(n_cells, false);
+  for (int i = 0; i < y.size(); ++i) {
+    int cell = cell_id(i) - 1;
+    if (cell < 0 || cell >= n_cells) Rcpp::stop("Invalid response cell index");
+    if (y(i) == 1) correct[cell] = true;
+    else incorrect[cell] = true;
+  }
+  for (int cell = 0; cell < n_cells; ++cell) {
+    if (correct[cell] != incorrect[cell]) return cell + 1;
+  }
+  return 0;
+}
+
 // Pre-Allocated Zero-Copy C++ Parametric Bootstrap Batch for Marginal Probability Contrasts
 //
 // [[Rcpp::export]]
 Rcpp::NumericVector cpp_prob_bootstrap_batch(
     int n_boot,
+    const Eigen::VectorXi& cell_id,
     const Eigen::MatrixXd& X,
     const Eigen::VectorXi& subj_idx,
     const Eigen::MatrixXd& Z_subj,
@@ -1777,6 +1857,7 @@ Rcpp::NumericVector cpp_prob_bootstrap_batch(
       y_star(n) = static_cast<int>(R::rbinom(1.0, prob));
     }
 
+    if (!regularized && cpp_constant_response_cell(y_star, cell_id, X_cells.rows())) continue;
     try {
       FitResult f = ws.fit(
         y_star, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd,

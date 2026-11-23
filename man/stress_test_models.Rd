@@ -43,3 +43,9 @@ Generates paired datasets from the maximal correlated data-generating process
 compares competing analysis strategies side by side on the logit scale.
 Use \code{\link[=validate_design_point]{validate_design_point()}} to validate the actual target and analysis.
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+comparison <- stress_test_models(dgp, "condition", 16, 8, nsim = 3L)
+head(comparison)
+}

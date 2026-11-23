@@ -57,3 +57,45 @@ test_that("2D Gauss-Hermite marginal inversion recovers m-AFC cell probabilities
   expect_equal(chk$cell_diagnostics$conditional_prob, unname(conditional))
   expect_equal(chk$cell_diagnostics$quad_prob, unname(target_p), tolerance = 1e-10)
 })
+
+test_that("calibration preserves a fresh and a Box-Muller caller, including the next normal", {
+  # Do not alter the stream of the test runner itself.
+  pkg_path <- getNamespaceInfo(asNamespace("glmmplanr"), "path")
+  checked <- callr::r(function(path) {
+    if (!file.exists(file.path(path, "Meta", "package.rds"))) pkgload::load_all(path, quiet = TRUE)
+    else library(glmmplanr)
+    d <- design_crossed(list())
+    if (exists(".Random.seed", .GlobalEnv, inherits = FALSE)) rm(".Random.seed", envir = .GlobalEnv)
+    model <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3, check_nsim = 20L)
+    empty <- !exists(".Random.seed", .GlobalEnv, inherits = FALSE)
+    set.seed(18, normal.kind = "Box-Muller")
+    expected <- rnorm(2)
+    set.seed(18, normal.kind = "Box-Muller")
+    first <- rnorm(1)
+    before <- .Random.seed
+    copy <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3, check_nsim = 20L)
+    preserved <- identical(.Random.seed, before) && identical(c(first, rnorm(1)), expected)
+    set.seed(18, normal.kind = "Inversion")
+    sample.int(.Machine$integer.max, 1L)
+    after_one <- .Random.seed
+    set.seed(18)
+    invisible(check_dgp(model, n_draws = 20L, seed = NULL))
+    c(empty, preserved, isTRUE(all.equal(copy$prior_check, model$prior_check, tolerance = 1e-8)),
+      identical(after_one, .Random.seed))
+  }, list(path = pkg_path))
+  expect_true(all(checked))
+})
+
+test_that("wide normal effects recover the independently integrated probabilities", {
+  des <- design_crossed(list(arm = c("a", "b")), allocation = "between_subj",
+                        contrast = "treatment")
+  g <- calibrate_dgp(des, c(.72, .80), chance = 1/3, subj_sd = 5, item_sd = 1,
+                     slope_sd_ratio = 0)
+  ref <- vapply(g$mu_cells, function(eta) {
+    integrate(function(z) (1/3 + 2/3 * plogis(eta + sqrt(26) * z)) * dnorm(z),
+              -Inf, Inf, rel.tol = 1e-12)$value
+  }, numeric(1))
+  expect_lt(max(abs(ref - c(.72, .80))), 1e-7)
+  expect_lt(abs(true_prob_effect(g, c(-1, 1)) - diff(ref)), 2e-7)
+  expect_gt(g$n_quad, g$solver_info$requested_nodes)
+})

@@ -14,6 +14,9 @@ knitr::opts_chunk$set(
 )
 ```
 
+For an introduction to choosing a design and reading its Monte Carlo bounds,
+see [Planning a crossed experiment or a fixed-bank calibration](planning-workflows.html).
+
 ## Quick Verification of Quadrature Calibration
 
 Before reviewing the validation benchmarks below, you can verify how `calibrate_dgp()` aligns population-averaged (`quad_prob`) and zero-random-effect (`conditional_prob`) cell accuracies in a crossed binary GLMM:

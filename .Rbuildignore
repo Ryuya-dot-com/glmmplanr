@@ -1,5 +1,9 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.Ruserdata$
+^Rplots\.(pdf|ps)$
+^glmmplanr_.*\.tar\.gz$
+^glmmplanr\.Rcheck$
 ^README\.Rmd$
 ^LICENSE\.md$
 ^\.github$
@@ -8,4 +12,6 @@
 ^validation$
 ^AGENTS\.md$
 ^ROADMAP\.md$
+^src/.*\.(o|so|dll)$
 ^inst/stan/crossed_binomial_mafc$
+^inst/stan/.*\.exe$

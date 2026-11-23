@@ -2,15 +2,13 @@
 % Please edit documentation in R/reporting.R
 \name{report_plan}
 \alias{report_plan}
-\title{Generate Copy-Paste Methods Justification for Registered Reports & Grant Proposals}
+\title{Write a Sample Size Justification}
 \usage{
-report_plan(x, lang = c("en", "ja"), print_output = TRUE)
+report_plan(x, print_output = TRUE)
 }
 \arguments{
-\item{x}{A \code{"glmmplanr_result"} object.}
-
-\item{lang}{Output language: \code{"en"} (default; English for Registered Reports /
-journal manuscripts) or \code{"ja"} (Japanese for JSPS Kakenhi grant proposals).}
+\item{x}{A result from \code{\link[=optimize_sample_size]{optimize_sample_size()}}, \code{\link[=plan_rasch_fixed_bank]{plan_rasch_fixed_bank()}},
+or \code{\link[=plan_rasch_precision]{plan_rasch_precision()}}.}
 
 \item{print_output}{Logical; if \code{TRUE} (default), prints the formatted text
 to the console and returns it invisibly.}
@@ -20,10 +18,18 @@ Character string containing the methods report (invisibly when
 \code{print_output = TRUE}).
 }
 \description{
-Produces a reproducible, transparent sample size justification narrative (in
-English or Japanese) detailing the experimental design, scheduled vs.
-post-attrition trials, Pareto trade-off frontier, percentage-point and
-conditional logit effects, estimation failure accounting, Morris et al.
-(2019) Monte Carlo uncertainty intervals, and multi-scenario / random-slope
-sensitivity bounds.
+Writes an English sample size justification describing the experimental design,
+scheduled and expected post-attrition trials, the Pareto trade-off frontier,
+percentage-point and conditional logit effects, and estimation failure accounting.
+It reports Monte Carlo intervals (Morris et al., 2019) and available sensitivity
+results for alternative scenarios and random-slope assumptions.
+}
+\details{
+For Rasch planning, the report gives the error limits, joint attainment,
+number of evaluable studies, and confirmed designs.
+}
+\examples{
+# Create the five-replication demonstration plan from the optimizer help.
+example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+report_plan(plan, print_output = FALSE)
 }

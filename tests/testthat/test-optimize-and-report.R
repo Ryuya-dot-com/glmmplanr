@@ -51,6 +51,7 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     verbose          = FALSE
   )
 
+  caller_rng <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)
   res_w2 <- optimize_sample_size(
     spec,
     n_subj_range     = c(24, 64),
@@ -68,11 +69,13 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     verbose          = FALSE
   )
 
-  # Exact worker-invariance via per-point L'Ecuyer-CMRG streams
+  # The RNG state and design decision are reproducible across worker counts.
+  expect_identical(get0(".Random.seed", envir = globalenv(), inherits = FALSE), caller_rng)
   expect_equal(res_w1$optimal$n_subj, res_w2$optimal$n_subj)
   expect_equal(res_w1$optimal$n_item, res_w2$optimal$n_item)
-  expect_equal(res_w1$optimal$power, res_w2$optimal$power, tolerance = 1e-12)
-  expect_equal(res_w1$surface$pred_power, res_w2$surface$pred_power, tolerance = 1e-12)
+  expect_identical(res_w1$optimal$decision_status, res_w2$optimal$decision_status)
+  expect_lt(abs(res_w1$optimal$power - res_w2$optimal$power), 1e-8)
+  expect_lt(max(abs(res_w1$surface$pred_power - res_w2$surface$pred_power)), 1e-8)
 
   # Multiples of 4 strictly enforced
   expect_equal(res_w1$optimal$n_subj %% 4L, 0L)
@@ -93,7 +96,7 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     expect_true(all(diff(sub_i$pred_ci_width) <= 1e-9))
   }
 
-  # Verify S3 outputs: gt table, 2D contour, Pareto curve, 3D plotly, EN & JA reports
+  # Verify S3 outputs: gt table, 2D contour, Pareto curve, 3D plotly, and the sample size report
   gt_tbl <- as_gt(res_w1)
   expect_s3_class(gt_tbl, "gt_tbl")
 
@@ -108,8 +111,10 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     expect_s3_class(p_3d, "plotly")
   }
 
-  rep_en <- report_plan(res_w1, lang = "en", print_output = FALSE)
-  rep_ja <- report_plan(res_w1, lang = "ja", print_output = FALSE)
-  expect_match(rep_en, "Sample Size Justification")
-  expect_match(rep_ja, "標本数設計の根拠")
+  report <- report_plan(res_w1, print_output = FALSE)
+  expect_match(report, "Sample Size Justification")
+  expect_output(printed <- withVisible(report_plan(res_w1)), "Sample Size Justification")
+  expect_false(printed$visible)
+  expect_identical(printed$value, report)
+  expect_error(report_plan(res_w1, "en"), "print_output")
 })

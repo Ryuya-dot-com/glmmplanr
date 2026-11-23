@@ -57,3 +57,7 @@ An object of class \code{"glmmplanr_design"}.
 \description{
 Convenience Constructor for Passage / Testlet-Nested Crossed Designs
 }
+\examples{
+des <- design_testlet(list(condition = c("a", "b")), testlet_size = 4L)
+des$k_item
+}

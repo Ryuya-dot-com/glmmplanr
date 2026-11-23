@@ -5,7 +5,11 @@ cpp_fit_crossed_glmm <- function(y, X, subj_idx, Z_subj, n_subj, item_idx, Z_ite
     .Call(`_glmmplanr_cpp_fit_crossed_glmm`, y, X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd, max_em_iter, max_pirls_iter, tol, init_beta, init_Sigma_subj, init_Sigma_item, init_Sigma_testlet, fix_cov, compute_joint_vcov, return_ranef)
 }
 
-cpp_prob_bootstrap_batch <- function(n_boot, X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet, beta_hat, Sigma_subj_hat, Sigma_item_hat, Sigma_testlet_hat, X_cells, Zs_cells, Zi_cells, Zt_cells, contrast_weights, gh_nodes, gh_weights, chance = 0.0, corr_mode = 1L, regularized = FALSE, lkj_eta = 2.0, prior_beta_sd = 2.5, prior_tau_sd = 1.5, max_em_iter = 160L, max_pirls_iter = 22L, tol = 1.5e-4, eff_idx_1based = 1L, marginal = TRUE) {
-    .Call(`_glmmplanr_cpp_prob_bootstrap_batch`, n_boot, X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet, beta_hat, Sigma_subj_hat, Sigma_item_hat, Sigma_testlet_hat, X_cells, Zs_cells, Zi_cells, Zt_cells, contrast_weights, gh_nodes, gh_weights, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd, max_em_iter, max_pirls_iter, tol, eff_idx_1based, marginal)
+cpp_constant_response_cell <- function(y, cell_id, n_cells) {
+    .Call(`_glmmplanr_cpp_constant_response_cell`, y, cell_id, n_cells)
+}
+
+cpp_prob_bootstrap_batch <- function(n_boot, cell_id, X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet, beta_hat, Sigma_subj_hat, Sigma_item_hat, Sigma_testlet_hat, X_cells, Zs_cells, Zi_cells, Zt_cells, contrast_weights, gh_nodes, gh_weights, chance = 0.0, corr_mode = 1L, regularized = FALSE, lkj_eta = 2.0, prior_beta_sd = 2.5, prior_tau_sd = 1.5, max_em_iter = 160L, max_pirls_iter = 22L, tol = 1.5e-4, eff_idx_1based = 1L, marginal = TRUE) {
+    .Call(`_glmmplanr_cpp_prob_bootstrap_batch`, n_boot, cell_id, X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet, beta_hat, Sigma_subj_hat, Sigma_item_hat, Sigma_testlet_hat, X_cells, Zs_cells, Zi_cells, Zt_cells, contrast_weights, gh_nodes, gh_weights, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd, max_em_iter, max_pirls_iter, tol, eff_idx_1based, marginal)
 }
 

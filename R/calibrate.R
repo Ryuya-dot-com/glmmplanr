@@ -3,9 +3,10 @@
 #' Numerically inverts researcher-specified marginal cell response probabilities
 #' \eqn{P(Y = 1 \mid X)} into data-generating conditional fixed-effect
 #' coefficients \eqn{\beta} on the guessing-adjusted logit scale using
-#' two-dimensional Gauss-Hermite quadrature and `nleqslv`, correcting both
-#' non-collapsibility (random-effect attenuation toward the midpoint) and lower
-#' guessing asymptotes (\eqn{g = 1/m} in forced-choice tasks).
+#' exact 1D Gauss-Hermite quadrature over the combined normal random-effect
+#' variance per cell and `nleqslv`, correcting both non-collapsibility
+#' (random-effect attenuation toward the midpoint) and lower guessing
+#' asymptotes (\eqn{g = 1/m} in forced-choice tasks).
 #'
 #' @param design A `"glmmplanr_design"` object created by [design_crossed()] or
 #'   [design_testlet()].
@@ -16,10 +17,11 @@
 #' @param chance Guessing probability (lower asymptote \eqn{g \in [0, 1)}, e.g.,
 #'   `0` for recall/production, `1/3` for 3AFC, `0.25` for 4AFC).
 #' @param subj_prob_range Optional numeric vector `c(low, high)` giving the 95%
-#'   subject accuracy interval at a baseline condition (converted via
-#'   [prob_range_to_sd()]). Ignored if `subj_sd` is supplied directly.
+#'   subject accuracy range used to specify the intercept SD via its width on
+#'   the adjusted logit scale. Calibration sets the location from `cell_probs`,
+#'   so the fitted endpoints can shift. Ignored when `subj_sd` is supplied.
 #' @param item_prob_range Optional numeric vector `c(low, high)` giving the 95%
-#'   item accuracy interval at a baseline condition. Ignored if `item_sd` is
+#'   item accuracy range used in the same way. Ignored if `item_sd` is
 #'   supplied directly.
 #' @param testlet_prob_range Optional numeric vector `c(low, high)` for passage
 #'   / testlet 95% accuracy range when `design$has_testlet` is `TRUE`.
@@ -40,11 +42,18 @@
 #'   equicorrelation scalar \eqn{\rho} (default `0.20`), `"zero"` (uncorrelated
 #'   random effects), a correlation matrix, or a named list
 #'   `list(subj = ..., item = ...)`.
-#' @param n_quad Integer number of Gauss-Hermite quadrature nodes per dimension
-#'   (default `21L`, giving a 441-point 2D tensor rule).
+#' @param n_quad Integer number of 1D Gauss-Hermite quadrature nodes (initially
+#'   `21L`). Because independent normal participant, item, and testlet random
+#'   effects sum to a single normal random variable in each cell, 1D quadrature
+#'   over the total cell SD is mathematically exact. The rule is refined up to
+#'   `256L` nodes when quadrature differs from adaptive normal integration by
+#'   more than `1e-10` (and aborts if the discrepancy still exceeds `1e-7` at
+#'   `256L` nodes). The result stores the effective `n_quad` and the
+#'   discrepancy in `solver_info`.
 #' @param check_nsim Integer number of Monte Carlo draws per cell used to build
 #'   the prior-predictive sanity-check summary (default `4000L`).
-#' @param seed Optional integer seed for the prior-predictive check.
+#' @param seed Integer seed for the prior-predictive check. Use `NULL` to draw
+#'   a master seed from the caller's random stream.
 #'
 #' @return An S3 object of class `"glmmplanr_dgp"` containing the calibrated
 #'   conditional parameter vector `beta`, naive uncalibrated benchmarks,
@@ -93,6 +102,10 @@ calibrate_dgp <- function(
   seed = 1L,
   participant_testlet_sd = 0
 ) {
+  if (uses_box_muller()) {
+    if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
+    return(isolated_seeded_call("calibrate_dgp", environment(), match.call()))
+  }
   if (!inherits(design, "glmmplanr_design")) {
     cli::cli_abort("{.arg design} must be a {.cls glmmplanr_design} object.")
   }
@@ -199,8 +212,13 @@ calibrate_dgp <- function(
   sd_subj_cell <- sqrt(pmax(var_subj_cell, 0))
   sd_item_tot_cell <- sqrt(pmax(var_item_cell + var_testlet_cell, 0))
 
-  # Solve for conditional beta via 2D Gauss-Hermite quadrature + nleqslv
-  quad2d <- gh_quad_2d(n_quad)
+  # Solve for conditional beta via exact 1D Gauss-Hermite quadrature + nleqslv.
+  # Independent normal participant, item, and testlet effects sum to N(0, sd_total^2) in each cell.
+  if (!is.numeric(n_quad) || length(n_quad) != 1L || !is.finite(n_quad) ||
+      n_quad < 1 || n_quad != floor(n_quad)) {
+    cli::cli_abort("{.arg n_quad} must be a positive integer.")
+  }
+  sd_total <- sqrt(sd_subj_cell^2 + sd_item_tot_cell^2)
   X_cells <- design$X_cells
 
   # Analytical starting point using logistic-normal attenuation approximation
@@ -211,38 +229,47 @@ calibrate_dgp <- function(
 
   eval_marginal <- function(beta_vec) {
     mu_cell <- as.numeric(X_cells %*% beta_vec)
-    # Vectorized across cells (M x Q^2)
-    linpred <- outer(mu_cell, rep.int(1, length(quad2d$weights))) +
-      outer(sd_subj_cell, quad2d$z1) +
-      outer(sd_item_tot_cell, quad2d$z2)
+    # Vectorized across cells (M x Q)
+    linpred <- outer(mu_cell, rep.int(1, length(quad1d$weights))) +
+      outer(sd_total, quad1d$nodes)
     p_inner <- stats::plogis(linpred)
-    probs <- chance + (1 - chance) * as.numeric(p_inner %*% quad2d$weights)
+    probs <- chance + (1 - chance) * as.numeric(p_inner %*% quad1d$weights)
     probs - target_probs
   }
 
   eval_jacobian <- function(beta_vec) {
     mu_cell <- as.numeric(X_cells %*% beta_vec)
-    linpred <- outer(mu_cell, rep.int(1, length(quad2d$weights))) +
-      outer(sd_subj_cell, quad2d$z1) +
-      outer(sd_item_tot_cell, quad2d$z2)
+    linpred <- outer(mu_cell, rep.int(1, length(quad1d$weights))) +
+      outer(sd_total, quad1d$nodes)
     p_inner <- stats::plogis(linpred)
     deriv_inner <- (1 - chance) * p_inner * (1 - p_inner)
-    d_mu <- as.numeric(deriv_inner %*% quad2d$weights)
+    d_mu <- as.numeric(deriv_inner %*% quad1d$weights)
     X_cells * d_mu
   }
 
-  sol <- nleqslv::nleqslv(
-    x = beta_init,
-    fn = eval_marginal,
-    jac = eval_jacobian,
-    method = "Newton",
-    control = list(ftol = 1e-13, xtol = 1e-13, maxit = 200L)
-  )
-  max_err <- max(abs(sol$fvec))
-  if (max_err > 1e-7) {
-    cli::cli_abort(
-      "Marginal probability inversion did not converge (max residual = {signif(max_err, 4)}). Check extreme cell_probs or random-effect SDs."
-    )
+  requested_nodes <- n_quad
+  repeat {
+    quad1d <- gh_quad_1d(n_quad)
+    sol <- nleqslv::nleqslv(beta_init, eval_marginal, jac = eval_jacobian,
+      method = "Newton", control = list(ftol = 1e-13, xtol = 1e-13, maxit = 200L))
+    max_err <- max(abs(sol$fvec))
+    if (!is.finite(max_err) || max_err > 1e-7) {
+      cli::cli_abort("Marginal inversion failed (maximum solver residual {signif(max_err, 4)}). Check the target probabilities and SDs.")
+    }
+    mu <- drop(X_cells %*% sol$x)
+    reference <- vapply(seq_along(mu), function(i) {
+      stats::integrate(function(z) mafc_plogis(mu[i] + sd_total[i] * z, chance) *
+        stats::dnorm(z), -Inf, Inf, rel.tol = 1e-12)$value
+    }, numeric(1))
+    reported <- drop(mafc_plogis(mu + outer(sd_total, quad1d$nodes), chance) %*% quad1d$weights)
+    integration_error <- max(abs(reference - target_probs), abs(reported - reference))
+    if (integration_error <= 1e-10) break
+    if (n_quad >= 256L) {
+      if (integration_error <= 1e-7) break
+      cli::cli_abort("Quadrature differs from adaptive integration by {signif(integration_error, 4)} at {n_quad} nodes. Increase {.arg n_quad} or review the random-effect scales.")
+    }
+    beta_init <- sol$x
+    n_quad <- min(256L, 2L * n_quad)
   }
 
   beta <- stats::setNames(sol$x, colnames(X_cells))
@@ -255,7 +282,7 @@ calibrate_dgp <- function(
     colnames(X_cells)
   )
   mu_cells <- stats::setNames(as.numeric(X_cells %*% beta), design$cells$cell_name)
-  achieved_probs <- stats::setNames(target_probs + sol$fvec, design$cells$cell_name)
+  achieved_probs <- stats::setNames(reference, design$cells$cell_name)
 
   dgp_obj <- structure(
     list(
@@ -286,6 +313,8 @@ calibrate_dgp <- function(
       item_prob_range = item_prob_range,
       n_quad = as.integer(n_quad),
       solver_info = list(
+        requested_nodes = requested_nodes,
+        integration_error = integration_error,
         iterations = sol$iter,
         max_abs_residual = max_err,
         termcd = sol$termcd,
@@ -343,7 +372,7 @@ resolve_re_sds <- function(
   label
 ) {
   if (!is.null(direct_sd)) {
-    if (!is.numeric(direct_sd) || anyNA(direct_sd) || any(direct_sd < 0)) {
+    if (!is.numeric(direct_sd) || any(!is.finite(direct_sd)) || any(direct_sd < 0)) {
       cli::cli_abort("{.arg {label}_sd} must contain non-negative numeric SD values.")
     }
     if (length(direct_sd) == 1L) {
@@ -435,9 +464,6 @@ safe_chol_lower <- function(Sigma) {
   if (rnk < p) {
     ch[(rnk + 1L):p, ] <- 0
   }
-  L <- matrix(0, nrow = p, ncol = p)
-  L[, piv] <- t(ch)
-  # Wait: Sigma = t(ch_unpiv) %*% ch_unpiv where ch[, inv_piv] is upper factor
   inv_piv <- order(piv)
   U <- ch[, inv_piv, drop = FALSE]
   L_out <- t(U)
@@ -446,7 +472,7 @@ safe_chol_lower <- function(Sigma) {
 }
 
 #' Prior-Predictive Sanity Check of Calibrated DGP
-#' @keywords internal
+#' @noRd
 compute_prior_predictive_check <- function(dgp, n_draws = 4000L, seed = 1L) {
   streams <- make_lecuyer_streams(seed, 1L)
   with_rng_stream(streams[[1L]], {
@@ -495,17 +521,32 @@ compute_prior_predictive_check <- function(dgp, n_draws = 4000L, seed = 1L) {
 #' across experimental cells.
 #'
 #' @param dgp A `"glmmplanr_dgp"` object (or `"glmmplanr_spec"` / `"glmmplanr_result"`).
-#' @param plot Logical; if `TRUE` (default), returns a `ggplot2` object showing
+#' @param plot Logical; if `TRUE` (default), includes a plot showing
 #'   cell-level probability distributions and guessing floor.
 #' @param n_draws Number of Monte Carlo draws per cell for density plotting
 #'   (default `3000L`).
-#' @return Invisibly returns a list with `coefficients`, `cell_diagnostics`, and
-#'   (when `plot = TRUE`) `plot` (also printed when called interactively).
+#' @param seed Integer seed for the plot draws. Use `NULL` to draw a master seed
+#'   from the caller's random stream. Ignored when `plot = FALSE`.
+#' @return A visible S3 list of class `glmmplanr_dgp_check` with the data frames
+#'   `coefficients`, `cell_diagnostics`, `marginal_effects`, and `plot` (a ggplot
+#'   or `NULL`). `marginal_effects` gives each non-intercept model-matrix
+#'   contrast of the integrated cell probabilities in percentage points, using
+#'   the design coding. With two binary factors coded -0.5/+0.5 the interaction
+#'   is the full difference in differences.
+#'   Its print method displays the tables and, interactively, the plot.
 #'   In `cell_diagnostics`, `quad_prob` averages over the random effects and
 #'   `conditional_prob` gives the response probability with all random effects
 #'   set to zero. Both include the specified guessing floor.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' check_dgp(dgp, plot = FALSE)$cell_diagnostics[c("cell", "quad_prob", "conditional_prob")]
 #' @export
-check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L) {
+check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L, seed = 42L) {
+  if (isTRUE(plot) && uses_box_muller()) {
+    if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
+    return(isolated_seeded_call("check_dgp", environment(), match.call()))
+  }
   if (inherits(dgp, "glmmplanr_result")) dgp <- dgp$spec$dgp
   if (inherits(dgp, "glmmplanr_spec")) dgp <- dgp$dgp
   if (!inherits(dgp, "glmmplanr_dgp")) {
@@ -527,7 +568,7 @@ check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L) {
 
   p_out <- NULL
   if (isTRUE(plot)) {
-    streams <- make_lecuyer_streams(42L, 1L)
+    streams <- make_lecuyer_streams(seed, 1L)
     draw_df <- with_rng_stream(streams[[1L]], {
       des <- dgp$design
       p_s <- ncol(des$Z_subj_cells)
@@ -597,6 +638,9 @@ check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L) {
 
   out <- list(
     coefficients = coef_df,
+    marginal_effects = data.frame(term = coef_df$term[-1L],
+      effects_pp = 100 * unname(qr.solve(dgp$design$X_cells,
+        dgp_cell_probabilities(dgp, "marginal"))[-1L])),
     cell_diagnostics = data.frame(dgp$prior_check,
       conditional_prob = dgp_cell_probabilities(dgp, "conditional")),
     plot = p_out
@@ -605,6 +649,7 @@ check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L) {
   out
 }
 
+#' @rdname print.glmmplanr_design
 #' @export
 print.glmmplanr_dgp_check <- function(x, ...) {
   cli::cli_h2("glmmplanr DGP Calibration & Prior-Predictive Check")
@@ -616,6 +661,10 @@ print.glmmplanr_dgp_check <- function(x, ...) {
   cd <- x$cell_diagnostics
   cd[, -1L] <- lapply(cd[, -1L], round, 4)
   print(cd, row.names = FALSE)
+  if (NROW(x$marginal_effects)) {
+    cli::cli_h3("Design contrasts in population accuracy (percentage points)")
+    print(x$marginal_effects, digits = 4, row.names = FALSE)
+  }
   if (!is.null(x$plot) && interactive()) {
     print(x$plot)
   }
@@ -649,6 +698,11 @@ trial_testlet_effect <- function(dgp, ns, nt, sid, tid) {
 #' @return A `data.frame` of observed trials with binary response `y` (`0L`/`1L`),
 #'   cluster factors `subj` and `item` (plus `testlet` if present), experimental
 #'   factors with the selected contrasts attached, and cell index `cell_id`.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' trials <- simulate_dgp_data(dgp, n_subj = 8, n_item = 4)
+#' head(trials[c("subj", "item", "condition", "y")])
 #' @export
 simulate_dgp_data <- function(dgp, schedule = NULL, n_subj = NULL, n_item = NULL) {
   if (!inherits(dgp, "glmmplanr_dgp")) {
@@ -723,6 +777,11 @@ draw_dgp_trials <- function(dgp, schedule, keep_person_item_effects = FALSE) {
 #' @param slope_multipliers Named numeric vector of multipliers applied to
 #'   `slope_sd_ratio` (default `c(optimistic = 0.70, standard = 1.00, conservative = 1.35)`).
 #' @return A named list of `"glmmplanr_dgp"` objects.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' models <- sensitivity_dgps(dgp)
+#' vapply(models, function(x) unname(x$tau_subj[2L]), numeric(1))
 #' @export
 sensitivity_dgps <- function(
   dgp,
@@ -758,6 +817,7 @@ sensitivity_dgps <- function(
   })
 }
 
+#' @rdname print.glmmplanr_design
 #' @export
 print.glmmplanr_dgp <- function(x, ...) {
   cli::cli_h2("glmmplanr Calibrated Data-Generating Process (DGP)")
@@ -768,7 +828,7 @@ print.glmmplanr_dgp <- function(x, ...) {
     if (x$design$has_testlet) {
       "Testlet RE SDs: {paste(sprintf('%s=%.3f', names(x$tau_testlet), x$tau_testlet), collapse = ', ')}"
     },
-    "2D Gauss-Hermite inversion ({x$n_quad}x{x$n_quad} nodes): max |residual| = { format(x$solver_info$max_abs_residual, scientific = TRUE, digits = 2) } ({x$solver_info$iterations} Newton steps)"
+    "Gauss-Hermite inversion ({x$n_quad} nodes, exact 1D variance-sum reduction): max |residual| = { format(x$solver_info$max_abs_residual, scientific = TRUE, digits = 2) } ({x$solver_info$iterations} Newton steps)"
   ))
   coef_tbl <- data.frame(
     Term = names(x$beta),

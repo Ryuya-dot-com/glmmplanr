@@ -1,17 +1,27 @@
+# Local R and RStudio files
+*.Rproj
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
-src/*.o
-src/*.so
-src/*.dll
+.DS_Store
+/Rplots.pdf
+/Rplots.ps
+
+# Build products
+/src/*.o
+/src/*.so
+/src/*.dll
+/src/*.d
 *.tar.gz
 *.Rcheck
-.DS_Store
-inst/doc
-Meta
-inst/stan/crossed_binomial_mafc
-inst/stan/*.exe
-AGENTS.md
-ROADMAP.md
-validation/
+/inst/doc/
+/Meta/
+/docs/
+/inst/stan/crossed_binomial_mafc
+/inst/stan/*.exe
+
+# Local project notes and development validation
+/AGENTS.md
+/ROADMAP.md
+/validation/

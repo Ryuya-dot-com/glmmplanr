@@ -4,24 +4,10 @@
 \name{glmmplanr-package}
 \alias{glmmplanr}
 \alias{glmmplanr-package}
-\alias{print.glmmplanr_design}
-\alias{print.glmmplanr_dgp}
-\alias{print.glmmplanr_dgp_check}
-\alias{print.glmmplanr_spec}
-\alias{print.glmmplanr_result}
-\alias{summary.glmmplanr_result}
 \title{glmmplanr: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs}
 \description{
-An end-to-end sample size and precision optimization pipeline for crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models in behavioral science, psycholinguistics, and language assessment. Generates balanced Latin-square, between-within, incomplete-block, and testlet-nested designs with configurable factor contrasts; numerically inverts marginal cell probabilities and m-AFC guessing asymptotes into conditional GLMM parameters via two-dimensional Gauss-Hermite quadrature; evaluates statistical power, confidence/credible interval width (AIPE), ROPE exclusion, singularity/convergence rates, coverage, and Type M/S errors; and identifies non-dominated Pareto-optimal (N_subj x N_item) designs using Universal Kriging monotone Gaussian process surrogates and multi-stage parallel C++ estimation. Supports both random-item and fixed-bank Rasch parameter recovery planning.
+Plans numbers of participants and items for studies with one binary response per trial, including correct or incorrect answers in forced-choice tasks and yes or no judgments. Uses crossed generalized linear mixed models (GLMMs) and explanatory item response models in behavioral science, psycholinguistics, and language assessment. Generates balanced Latin-square, between-within, incomplete-block, and testlet-nested designs with configurable factor contrasts; numerically inverts marginal cell probabilities and guessing probabilities in multiple-alternative forced-choice tasks into conditional GLMM parameters by Gaussian quadrature; evaluates power, accuracy in parameter estimation through interval widths, exclusion of a region of practical equivalence, convergence, coverage, and magnitude and sign errors; and identifies non-dominated Pareto-optimal (N_subj x N_item) designs using Universal Kriging monotone Gaussian process surrogates and multi-stage parallel 'C++' estimation. Supports both random-item and fixed-bank Rasch parameter recovery planning.
 }
-\section{Inspecting objects}{
-
-\code{print()} displays a design, calibrated generator, generator check, target
-specification, or sample-size plan. For a plan, \code{summary()} also shows
-response-pattern frequencies, invalid fits, and the largest observed
-counts for extreme participant and item responses at the selected design.
-}
-
 \seealso{
 Useful links:
 \itemize{

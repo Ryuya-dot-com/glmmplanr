@@ -46,6 +46,20 @@
 #'   Carlo replications automatically run on Stage-2 candidates whose Monte
 #'   Carlo confidence interval straddles the target (`decision_status == "indeterminate"`),
 #'   default `0L`.
+#' @param topup_policy How top-up replications are evaluated when `nsim_topup > 0L`:
+#'   * `"independent"` (default): Evaluates `"indeterminate"` candidates solely
+#'     on the fresh independent top-up batch without pooling with Stage-2
+#'     replications, avoiding optional-stopping bias in the Wilson bounds.
+#'   * `"pooled"`: Pools Stage-2 and top-up replications for exploratory precision
+#'     narrowing (emits a warning and flags `search_meta$adaptive_pooled = TRUE`
+#'     because data-adaptive pooling invalidates nominal fixed-sample Wilson
+#'     coverage).
+#' @param mc_adjustment Multiplicity adjustment applied to Stage-2 Wilson Monte
+#'   Carlo intervals across verified candidates (and scenarios):
+#'   * `"none"` (default): Pointwise `spec$mc_conf_level` Wilson intervals.
+#'   * `"bonferroni"`: Simultaneous Bonferroni-adjusted Wilson confidence level
+#'     `1 - (1 - spec$mc_conf_level) / m` across the `m` verified Stage-2
+#'     candidate (or candidate-by-scenario) decisions.
 #' @param n_verify Number of Pareto-frontier candidate designs verified at
 #'   `nsim_final` replications in Stage 2 (default `4L`).
 #' @param early_stop Logical; when `TRUE` (default) and `nsim_final >= 200L`,
@@ -71,7 +85,18 @@
 #'   If `feasible` is false, `optimal` identifies a diagnostic candidate and
 #'   `optimal_high_confidence` is null. `verified_pareto` contains confirmed designs.
 #'   `verified` includes the response-pattern diagnostics of [evaluate_design_point()].
-#'   After a top-up of an older plan, `pattern_nsim` counts only diagnosed replications.
+#'   When pooling with a saved plan that omits response-pattern counts,
+#'   `pattern_nsim` counts only diagnosed replications.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' spec <- specify_target(dgp, "condition", criterion = "power",
+#'                        engine = "bayes_laplace", analysis_re = "intercept_only")
+#' # Five replications demonstrate the output. Use more to make a design decision.
+#' plan <- optimize_sample_size(spec, c(16, 18), 8, method = "grid",
+#'   nsim_init = 5L, nsim_final = 5L, n_verify = 2L, nsim_sensitivity = 0L,
+#'   workers = 1L, verbose = FALSE)
+#' plan$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 #' @export
 optimize_sample_size <- function(
   spec,
@@ -86,6 +111,8 @@ optimize_sample_size <- function(
   nsim_init = 80L,
   nsim_final = 1000L,
   nsim_topup = 0L,
+  topup_policy = c("independent", "pooled"),
+  mc_adjustment = c("none", "bonferroni"),
   n_verify = 4L,
   early_stop = TRUE,
   nsim_sensitivity = 200L,
@@ -94,16 +121,27 @@ optimize_sample_size <- function(
   seed = 20261119L,
   verbose = TRUE
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("optimize_sample_size", environment(), match.call()))
+  }
   if (!inherits(spec, "glmmplanr_spec")) {
     cli::cli_abort("{.arg spec} must be a {.cls glmmplanr_spec} object.")
   }
   prefer <- match.arg(prefer)
   method <- match.arg(method)
+  topup_policy <- match.arg(topup_policy)
+  mc_adjustment <- match.arg(mc_adjustment)
   parallel_backend <- match.arg(parallel_backend)
   workers <- max(1L, as.integer(workers))
   seed <- as.integer(seed)
   nsim_topup <- max(0L, as.integer(nsim_topup))
   early_stop <- isTRUE(early_stop)
+  if (nsim_topup > 0L && identical(topup_policy, "pooled")) {
+    cli::cli_warn(c(
+      "Using {.code topup_policy = 'pooled'} combines Stage-2 and adaptive top-up replications.",
+      "i" = "Data-adaptive pooling invalidates nominal fixed-sample Wilson coverage; use {.code topup_policy = 'independent'} or confirm the final design with {.fn validate_design_point}."
+    ))
+  }
 
   # Start persistent mirai daemon pool once across all stages when applicable
   # (including macOS where fork/mclapply can deadlock after CoreText/GCD calls)
@@ -178,6 +216,8 @@ optimize_sample_size <- function(
       nsim_init = as.integer(nsim_init),
       nsim_final = as.integer(nsim_final),
       nsim_topup = nsim_topup,
+      topup_policy = topup_policy,
+      mc_adjustment = if (is.null(scenarios)) mc_adjustment else "none",
       n_verify = as.integer(n_verify),
       early_stop = early_stop,
       workers = workers,
@@ -205,6 +245,8 @@ optimize_sample_size <- function(
       nsim_init = as.integer(nsim_init),
       nsim_final = as.integer(nsim_final),
       nsim_topup = nsim_topup,
+      topup_policy = topup_policy,
+      mc_adjustment = mc_adjustment,
       n_verify = as.integer(n_verify),
       early_stop = early_stop,
       core_res = core_res,
@@ -268,6 +310,19 @@ optimize_sample_size <- function(
   }
 
   pareto_df <- verified_pareto
+  n_decisions <- if (!is.null(robust_info)) nrow(robust_info$scenario_evaluations) else nrow(verified_df)
+  mc_conf_eff <- if (identical(mc_adjustment, "bonferroni")) {
+    bonferroni_mc_conf_level(spec$mc_conf_level, n_decisions)
+  } else {
+    spec$mc_conf_level
+  }
+  used_topup_rows <- if (!is.null(robust_info)) {
+    ev_chk <- robust_info$scenario_evaluations
+    "nsim_topup_used" %in% names(ev_chk) && any(ev_chk$nsim_topup_used > 0L, na.rm = TRUE)
+  } else {
+    "nsim_topup_used" %in% names(verified_df) && any(verified_df$nsim_topup_used > 0L, na.rm = TRUE)
+  }
+  adaptive_pooled <- isTRUE(used_topup_rows && identical(topup_policy, "pooled"))
   elapsed_sec <- unname((proc.time() - t_start)[3L])
   if (isTRUE(verbose)) {
     cli::cli_inform(
@@ -297,13 +352,18 @@ optimize_sample_size <- function(
         n_item_grid = i_grid,
         n_grid_total = nrow(grid_df),
         n_grid_verified = nrow(verified_df),
-        simulation_version = 2L,
+        n_stage2_decisions = n_decisions,
+        simulation_version = 3L,
         n_grid_stride = n_grid_stride,
         n_eval_init = as.integer(n_eval_init),
         n_eval_adapt = as.integer(n_eval_adapt),
         nsim_init = as.integer(nsim_init),
         nsim_final = as.integer(nsim_final),
         nsim_topup = nsim_topup,
+        topup_policy = topup_policy,
+        adaptive_pooled = adaptive_pooled,
+        mc_adjustment = mc_adjustment,
+        mc_conf_level_effective = mc_conf_eff,
         early_stop = early_stop,
         workers = workers,
         seed = seed,
@@ -325,6 +385,11 @@ optimize_sample_size <- function(
 #' @param verbose Logical; notify if stored random-slope sensitivity table is
 #'   cleared because the selected candidate changed (default `FALSE`).
 #' @return Updated `"glmmplanr_result"` object.
+#' @examples
+#' # Create the five-replication demonstration plan from the optimizer help.
+#' example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+#' reordered <- switch_preference(plan, "fewer_items", verbose = FALSE)
+#' reordered$optimal[c("n_subj", "n_item", "decision_status")]
 #' @export
 switch_preference <- function(
   result,
@@ -387,8 +452,59 @@ attach_grid_meta <- function(df_sub, grid_df) {
   df_sub
 }
 
+reclassify_verified_mc <- function(df, spec, conf_level) {
+  if (is.null(df) || nrow(df) == 0L || !is.finite(conf_level)) return(df)
+  for (i in seq_len(nrow(df))) {
+    n_tot <- df$nsim[i]
+    n_val <- df$n_valid[i]
+    denom <- if (spec$failure_policy == "effective") n_tot else n_val
+    valid_gate_ok <- if (spec$failure_policy == "effective") TRUE else ((n_val / n_tot) >= spec$min_valid_rate)
+
+    k_sig <- if (is.finite(df$effective_power[i])) round(df$effective_power[i] * n_tot) else NA_integer_
+    mc_pow <- wilson_mc_ci(k_sig, denom, conf_level = conf_level)
+    df$power_mc_lo[i] <- unname(mc_pow["lo"])
+    df$power_mc_hi[i] <- unname(mc_pow["hi"])
+
+    mc_aipe <- c(lo = NA_real_, hi = NA_real_)
+    if (!is.null(spec$ci_width) && "effective_aipe_prob" %in% names(df) && is.finite(df$effective_aipe_prob[i])) {
+      k_aipe <- round(df$effective_aipe_prob[i] * n_tot)
+      mc_aipe <- wilson_mc_ci(k_aipe, denom, conf_level = conf_level)
+      df$aipe_mc_lo[i] <- unname(mc_aipe["lo"])
+      df$aipe_mc_hi[i] <- unname(mc_aipe["hi"])
+    }
+
+    mc_joint <- c(lo = NA_real_, hi = NA_real_)
+    if (!is.null(spec$ci_width) && "k_joint" %in% names(df) && is.finite(df$k_joint[i])) {
+      mc_joint <- wilson_mc_ci(df$k_joint[i], denom, conf_level = conf_level)
+      df$joint_mc_lo[i] <- unname(mc_joint["lo"])
+      df$joint_mc_hi[i] <- unname(mc_joint["hi"])
+    }
+
+    k_rope <- if ("effective_rope_prob" %in% names(df) && is.finite(df$effective_rope_prob[i])) {
+      round(df$effective_rope_prob[i] * n_tot)
+    } else {
+      NA_integer_
+    }
+    mc_rope <- wilson_mc_ci(k_rope, denom, conf_level = conf_level)
+    if ("rope_mc_lo" %in% names(df)) {
+      df$rope_mc_lo[i] <- unname(mc_rope["lo"])
+      df$rope_mc_hi[i] <- unname(mc_rope["hi"])
+    }
+
+    df$decision_status[i] <- compute_decision_status(
+      spec = spec,
+      valid_gate_ok = valid_gate_ok,
+      mc_pow = mc_pow,
+      mc_aipe = mc_aipe,
+      mc_rope = mc_rope,
+      mc_joint = mc_joint
+    )
+  }
+  df
+}
+
 #' Core Single-Specification Search + Pareto Verification + Top-Up Helper
-#' @keywords internal
+#' @noRd
 run_single_spec_search <- function(
   spec,
   grid_df,
@@ -400,6 +516,8 @@ run_single_spec_search <- function(
   nsim_init,
   nsim_final,
   nsim_topup,
+  topup_policy = "independent",
+  mc_adjustment = "none",
   n_verify,
   early_stop = FALSE,
   workers,
@@ -465,10 +583,15 @@ run_single_spec_search <- function(
         point_base_topup = point_base_topup,
         spec = spec,
         nsim_topup = nsim_topup,
+        topup_policy = topup_policy,
         workers = workers,
         parallel_backend = parallel_backend,
         verbose = verbose
       )
+    }
+    if (identical(mc_adjustment, "bonferroni")) {
+      conf_eff <- bonferroni_mc_conf_level(spec$mc_conf_level, nrow(verified_df))
+      verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
     }
     eval_all <- verified_df
     surf <- build_surrogate_surface(grid_df, eval_all, spec, prefer = prefer)
@@ -558,10 +681,16 @@ run_single_spec_search <- function(
     verified_raw <- s2_out$raw
 
     if (!any(verified_df$decision_status == "pass")) {
-      gp_feas_idx <- which(surf_s1$pred_criterion_met &
-        !(paste(surf_s1$n_subj, surf_s1$n_item) %in% paste(verified_df$n_subj, verified_df$n_item)))
+      # Refit GP surface incorporating Stage-2 evaluations so systematic
+      # Stage-1 vs Stage-2 estimator shifts are corrected before step-up selection.
+      s1_k0 <- !(paste(eval_s1$n_subj, eval_s1$n_item) %in%
+                   paste(verified_df$n_subj, verified_df$n_item))
+      eval_refit <- align_and_bind_rows(list(eval_s1[s1_k0, , drop = FALSE], verified_df))
+      surf_refit <- build_surrogate_surface(grid_df, eval_refit, spec, prefer = prefer)
+      gp_feas_idx <- which(surf_refit$pred_criterion_met &
+        !(paste(surf_refit$n_subj, surf_refit$n_item) %in% paste(verified_df$n_subj, verified_df$n_item)))
       if (length(gp_feas_idx) > 0L) {
-        best_backup <- gp_feas_idx[order(surf_s1$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
+        best_backup <- gp_feas_idx[order(surf_refit$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
         ex_out <- evaluate_grid_batch(
           spec = spec,
           grid_sub = grid_df[best_backup, , drop = FALSE],
@@ -616,10 +745,16 @@ run_single_spec_search <- function(
         point_base_topup = point_base_topup,
         spec = spec,
         nsim_topup = nsim_topup,
+        topup_policy = topup_policy,
         workers = workers,
         parallel_backend = parallel_backend,
         verbose = verbose
       )
+    }
+
+    if (identical(mc_adjustment, "bonferroni")) {
+      conf_eff <- bonferroni_mc_conf_level(spec$mc_conf_level, nrow(verified_df))
+      verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
     }
 
     s1_keep <- !(paste(eval_s1$n_subj, eval_s1$n_item) %in%
@@ -668,7 +803,7 @@ select_recommended_from_verified <- function(verified_df, spec) {
 }
 
 #' Execute Pre-Specified Independent Top-Up Verification on Indeterminate Candidates
-#' @keywords internal
+#' @noRd
 apply_indeterminate_topup <- function(
   verified_df,
   verified_raw,
@@ -676,6 +811,7 @@ apply_indeterminate_topup <- function(
   point_base_topup,
   spec,
   nsim_topup,
+  topup_policy = "independent",
   workers,
   parallel_backend,
   verbose = TRUE
@@ -692,7 +828,7 @@ apply_indeterminate_topup <- function(
 
   if (verbose) {
     cli::cli_inform(
-      "Stage 3 (Top-Up): Running {nsim_topup} independent replications on {length(ind_idx)} borderline ({.val indeterminate}) candidate(s)..."
+      "Stage 3 (Top-Up, policy = {.val {topup_policy}}): Running {nsim_topup} independent replications on {length(ind_idx)} borderline ({.val indeterminate}) candidate(s)..."
     )
   }
 
@@ -712,27 +848,37 @@ apply_indeterminate_topup <- function(
     fast_stage = FALSE,
     workers = workers,
     parallel_backend = parallel_backend,
-    keep_raw = TRUE,
+    keep_raw = identical(topup_policy, "pooled"),
     stage_label = "Stage 3 Top-Up",
     verbose = verbose
   )
 
   for (j in seq_along(ind_idx)) {
     r_i <- ind_idx[j]
-    raw_init <- verified_raw[[r_i]]
-    raw_top <- top_out$raw[[j]]
+    if (identical(topup_policy, "independent")) {
+      fresh <- attach_grid_meta(top_out$summary[j, , drop = FALSE], grid_df)
+      fresh$stage <- paste0(verified_df$stage[r_i], "+independent")
+      fresh$nsim_initial <- verified_df$nsim_initial[r_i]
+      fresh$nsim_topup_used <- fresh$nsim
+      fresh$decision_initial <- verified_df$decision_initial[r_i]
+      fresh$topup_only_power <- fresh$power
+      verified_df[r_i, names(fresh)] <- fresh
+    } else {
+      raw_init <- verified_raw[[r_i]]
+      raw_top <- top_out$raw[[j]]
 
-    pooled <- pool_replications(raw_init, raw_top, spec, verified_df[r_i, , drop = FALSE],
-                                top_out$summary[j, , drop = FALSE])
+      pooled <- pool_replications(raw_init, raw_top, spec, verified_df[r_i, , drop = FALSE],
+                                  top_out$summary[j, , drop = FALSE])
 
-    pooled <- attach_grid_meta(pooled, grid_df)
-    pooled$stage <- paste0(verified_df$stage[r_i], "+topup")
-    pooled$nsim_initial <- raw_init$nsim
-    pooled$nsim_topup_used <- raw_top$nsim
-    pooled$decision_initial <- verified_df$decision_initial[r_i]
-    pooled$topup_only_power <- top_out$summary$power[j]
+      pooled <- attach_grid_meta(pooled, grid_df)
+      pooled$stage <- paste0(verified_df$stage[r_i], "+topup")
+      pooled$nsim_initial <- raw_init$nsim
+      pooled$nsim_topup_used <- raw_top$nsim
+      pooled$decision_initial <- verified_df$decision_initial[r_i]
+      pooled$topup_only_power <- top_out$summary$power[j]
 
-    verified_df[r_i, names(pooled)] <- pooled
+      verified_df[r_i, names(pooled)] <- pooled
+    }
   }
 
   verified_df
@@ -758,268 +904,6 @@ pool_replications <- function(initial, extra, spec, row, extra_summary) {
   out
 }
 
-dgp_is_equivalent <- function(dgp1, dgp2, tol = 1e-9) {
-  if (!inherits(dgp1, "glmmplanr_dgp") || !inherits(dgp2, "glmmplanr_dgp")) return(FALSE)
-  # Formula environments can differ between otherwise identical designs.
-  fields <- setdiff(names(dgp1$design), c("fixed_rhs", "subj_rhs", "item_rhs", "testlet_rhs",
-                                        "items_per_subject", "item_seed"))
-  pars <- c("chance", "beta", "mu_cells", "Sigma_subj", "Sigma_item", "Sigma_testlet",
-            "L_subj", "L_item", "L_testlet", "n_quad")
-  identical(testlet_interaction_sd(dgp1), testlet_interaction_sd(dgp2)) &&
-    identical(dgp1$design$items_per_subject, dgp2$design$items_per_subject) &&
-    identical(dgp1$design$item_seed, dgp2$design$item_seed) &&
-    identical(dropout_rate(dgp1$design), dropout_rate(dgp2$design)) &&
-    identical(dgp1$design[fields], dgp2$design[fields]) &&
-    isTRUE(all.equal(dgp1[pars], dgp2[pars], tolerance = tol))
-}
-
-align_and_bind_rows <- function(df_list) {
-  df_list <- Filter(function(x) !is.null(x) && nrow(x) > 0L, df_list)
-  if (length(df_list) == 0L) return(data.frame())
-  if (length(df_list) == 1L) return(df_list[[1L]])
-  all_cols <- Reduce(union, lapply(df_list, names))
-  aligned <- lapply(df_list, function(d) {
-    miss <- setdiff(all_cols, names(d))
-    for (cn in miss) d[[cn]] <- NA
-    d[, all_cols, drop = FALSE]
-  })
-  out <- do.call(rbind, aligned)
-  rownames(out) <- NULL
-  out
-}
-
-#' Multi-Scenario Robust Sample-Size Comparison (Pure Sample-Size Increments)
-#' @keywords internal
-run_multi_scenario_analysis <- function(
-  base_spec,
-  scenarios,
-  standard_scenario,
-  grid_df,
-  n_grid_stride,
-  prefer,
-  method,
-  n_eval_init,
-  n_eval_adapt,
-  nsim_init,
-  nsim_final,
-  nsim_topup,
-  n_verify,
-  early_stop = FALSE,
-  core_res = NULL,
-  workers,
-  parallel_backend,
-  seed,
-  verbose
-) {
-  scen_names <- names(scenarios)
-  if (is.null(scen_names) || any(!nzchar(scen_names))) {
-    scen_names <- paste0("scenario_", seq_along(scenarios))
-    names(scenarios) <- scen_names
-  }
-
-  if (anyDuplicated(scen_names)) cli::cli_abort("Scenario names must be unique.")
-  if (is.null(standard_scenario)) {
-    if ("standard" %in% scen_names) {
-      standard_scenario <- "standard"
-    } else {
-      effs <- vapply(scenarios, function(d) {
-        abs(true_prob_effect(d, base_spec$contrast_weights[d$design$cells$cell_name], base_spec$prob_estimand))
-      }, numeric(1L))
-      standard_scenario <- scen_names[order(effs)[ceiling(length(effs) / 2)]]
-    }
-  } else if (!(standard_scenario %in% scen_names)) {
-    cli::cli_abort("{.arg standard_scenario} ({.val {standard_scenario}}) not found in {.val {scen_names}}.")
-  }
-
-  make_scen_spec <- function(dgp_s) {
-    sp_s <- base_spec
-    sp_s$dgp <- dgp_s
-    sp_s$effect_col <- resolve_effect_column(dgp_s$design, base_spec$effect_input)
-    sp_s$contrast_weights <- base_spec$contrast_weights[dgp_s$design$cells$cell_name]
-    sp_s$engine <- resolve_available_engine(base_spec$requested_engine,
-      chance = if (base_spec$analysis_link == "match_dgp") dgp_s$chance else 0, notify = FALSE)
-    sp_s$true_beta <- unname(dgp_s$beta[[sp_s$effect_col]])
-    sp_s$true_prob_diff <- true_prob_effect(
-      dgp_s, weights = sp_s$contrast_weights, estimand = base_spec$prob_estimand
-    )
-    sp_s$true_prob_diff_pp <- sp_s$true_prob_diff * 100.0
-    sp_s$true_effect_target <- switch(
-      base_spec$scale,
-      logit = sp_s$true_beta,
-      prob = sp_s$true_prob_diff,
-      pp = sp_s$true_prob_diff_pp
-    )
-    sp_s
-  }
-
-  scen_specs <- lapply(scenarios, make_scen_spec)
-
-  # Explore each scenario, then verify designs on the intersection of their
-  # predicted feasible regions, including compromises absent from individual fronts.
-  searches <- lapply(seq_along(scen_specs), function(i) {
-    sp <- scen_specs[[i]]
-    if (!is.null(core_res) && dgp_is_equivalent(base_spec$dgp, sp$dgp)) return(core_res)
-    if (isTRUE(verbose)) {
-      cli::cli_inform("Exploring scenario {i}/{length(scen_specs)} ({.val {scen_names[i]}})...")
-    }
-    run_single_spec_search(
-      sp, grid_df, n_grid_stride, prefer, method, n_eval_init, n_eval_adapt,
-      nsim_init, nsim_final, nsim_topup, n_verify, early_stop, workers,
-      parallel_backend, seed, stage_offset = 7L + 3L * (i - 1L), verbose = verbose)
-  })
-  names(searches) <- scen_names
-  surfaces <- lapply(searches, `[[`, "surface")
-  combined <- robust_surface(grid_df, surfaces)
-  candidates <- lapply(searches, function(res) res$verified[c("n_subj", "n_item")])
-  robust_idx <- select_stage2_candidates(combined, base_spec, prefer, n_verify)
-  cand_coords <- unique(rbind(do.call(rbind, candidates),
-                              grid_df[robust_idx, c("n_subj", "n_item"), drop = FALSE]))
-  cand_match <- match(
-    paste(cand_coords$n_subj, cand_coords$n_item),
-    paste(grid_df$n_subj, grid_df$n_item)
-  )
-  cand_grid <- grid_df[cand_match, , drop = FALSE]
-  cand_keys <- paste(cand_grid$n_subj, cand_grid$n_item)
-
-  scen_evals <- vector("list", length(scenarios))
-  names(scen_evals) <- scen_names
-
-  verify_scenario <- function(sub_grid, snm, s_i) {
-    sp <- scen_specs[[snm]]
-    streams <- function(slot) allocate_stage_point_streams(
-      seed, stage_slot = slot, grid_ids = sub_grid$orig_grid_id, stride = n_grid_stride)
-    verification_offset <- 7L + 3L * length(scenarios)
-    batch <- evaluate_grid_batch(sp, sub_grid, streams(verification_offset + s_i), nsim_final,
-      sp$engine, FALSE, workers, parallel_backend, keep_raw = nsim_topup > 0L,
-      allow_curtail = early_stop,
-      stage_label = sprintf("Scenario %s (%d/%d)", snm, s_i, length(scenarios)),
-      verbose = verbose)
-    df <- attach_grid_meta(batch$summary, sub_grid)
-    df$stage <- "scenario_final"
-    if (nsim_topup > 0L) {
-      df <- apply_indeterminate_topup(df, batch$raw, sub_grid,
-        streams(verification_offset + length(scenarios) + s_i), sp, nsim_topup, workers, parallel_backend, verbose)
-    }
-    df
-  }
-
-  for (s_i in seq_along(scenarios)) {
-    snm <- scen_names[s_i]
-    pre_df <- searches[[snm]]$verified
-    pre_keys <- paste(pre_df$n_subj, pre_df$n_item)
-    hit_idx <- match(cand_keys, pre_keys)
-    miss_mask <- is.na(hit_idx)
-    reused_part <- if (any(!miss_mask)) {
-      pre_df[hit_idx[!miss_mask], , drop = FALSE]
-    } else {
-      NULL
-    }
-    new_part <- if (any(miss_mask)) {
-      verify_scenario(cand_grid[miss_mask, , drop = FALSE], snm, s_i)
-    } else {
-      NULL
-    }
-    comb <- align_and_bind_rows(list(reused_part, new_part))
-    ord_back <- match(cand_keys, paste(comb$n_subj, comb$n_item))
-    ev_s <- attach_grid_meta(comb[ord_back, , drop = FALSE], cand_grid)
-    ev_s$scenario <- snm
-    rownames(ev_s) <- NULL
-    scen_evals[[snm]] <- ev_s
-  }
-
-  all_scen_df <- align_and_bind_rows(scen_evals)
-  rownames(all_scen_df) <- NULL
-
-  plans <- rank_scenarios(all_scen_df, standard_scenario, standard_scenario, base_spec)
-  combined$evaluated <- paste(combined$n_subj, combined$n_item) %in% cand_keys
-  plans$surface <- combined
-  plans$specs <- scen_specs
-  plans
-}
-
-robust_surface <- function(grid, surfaces) {
-  combine <- function(column, fun) Reduce(fun, lapply(surfaces, `[[`, column))
-  for (nm in c("pred_power", "pred_aipe_prob", "pred_joint_prob", "pred_rope_prob", "prob_feasible")) {
-    grid[[nm]] <- combine(nm, pmin)
-  }
-  for (nm in c("pred_ci_width", "pred_prob_ci_width_pp")) grid[[nm]] <- combine(nm, pmax)
-  grid$pred_criterion_met <- combine("pred_criterion_met", `&`)
-  grid
-}
-
-rank_scenarios <- function(all_scen_df, standard_scenario, toughest_name, spec) {
-  scen_evals <- split(all_scen_df, all_scen_df$scenario)
-  scen_evals <- scen_evals[c(toughest_name, setdiff(names(scen_evals), toughest_name))]
-  std_df <- scen_evals[[standard_scenario]]
-  keys <- paste(std_df$n_subj, std_df$n_item)
-  scen_evals <- lapply(scen_evals, function(d) {
-    idx <- match(keys, paste(d$n_subj, d$n_item))
-    if (anyNA(idx)) cli::cli_abort("Missing scenario evaluation at a candidate design.")
-    d[idx, , drop = FALSE]
-  })
-  standard <- select_recommended_from_verified(std_df, spec)
-  feasible_std <- standard$feasible
-  opt_std <- standard$optimal
-  statuses <- c("fail", "indeterminate", "pass")
-  limiting <- lapply(seq_along(keys), function(i) {
-    rows <- do.call(rbind, lapply(scen_evals, function(d) d[i, , drop = FALSE]))
-    ord <- order(match(rows$decision_status, statuses), attainment_score(rows, spec))
-    rows[ord[1L], , drop = FALSE]
-  })
-  verified <- do.call(rbind, limiting)
-  verified$criterion_met <- Reduce(`&`, lapply(scen_evals, `[[`, "criterion_met"))
-  robust <- select_recommended_from_verified(verified, spec)
-  feasible_rob <- robust$feasible
-  opt_rob <- robust$optimal
-  pick_r <- match(paste(opt_rob$n_subj, opt_rob$n_item), keys)
-
-  delta_subj <- as.integer(opt_rob$n_subj - opt_std$n_subj)
-  delta_item <- as.integer(opt_rob$n_item - opt_std$n_item)
-  delta_trials <- as.integer(opt_rob$n_trials_scheduled - opt_std$n_trials_scheduled)
-
-  if (!feasible_std || !feasible_rob) {
-    delta_subj <- delta_item <- delta_trials <- NA_integer_
-  }
-
-  comparison_df <- data.frame(
-    plan = c(
-      sprintf("Standard Plan (%s)", standard_scenario),
-      sprintf("Robust All-Scenario Plan (%d scenarios)", length(scen_evals))
-    ),
-    feasible = c(feasible_std, feasible_rob),
-    n_subj = c(opt_std$n_subj, opt_rob$n_subj),
-    n_item = c(opt_std$n_item, opt_rob$n_item),
-    n_trials_scheduled = c(opt_std$n_trials_scheduled, opt_rob$n_trials_scheduled),
-    delta_subj = c(0L, delta_subj),
-    delta_item = c(0L, delta_item),
-    delta_trials = c(0L, delta_trials),
-    worst_case_power = c(
-      min(vapply(scen_evals, function(d) d$power[d$n_subj == opt_std$n_subj & d$n_item == opt_std$n_item][1L], numeric(1L))),
-      min(vapply(scen_evals, function(d) d$power[pick_r], numeric(1L)))
-    ),
-    worst_case_ci_width = c(
-      max(vapply(scen_evals, function(d) d$ci_width_mean[d$n_subj == opt_std$n_subj & d$n_item == opt_std$n_item][1L], numeric(1L))),
-      max(vapply(scen_evals, function(d) d$ci_width_mean[pick_r], numeric(1L)))
-    ),
-    stringsAsFactors = FALSE
-  )
-
-  list(
-    standard_scenario = standard_scenario,
-    toughest_scenario = as.character(opt_rob$scenario[1L]),
-    optimal_standard = opt_std,
-    optimal_robust = opt_rob,
-    feasible_standard = feasible_std,
-    feasible_robust = feasible_rob,
-    delta_subj = delta_subj,
-    delta_item = delta_item,
-    delta_trials = delta_trials,
-    comparison = comparison_df,
-    verified = verified,
-    scenario_evaluations = all_scen_df
-  )
-}
-
 #' Run Additional Independent Top-Up Replications on Borderline Candidates
 #'
 #' Executes `nsim_extra` fresh, independent Monte Carlo replications (using a
@@ -1030,22 +914,40 @@ rank_scenarios <- function(all_scen_df, standard_scenario, toughest_name, spec) 
 #' @param result A `"glmmplanr_result"` object.
 #' @param nsim_extra Positive integer number of independent additional
 #'   replications per borderline candidate (default `1000L`).
+#' @param topup_policy How top-up replications are used to update borderline
+#'   candidates:
+#'   * `"independent"` (default): Evaluates each `"indeterminate"` candidate
+#'     solely on the fresh `nsim_extra` batch without pooling prior Stage-2
+#'     draws, preserving nominal fixed-sample Wilson coverage.
+#'   * `"pooled"`: Pools prior and new replications (emits a warning and flags
+#'     `search_meta$adaptive_pooled = TRUE` because data-adaptive pooling
+#'     invalidates nominal fixed-sample Wilson coverage).
 #' @param workers Integer number of parallel workers.
 #' @param parallel_backend Parallel backend (`"auto"`, `"mirai"`, `"multicore"`,
 #'   or `"sequential"`).
 #' @param verbose Logical; print progress message (default `TRUE`).
 #' @return Updated `"glmmplanr_result"` object with refined candidate diagnostics.
+#' @examples
+#' # Create the five-replication demonstration plan from the optimizer help.
+#' example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+#' more <- topup_verification(plan, nsim_extra = 5L, verbose = FALSE)
+#' more$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 #' @export
 topup_verification <- function(
   result,
   nsim_extra = 1000L,
+  topup_policy = c("independent", "pooled"),
   workers = result$search_meta$workers,
   parallel_backend = "auto",
   verbose = TRUE
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("topup_verification", environment(), match.call()))
+  }
   if (!inherits(result, "glmmplanr_result")) {
     cli::cli_abort("{.arg result} must be a {.cls glmmplanr_result} object.")
   }
+  topup_policy <- match.arg(topup_policy)
   nsim_extra <- as.integer(nsim_extra)
   if (nsim_extra < 1L) cli::cli_abort("{.arg nsim_extra} must be a positive integer.")
 
@@ -1054,7 +956,7 @@ topup_verification <- function(
   }
   meta <- result$search_meta
   old_specs <- c(list(result$spec), result$robust$specs)
-  if (is.null(meta$simulation_version) &&
+  if (identical(topup_policy, "pooled") && is.null(meta$simulation_version) &&
       any(vapply(old_specs, function(sp) isTRUE(sp$dgp$design$attrition > 0), logical(1)))) {
     cli::cli_abort("Rerun this plan before pooling results from different trial missingness mechanisms.")
   }
@@ -1062,26 +964,58 @@ topup_verification <- function(
   rc <- result$robust
   decisions <- if (is.null(rc)) result$verified else rc$scenario_evaluations
   if (!any(decisions$decision_status == "indeterminate")) return(result)
+  if (identical(topup_policy, "pooled") &&
+      (is.null(meta$simulation_version) || meta$simulation_version < 3L)) {
+    used_old_scale <- vapply(old_specs, function(sp) {
+      isTRUE(sp$prior_tau_sd < 0.5) &&
+        (identical(sp$engine, "bayes_laplace") || identical(sp$on_singular, "switch_bayes"))
+    }, logical(1))
+    if (any(used_old_scale)) {
+      cli::cli_abort("Rerun this plan before pooling replications. The previous regularized estimator used 0.5 for {.arg prior_tau_sd} values below 0.5.")
+    }
+  }
+  if (identical(topup_policy, "pooled")) {
+    cli::cli_warn(c(
+      "Pooling prior Stage-2 and adaptive top-up replications ({.code topup_policy = 'pooled'}).",
+      "i" = "Data-adaptive pooling invalidates nominal fixed-sample Wilson coverage; use {.code topup_policy = 'independent'} or confirm the final design with {.fn validate_design_point}."
+    ))
+  }
+  mc_adj <- if (!is.null(meta$mc_adjustment)) meta$mc_adjustment else "none"
   if (is.null(rc)) {
     result$verified <- topup_rows(result$verified, result$spec, result, nsim_extra,
-                                 50L + round_num, workers, parallel_backend, verbose)
+                                 50L + round_num, topup_policy, workers, parallel_backend, verbose)
+    if (identical(mc_adj, "bonferroni")) {
+      conf_eff <- bonferroni_mc_conf_level(result$spec$mc_conf_level, nrow(result$verified))
+      result$verified <- reclassify_verified_mc(result$verified, result$spec, conf_eff)
+      result$search_meta$mc_conf_level_effective <- conf_eff
+    }
   } else {
-    if (is.null(rc$specs)) cli::cli_abort("Rerun this legacy plan to recover the scenario models for top-up.")
+    if (is.null(rc$specs)) cli::cli_abort("Rerun this saved plan to recover the scenario models for top-up.")
     ev <- rc$scenario_evaluations
     names_s <- names(rc$specs)
     slots <- max(50L, 30L + 2L * length(names_s), 7L + 5L * length(names_s)) + (round_num - 1L) * length(names_s) + seq_along(names_s)
     updated <- lapply(seq_along(names_s), function(i) {
       sn <- names_s[i]
       topup_rows(ev[ev$scenario == sn, , drop = FALSE], rc$specs[[sn]], result,
-                 nsim_extra, slots[i], workers, parallel_backend, verbose)
+                 nsim_extra, slots[i], topup_policy, workers, parallel_backend, verbose)
     })
-    result$robust$scenario_evaluations <- align_and_bind_rows(updated)
+    ev_new <- align_and_bind_rows(updated)
+    if (identical(mc_adj, "bonferroni")) {
+      conf_eff <- bonferroni_mc_conf_level(result$spec$mc_conf_level, nrow(ev_new))
+      ev_new <- reclassify_verified_mc(ev_new, result$spec, conf_eff)
+      result$search_meta$mc_conf_level_effective <- conf_eff
+    }
+    result$robust$scenario_evaluations <- ev_new
   }
   result$search_meta$topup_rounds <- round_num
+  result$search_meta$topup_policy <- topup_policy
+  if (identical(topup_policy, "pooled")) {
+    result$search_meta$adaptive_pooled <- TRUE
+  }
   switch_preference(result, result$prefer)
 }
 
-topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, parallel_backend, verbose) {
+topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, workers, parallel_backend, verbose) {
   ind_idx <- which(ver$decision_status == "indeterminate")
   if (!length(ind_idx)) return(ver)
   stride <- result$search_meta$n_grid_stride
@@ -1098,7 +1032,7 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, paralle
 
   if (verbose) {
     cli::cli_inform(
-      "Running {nsim_extra} independent top-up replications on {length(ind_idx)} indeterminate candidate(s)..."
+      "Running {nsim_extra} independent top-up replications (policy = {.val {topup_policy}}) on {length(ind_idx)} indeterminate candidate(s)..."
     )
   }
 
@@ -1111,7 +1045,7 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, paralle
     fast_stage = FALSE,
     workers = workers,
     parallel_backend = parallel_backend,
-    keep_raw = TRUE,
+    keep_raw = identical(topup_policy, "pooled"),
     stage_label = "Top-Up Verification",
     verbose = verbose
   )
@@ -1120,6 +1054,17 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, paralle
     r_i <- ind_idx[j]
     old_r <- ver[r_i, , drop = FALSE]
     new_r <- extra_out$summary[j, , drop = FALSE]
+    if (identical(topup_policy, "independent")) {
+      fresh <- attach_grid_meta(new_r, surf)
+      if ("stage" %in% names(ver)) {
+        fresh$stage <- paste0(old_r$stage, "+independent")
+      }
+      if ("scenario" %in% names(ver)) {
+        fresh$scenario <- old_r$scenario
+      }
+      ver[r_i, names(fresh)] <- fresh
+      next
+    }
     if (is.list(old_r$replications) && is.list(old_r$replications[[1L]])) {
       summary <- attach_grid_meta(
         pool_replications(old_r$replications[[1L]], extra_out$raw[[j]], sp, old_r, new_r),
@@ -1129,7 +1074,7 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, paralle
       next
     }
     ver[r_i, pattern_columns] <- as.list(pooled_pattern_totals(old_r, new_r))
-    # Older logit-scale results only retain aggregate counts.
+    # Fallback when a saved result retains only aggregate counts.
     n1 <- old_r$nsim; n2 <- new_r$nsim; ntot <- n1 + n2
     v1 <- old_r$n_valid; v2 <- new_r$n_valid; vtot <- v1 + v2
 
@@ -1217,7 +1162,7 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, workers, paralle
 }
 
 #' Chunked Reproducible Parallel Evaluator Over Candidate Lattice Points
-#' @keywords internal
+#' @noRd
 evaluate_grid_batch <- function(
   spec,
   grid_sub,
@@ -1510,149 +1455,6 @@ evaluate_grid_batch <- function(
   list(summary = do.call(rbind, pt_rows), raw = raw_list)
 }
 
-split_indices <- function(n, k) {
-  if (k <= 1L) return(list(seq_len(n)))
-  grp <- cut(seq_len(n), breaks = k, labels = FALSE)
-  unname(split(seq_len(n), grp))
-}
-
-start_mirai_pool <- function(workers) {
-  tryCatch({
-    mirai::daemons(workers)
-    is_dev <- isNamespaceLoaded("pkgload") &&
-      isTRUE(tryCatch(pkgload::is_dev_package("glmmplanr"), error = function(e) FALSE))
-    if (is_dev) {
-      pkg_root <- getNamespaceInfo(asNamespace("glmmplanr"), "path")
-      init_res <- mirai::everywhere(
-        pkgload::load_all(p, compile = FALSE, quiet = TRUE),
-        p = pkg_root
-      )[]
-      if (any(vapply(init_res, mirai::is_error_value, logical(1L)))) {
-        try(mirai::daemons(0L), silent = TRUE)
-        return(FALSE)
-      }
-    }
-    TRUE
-  }, error = function(e) {
-    try(mirai::daemons(0L), silent = TRUE)
-    FALSE
-  })
-}
-
-run_parallel_tasks <- function(
-  tasks,
-  worker_fn,
-  workers,
-  parallel_backend,
-  stage_label = NULL,
-  verbose = FALSE
-) {
-  n_tasks <- length(tasks)
-  if (n_tasks == 0L) return(list())
-
-  task_weights <- vapply(tasks, function(t) {
-    if (is.list(t) && !is.null(t$rep_idx)) length(t$rep_idx) else 1L
-  }, integer(1L))
-  total_reps <- sum(task_weights)
-  lbl <- if (!is.null(stage_label) && nzchar(stage_label)) stage_label else "Simulating"
-
-  show_pb <- isTRUE(verbose) && total_reps > 1L && n_tasks > 1L
-  pb_id <- NULL
-  if (show_pb) {
-    pb_id <- cli::cli_progress_bar(
-      name = lbl,
-      total = total_reps,
-      format = paste0(
-        "{cli::pb_spin} {cli::pb_name} [{cli::pb_bar}] ",
-        "{cli::pb_current}/{cli::pb_total} sims ({cli::pb_percent}) | ",
-        "Elapsed: {cli::pb_elapsed} | ETA: {cli::pb_eta}"
-      ),
-      clear = FALSE
-    )
-    on.exit(cli::cli_progress_done(id = pb_id), add = TRUE)
-  }
-
-  run_seq <- function(idx_vec) {
-    out <- vector("list", length(idx_vec))
-    for (k in seq_along(idx_vec)) {
-      ii <- idx_vec[k]
-      out[[k]] <- worker_fn(tasks[[ii]])
-      if (!is.null(pb_id)) cli::cli_progress_update(inc = task_weights[ii], id = pb_id)
-    }
-    out
-  }
-
-  if (workers <= 1L || parallel_backend == "sequential" || n_tasks <= 1L) {
-    return(run_seq(seq_len(n_tasks)))
-  }
-
-  chk <- tolower(Sys.getenv("_R_CHECK_LIMIT_CORES_", ""))
-  if (nzchar(chk) && chk != "false") {
-    workers <- min(workers, 2L)
-  }
-
-  n_waves <- if (show_pb) min(n_tasks, max(1L, ceiling(n_tasks / max(workers * 2L, 2L)))) else 1L
-  waves <- split_indices(n_tasks, n_waves)
-
-  is_macos <- identical(Sys.info()[["sysname"]], "Darwin")
-  prefer_mirai <- parallel_backend == "mirai" ||
-    (parallel_backend == "auto" &&
-       (isTRUE(mirai::daemons_set()) || .Platform$OS.type != "unix" || is_macos))
-
-  if (prefer_mirai) {
-    res <- tryCatch({
-      started_daemons <- FALSE
-      if (!isTRUE(mirai::daemons_set())) {
-        if (!start_mirai_pool(workers)) stop("mirai pool init failed", call. = FALSE)
-        started_daemons <- TRUE
-      }
-      on.exit(if (started_daemons) try(mirai::daemons(0L), silent = TRUE), add = TRUE)
-      full_out <- vector("list", n_tasks)
-      for (wv in waves) {
-        sub_out <- mirai::mirai_map(
-          tasks[wv], function(tsk, fn) fn(tsk), .args = list(fn = worker_fn)
-        )[]
-        if (any(vapply(sub_out, mirai::is_error_value, logical(1L)))) {
-          stop("mirai worker error", call. = FALSE)
-        }
-        full_out[wv] <- sub_out
-        if (!is.null(pb_id)) cli::cli_progress_update(inc = sum(task_weights[wv]), id = pb_id)
-      }
-      full_out
-    }, error = function(e) NULL)
-    if (!is.null(res)) return(res)
-  }
-
-  if (.Platform$OS.type == "unix") {
-    old_omp <- Sys.getenv("OMP_NUM_THREADS", unset = NA_character_)
-    old_vec <- Sys.getenv("VECLIB_MAXIMUM_THREADS", unset = NA_character_)
-    Sys.setenv(OMP_NUM_THREADS = "1", VECLIB_MAXIMUM_THREADS = "1")
-    on.exit({
-      if (is.na(old_omp)) Sys.unsetenv("OMP_NUM_THREADS") else Sys.setenv(OMP_NUM_THREADS = old_omp)
-      if (is.na(old_vec)) Sys.unsetenv("VECLIB_MAXIMUM_THREADS") else Sys.setenv(VECLIB_MAXIMUM_THREADS = old_vec)
-    }, add = TRUE)
-
-    full_out <- vector("list", n_tasks)
-    ok_mc <- TRUE
-    for (wv in waves) {
-      use_presched <- length(wv) > (workers * 4L)
-      sub_out <- parallel::mclapply(
-        tasks[wv], worker_fn, mc.cores = workers, mc.preschedule = use_presched
-      )
-      bad <- vapply(sub_out, function(x) inherits(x, "try-error") || is.null(x), logical(1L))
-      if (any(bad)) {
-        ok_mc <- FALSE
-        break
-      }
-      full_out[wv] <- sub_out
-      if (!is.null(pb_id)) cli::cli_progress_update(inc = sum(task_weights[wv]), id = pb_id)
-    }
-    if (ok_mc) return(full_out)
-  }
-
-  run_seq(seq_len(n_tasks))
-}
-
 build_surrogate_surface <- function(grid_df, eval_df, spec, evaluated_mask = NULL, prefer = "balanced") {
   surf <- grid_df
   denom_col <- if (spec$failure_policy == "effective") "nsim" else "n_valid"
@@ -1787,7 +1589,7 @@ attainment_score <- function(df, spec) {
 #' Keeps feasible `(N_subj, N_item)` pairs where neither `N_subj` nor `N_item`
 #' can be reduced without increasing the other while still meeting the target.
 #'
-#' @keywords internal
+#' @noRd
 extract_2d_pareto <- function(feas_df) {
   if (is.null(feas_df) || nrow(feas_df) == 0L) {
     return(feas_df)
@@ -1821,65 +1623,7 @@ extract_pareto_frontier <- function(surf, spec) {
   out
 }
 
-compute_sensitivity_table <- function(
-  spec,
-  n_subj,
-  n_item,
-  orig_grid_id,
-  n_grid_stride,
-  nsim,
-  seed,
-  workers,
-  parallel_backend,
-  verbose = FALSE
-) {
-  mults <- c(optimistic = 0.70, standard = 1.00, conservative = 1.35)
-  dgps <- sensitivity_dgps(spec$dgp, slope_multipliers = mults)
-  grid_one <- data.frame(n_subj = n_subj, n_item = n_item, grid_id = 1L)
-
-  rows <- lapply(seq_along(dgps), function(idx) {
-    nm <- names(dgps)[idx]
-    sp_lvl <- spec
-    sp_lvl$dgp <- dgps[[idx]]
-    sp_lvl$true_beta <- unname(dgps[[idx]]$beta[[spec$effect_col]])
-    sp_lvl$true_prob_diff <- true_prob_effect(
-      dgps[[idx]], weights = spec$contrast_weights, estimand = spec$prob_estimand
-    )
-    sp_lvl$true_prob_diff_pp <- sp_lvl$true_prob_diff * 100.0
-    sp_lvl$true_effect_target <- switch(
-      spec$scale,
-      logit = sp_lvl$true_beta,
-      prob = sp_lvl$true_prob_diff,
-      pp = sp_lvl$true_prob_diff_pp
-    )
-
-    lvl_base <- allocate_stage_point_streams(
-      seed, stage_slot = 3L + idx, grid_ids = orig_grid_id, stride = n_grid_stride
-    )
-
-    ev <- evaluate_grid_batch(
-      spec = sp_lvl,
-      grid_sub = grid_one,
-      point_bases = lvl_base,
-      nsim = nsim,
-      engine_use = spec$engine,
-      fast_stage = FALSE,
-      workers = workers,
-      parallel_backend = parallel_backend,
-      stage_label = sprintf("Sensitivity (%s)", nm),
-      verbose = verbose
-    )$summary
-    ev$scenario <- nm
-    ev$slope_multiplier <- unname(mults[idx])
-    ev$true_beta <- sp_lvl$true_beta
-    ev
-  })
-
-  out <- do.call(rbind, rows)
-  cols_front <- c("scenario", "slope_multiplier", "n_subj", "n_item", "true_beta")
-  out[, c(cols_front, setdiff(names(out), cols_front)), drop = FALSE]
-}
-
+#' @rdname print.glmmplanr_design
 #' @export
 print.glmmplanr_result <- function(x, ...) {
   cli::cli_h2("glmmplanr 2D Sample Size Optimization Result")
@@ -1959,6 +1703,23 @@ print.glmmplanr_result <- function(x, ...) {
       )
     }
   }
+  if (isTRUE(x$search_meta$adaptive_pooled)) {
+    bullets <- c(
+      bullets,
+      "Note: Adaptive top-up pooling was used; nominal fixed-sample Wilson coverage is not guaranteed. Confirm the selected design with {.fn validate_design_point}."
+    )
+  }
+  if (identical(x$search_meta$mc_adjustment, "bonferroni") &&
+      !is.null(x$search_meta$mc_conf_level_effective)) {
+    bullets <- c(
+      bullets,
+      sprintf(
+        "MC multiplicity adjustment: Bonferroni across %d Stage-2 decision(s) (per-decision Wilson level = %.2f%%)",
+        as.integer(x$search_meta$n_stage2_decisions),
+        100 * x$search_meta$mc_conf_level_effective
+      )
+    )
+  }
   bullets <- c(
     bullets,
     "Search time: {round(x$search_meta$elapsed_sec, 2)} sec ({nrow(x$evaluated)} point evaluations, method = {.val {x$search_meta$method}})"
@@ -1967,6 +1728,7 @@ print.glmmplanr_result <- function(x, ...) {
   invisible(x)
 }
 
+#' @rdname print.glmmplanr_design
 #' @export
 summary.glmmplanr_result <- function(object, ...) {
   print.glmmplanr_result(object, ...)

@@ -19,3 +19,6 @@ Sorted integer vector of valid multiples of \code{k} (or full min/max grid).
 \description{
 Snap Candidate Sample Sizes to Balanced Multiples of List Count K
 }
+\examples{
+valid_multiples(c(10, 20), k = 4)
+}

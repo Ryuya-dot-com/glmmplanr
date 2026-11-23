@@ -15,11 +15,20 @@ Supply factors with all planned levels to include units with no trial rows.
 The \code{subj} and \code{item} factors from \code{\link[=simulate_dgp_data]{simulate_dgp_data()}} retain these levels.}
 }
 \value{
-One row per unit with \code{unit}, \code{id}, \code{n_observed}, \code{n_correct}, and
+A data frame with one row per unit with \code{unit}, \code{id}, \code{n_observed}, \code{n_correct}, and
 \code{pattern} (all_correct, all_incorrect, mixed, or unobserved).
 }
 \description{
-Count Observed and Correct Responses by Participant and Item
+Counts describe the observed answers. One correct answer out of one and
+twenty out of twenty both give \code{all_correct}. Check \code{n_observed} alongside
+the label. A unit with zero observed answers is \code{unobserved}.
+}
+\details{
+Crossed GLMM fits keep the observed responses of all-correct and
+all-incorrect participants and items. A whole \emph{experimental cell} with
+one response category has a different consequence for unpenalized
+estimation. See \code{\link[=specify_target]{specify_target()}} for that case and
+\code{\link[=plan_rasch_fixed_bank]{plan_rasch_fixed_bank()}} for person and item scores in Rasch calibration.
 }
 \examples{
 response_patterns(c(1, 1, 0, NA), factor(c("A", "A", "B", "C")),

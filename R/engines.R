@@ -13,7 +13,7 @@ compact_idx0 <- function(ids) {
 #' (`prob_est`, `prob_se`), along with strict convergence status and captured
 #' backend error/warning messages.
 #'
-#' @keywords internal
+#' @noRd
 fit_single_dataset <- function(
   df,
   spec,
@@ -111,7 +111,8 @@ fit_single_dataset <- function(
 
   summarize_probability_fit(
     df$y, fit_response, X, Z_s, Z_i, Z_t, df$subj_id, df$item_id, df$testlet_id,
-    spec, re_structure, chance_fit, fast_stage, cpp_boot_ctx = cpp_boot_ctx
+    spec, re_structure, chance_fit, fast_stage, cpp_boot_ctx = cpp_boot_ctx,
+    unpenalized_cells = if (engine_use %in% c("cpp_laplace", "lme4_fast", "lme4", "glmmTMB")) cid
   )
 }
 
@@ -119,9 +120,21 @@ fit_single_dataset <- function(
 # a marginal contrast via either analytical joint delta or pre-allocated C++ / R bootstrap.
 summarize_probability_fit <- function(
   y, fit_response, X, Z_s, Z_i, Z_t, subj, item, testlet, spec, re_structure, chance, fast_stage,
-  cpp_boot_ctx = NULL
+  cpp_boot_ctx = NULL, unpenalized_cells = NULL
 ) {
-  fit <- fit_response(y)
+  refit <- function(response) {
+    if (!is.null(unpenalized_cells)) {
+      design <- spec$dgp$design
+      cell <- cpp_constant_response_cell(response, unpenalized_cells, design$n_cells)
+      if (cell > 0L) {
+        return(make_failed_fit("separation", sprintf(
+          "Separation in fixed-effect cell '%s': only one response category was observed. Its unpenalized cell logit has no finite estimate.",
+          design$cells$cell_name[cell])))
+      }
+    }
+    fit_response(response)
+  }
+  fit <- refit(y)
   if (!is.null(fit$prob_est)) return(fit)
   n_s_obs <- length(unique(subj))
   n_i_obs <- length(unique(item))
@@ -173,6 +186,7 @@ summarize_probability_fit <- function(
         max_inner <- if (chance > 0) 44L else 22L
         boot <- cpp_prob_bootstrap_batch(
           n_boot = B,
+          cell_id = as.integer(unpenalized_cells),
           X = cpp_boot_ctx$X,
           subj_idx = cpp_boot_ctx$s_idx0,
           Z_subj = cpp_boot_ctx$Z_s,
@@ -222,7 +236,7 @@ summarize_probability_fit <- function(
           }
           y_star <- stats::rbinom(length(y), 1L, mafc_plogis(eta, chance))
           tryCatch({
-            f <- fit_response(y_star)
+            f <- refit(y_star)
             if (isTRUE(f$converged)) delta(f, include_joint = FALSE)$est else NA_real_
           }, error = function(e) NA_real_)
         })
@@ -372,7 +386,7 @@ run_cpp_glmm_core <- function(
 }
 
 #' Pre-Index Trial Matrices and Cluster Indices Once per (n_subj, n_item) Schedule
-#' @keywords internal
+#' @noRd
 prepare_cpp_schedule_cache <- function(spec, schedule) {
   dgp <- spec$dgp
   des <- dgp$design
@@ -432,7 +446,7 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
 }
 
 #' Zero-Allocation Response Simulation Matching simulate_dgp_data() Bit-for-Bit
-#' @keywords internal
+#' @noRd
 simulate_fast_y_keep <- function(cache) {
   u_s <- matrix(stats::rnorm(cache$ns * cache$p_s), nrow = cache$ns, ncol = cache$p_s) %*% cache$t_Ls
   u_i <- matrix(stats::rnorm(cache$ni * cache$p_i), nrow = cache$ni, ncol = cache$p_i) %*% cache$t_Li
@@ -459,7 +473,7 @@ simulate_fast_y_keep <- function(cache) {
 }
 
 #' Fit a Cached Simulated Response Vector Directly via C++ Laplace
-#' @keywords internal
+#' @noRd
 fit_via_cpp_cached <- function(
   sim_dat, cache, spec, regularized, re_structure, fast_stage
 ) {
@@ -543,14 +557,18 @@ fit_via_cpp_cached <- function(
     corr_mode = corr_mode, regularized = regularized,
     eff_idx = cache$eff_idx
   )
+  cid <- if (!regularized) {
+    if (is.null(sim_dat$keep)) cache$cell_id else cache$cell_id[sim_dat$keep]
+  }
   summarize_probability_fit(
     sim_dat$y, fit_response, X, Z_s, Z_i, Z_t, s_idx0 + 1L, i_idx0 + 1L, t_idx0 + 1L,
-    spec, re_structure, cache$chance_fit, fast_stage, cpp_boot_ctx = cpp_boot_ctx
+    spec, re_structure, cache$chance_fit, fast_stage, cpp_boot_ctx = cpp_boot_ctx,
+    unpenalized_cells = cid
   )
 }
 
 #' Execute One Monte Carlo Replication (Zero-Alloc C++ Path or External Backend)
-#' @keywords internal
+#' @noRd
 execute_single_replication <- function(
   spec,
   schedule,
@@ -644,445 +662,6 @@ execute_single_replication <- function(
        patterns = patterns)
 }
 
-fit_via_lme4 <- function(df, X, Z_s, Z_i, Z_t, chance, corr_mode, nagq, eff_idx) {
-  fit_env <- build_numeric_glmm_df(df, X, Z_s, Z_i, Z_t, corr_mode, pkg = "lme4")
-  fam <- mafc_binomial(chance)
-  ctrl <- lme4::glmerControl(
-    optimizer = "bobyqa",
-    calc.derivs = (nagq > 0L),
-    optCtrl = list(maxfun = if (nagq == 0L) 2500L else 8000L)
-  )
-
-  warn_msgs <- character(0)
-  err_msg <- ""
-  fit <- tryCatch(
-    withCallingHandlers(
-      lme4::glmer(
-        formula = fit_env$formula,
-        data = fit_env$data,
-        family = fam,
-        nAGQ = nagq,
-        control = ctrl
-      ),
-      warning = function(w) {
-        warn_msgs <<- c(warn_msgs, conditionMessage(w))
-        invokeRestart("muffleWarning")
-      }
-    ),
-    error = function(e) {
-      err_msg <<- conditionMessage(e)
-      NULL
-    }
-  )
-
-  if (is.null(fit)) {
-    return(make_failed_fit("engine_error", err_msg))
-  }
-
-  b <- lme4::fixef(fit)
-  V <- as.matrix(stats::vcov(fit))
-  col_nm <- fit_env$x_names[eff_idx]
-  est <- unname(b[col_nm])
-  se <- sqrt(V[col_nm, col_nm])
-  sing <- lme4::isSingular(fit, tol = 1e-4)
-
-  bad_warn <- warn_msgs[grepl(
-    "failed to converge|degenerate|unable to evaluate|maximum number of function evaluations",
-    warn_msgs,
-    ignore.case = TRUE
-  )]
-  nonconv <- length(bad_warn) > 0L
-  conv <- !nonconv && is.finite(est) && is.finite(se) && (se > 0)
-
-  vc <- lme4::VarCorr(fit)
-  Sig_s <- extract_vc_matrix(vc, "subj", ncol(Z_s))
-  Sig_i <- extract_vc_matrix(vc, "item", ncol(Z_i))
-  Sig_t <- if (ncol(Z_t) > 0L) extract_vc_matrix(vc, "testlet", ncol(Z_t)) else NULL
-
-  b_ord <- as.numeric(b[fit_env$x_names])
-  V_ord <- V[fit_env$x_names, fit_env$x_names, drop = FALSE]
-
-  list(
-    est = est,
-    se = se,
-    beta_full = b_ord,
-    vcov_full = V_ord,
-    Sigma_subj = Sig_s,
-    Sigma_item = Sig_i,
-    Sigma_testlet = Sig_t,
-    singular = isTRUE(sing),
-    converged = conv,
-    status = if (conv) "converged" else "optimizer_warning",
-    error_reason = if (conv) "" else paste(unique(bad_warn), collapse = "; ")
-  )
-}
-
-extract_vc_matrix <- function(vc_list, grp_name, q) {
-  # Handles both correlated `(1 + ... | subj)` single entry and uncorrelated
-  # `(1 | subj) + (0 + zs_1 | subj)` split entries (`subj`, `subj.1`, ...)
-  nms <- names(vc_list)
-  hits <- which(nms == grp_name | startsWith(nms, paste0(grp_name, ".")))
-  if (length(hits) == 0L) {
-    return(diag(0.0, nrow = q))
-  }
-  if (length(hits) == 1L && nrow(vc_list[[hits[1L]]]) == q) {
-    return(as.matrix(vc_list[[hits[1L]]]))
-  }
-  vars <- unlist(lapply(hits, function(h) diag(as.matrix(vc_list[[h]]))))
-  vars <- vars[seq_len(min(length(vars), q))]
-  if (length(vars) < q) vars <- c(vars, rep(0.0, q - length(vars)))
-  diag(as.numeric(vars), nrow = q)
-}
-
-fit_via_glmmtmb <- function(df, X, Z_s, Z_i, Z_t, chance, corr_mode, eff_idx) {
-  fit_env <- build_numeric_glmm_df(df, X, Z_s, Z_i, Z_t, corr_mode, pkg = "glmmTMB")
-  fam <- mafc_binomial(chance)
-
-  warn_msgs <- character(0)
-  err_msg <- ""
-  fit <- tryCatch(
-    withCallingHandlers(
-      glmmTMB::glmmTMB(
-        formula = fit_env$formula,
-        data = fit_env$data,
-        family = fam
-      ),
-      warning = function(w) {
-        warn_msgs <<- c(warn_msgs, conditionMessage(w))
-        invokeRestart("muffleWarning")
-      }
-    ),
-    error = function(e) {
-      err_msg <<- conditionMessage(e)
-      NULL
-    }
-  )
-  if (is.null(fit)) {
-    return(make_failed_fit("engine_error", err_msg))
-  }
-
-  b <- glmmTMB::fixef(fit)$cond
-  V <- as.matrix(stats::vcov(fit)$cond)
-  col_nm <- fit_env$x_names[eff_idx]
-  est <- unname(b[col_nm])
-  se <- sqrt(V[col_nm, col_nm])
-  conv_code <- fit$fit$convergence
-  pd_hess <- isTRUE(fit$sdr$pdHess)
-  conv_ok <- identical(conv_code, 0L) && pd_hess && is.finite(est) && is.finite(se) && (se > 0)
-
-  vc <- glmmTMB::VarCorr(fit)$cond
-  sds <- unlist(lapply(vc, function(m) attr(m, "stddev")))
-  cors <- unlist(lapply(vc, function(m) {
-    cm <- attr(m, "correlation")
-    if (is.null(cm) || nrow(cm) < 2L) numeric(0) else cm[lower.tri(cm)]
-  }))
-  sing <- any(sds < 1e-3, na.rm = TRUE) || any(abs(cors) > 0.995, na.rm = TRUE)
-
-  Sig_s <- extract_vc_matrix(vc, "subj", ncol(Z_s))
-  Sig_i <- extract_vc_matrix(vc, "item", ncol(Z_i))
-  Sig_t <- if (ncol(Z_t) > 0L) extract_vc_matrix(vc, "testlet", ncol(Z_t)) else NULL
-
-  st <- if (conv_ok) {
-    "converged"
-  } else if (!pd_hess) {
-    "non_pd_hessian"
-  } else {
-    "optimizer_warning"
-  }
-  reason_txt <- if (conv_ok) {
-    ""
-  } else {
-    msg_parts <- c(
-      if (!identical(conv_code, 0L)) paste0("nlminb convergence=", conv_code, ": ", fit$fit$message),
-      if (!pd_hess) "non-positive-definite Hessian",
-      warn_msgs
-    )
-    paste(unique(msg_parts[nzchar(msg_parts)]), collapse = "; ")
-  }
-
-  list(
-    est = est,
-    se = se,
-    beta_full = as.numeric(b[fit_env$x_names]),
-    vcov_full = V[fit_env$x_names, fit_env$x_names, drop = FALSE],
-    Sigma_subj = Sig_s,
-    Sigma_item = Sig_i,
-    Sigma_testlet = Sig_t,
-    singular = isTRUE(sing),
-    converged = conv_ok,
-    status = st,
-    error_reason = reason_txt
-  )
-}
-
-build_stan_data <- function(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec) {
-  s_fac <- as.integer(factor(df$subj_id))
-  i_fac <- as.integer(factor(df$item_id))
-  has_t <- ncol(Z_t) > 0L
-  t_fac <- if (has_t) as.integer(factor(df$testlet_id)) else integer(0)
-
-  des <- spec$dgp$design
-  cell_z <- function(z, q) {
-    if (q == 1L) matrix(1, des$n_cells, 1L) else z
-  }
-  quad <- gh_quad_1d(spec$dgp$n_quad)
-  list(
-    M = des$n_cells, X_cell = des$X_cells,
-    Zs_cell = cell_z(des$Z_subj_cells, ncol(Z_s)),
-    Zi_cell = cell_z(des$Z_item_cells, ncol(Z_i)),
-    Zt_cell = if (has_t) cell_z(des$Z_testlet_cells, ncol(Z_t)) else matrix(0, des$n_cells, 0L),
-    contrast = unname(spec$contrast_weights), K = length(quad$nodes),
-    nodes = quad$nodes, weights = quad$weights,
-    marginal = as.integer(spec$prob_estimand == "marginal"),
-    N = nrow(df),
-    y = as.integer(df$y),
-    P = ncol(X),
-    X = X,
-    N_subj = max(s_fac),
-    Q_subj = ncol(Z_s),
-    subj_id = s_fac,
-    Z_subj = Z_s,
-    N_item = max(i_fac),
-    Q_item = ncol(Z_i),
-    item_id = i_fac,
-    Z_item = Z_i,
-    N_testlet = if (has_t) max(t_fac) else 0L,
-    Q_testlet = if (has_t) ncol(Z_t) else 0L,
-    testlet_id = t_fac,
-    Z_testlet = if (has_t) Z_t else matrix(0.0, nrow = 0L, ncol = 0L),
-    chance = chance,
-    corr_mode = corr_mode,
-    lkj_eta = spec$lkj_eta,
-    prior_beta_sd = spec$prior_beta_sd,
-    prior_tau_sd = spec$prior_tau_sd
-  )
-}
-
-fit_via_stan_laplace <- function(
-  df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec, eff_idx
-) {
-  # Joint MAP/Laplace over hierarchical (beta, tau, z) suffers from Neal's funnel
-  # degeneracy in crossed GLMMs; integrated Laplace is provided natively by
-  # `bayes_laplace`, while Stan backends (`stan_hmc` and legacy alias `stan_laplace`)
-  # execute full HMC/NUTS with strict convergence gates across CmdStan and RStan.
-  fit_via_stan_hmc(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec, eff_idx)
-}
-
-fit_via_stan_hmc <- function(
-  df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec, eff_idx
-) {
-  stan_data <- build_stan_data(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec)
-  mod_info <- get_compiled_stan_model(prefer = "any")
-  if (is.null(mod_info)) return(make_failed_fit("engine_error", "Stan model unavailable"))
-
-  focal_nm <- sprintf("beta[%d]", eff_idx)
-  b_vars <- sprintf("beta[%d]", seq_len(ncol(X)))
-
-  if (identical(mod_info$backend, "cmdstan")) {
-    err_msg <- ""
-    fit <- tryCatch(
-      mod_info$model$sample(
-        data = stan_data, chains = 2L, parallel_chains = 1L,
-        iter_warmup = 400L, iter_sampling = 400L, adapt_delta = 0.90,
-        refresh = 0L, show_messages = FALSE, show_exceptions = FALSE
-      ),
-      error = function(e) {
-        err_msg <<- conditionMessage(e)
-        NULL
-      }
-    )
-    if (is.null(fit)) return(make_failed_fit("engine_error", err_msg))
-    rc <- tryCatch(fit$return_codes(), error = function(e) 0L)
-    if (any(rc != 0L)) {
-      return(make_failed_fit("mcmc_not_converged", sprintf("CmdStan HMC return_code=%s", paste(rc, collapse = ","))))
-    }
-    draws_b <- fit$draws(variables = b_vars, format = "matrix")
-    contrast_draws <- as.numeric(fit$draws(variables = "prob_contrast", format = "matrix"))
-    focal_arr <- fit$draws(variables = focal_nm, format = "draws_array")
-    diag_df <- tryCatch(fit$diagnostic_summary(quiet = TRUE), error = function(e) list(num_divergent = 0L))
-    n_div <- sum(diag_df$num_divergent)
-    if (requireNamespace("posterior", quietly = TRUE)) {
-      rhat_val <- posterior::rhat(focal_arr)
-      ess_b <- posterior::ess_bulk(focal_arr)
-      ess_t <- posterior::ess_tail(focal_arr)
-    } else {
-      rhat_val <- 1.0; ess_b <- 400.0; ess_t <- 400.0
-    }
-  } else {
-    err_msg <- ""
-    sfit <- tryCatch(
-      suppressWarnings(rstan::sampling(
-        mod_info$model,
-        data = stan_data,
-        chains = 2L,
-        iter = 800L,
-        warmup = 400L,
-        cores = 1L,
-        refresh = 0L,
-        show_messages = FALSE,
-        control = list(adapt_delta = 0.90, max_treedepth = 10L)
-      )),
-      error = function(e) {
-        err_msg <<- conditionMessage(e)
-        NULL
-      }
-    )
-    if (is.null(sfit)) return(make_failed_fit("engine_error", err_msg))
-    ext <- rstan::extract(sfit, pars = c("beta", "prob_contrast"))
-    draws_b <- ext$beta
-    contrast_draws <- as.numeric(ext$prob_contrast)
-    arr <- rstan::extract(sfit, permuted = FALSE, inc_warmup = FALSE, pars = focal_nm)[, , focal_nm]
-    sam <- do.call(rbind, rstan::get_sampler_params(sfit, inc_warmup = FALSE))
-    n_div <- sum(sam[, "divergent__"])
-    if (requireNamespace("posterior", quietly = TRUE)) {
-      rhat_val <- posterior::rhat(arr)
-      ess_b <- posterior::ess_bulk(arr)
-      ess_t <- posterior::ess_tail(arr)
-    } else {
-      rhat_val <- rstan::Rhat(arr)
-      ess_b <- rstan::ess_bulk(arr)
-      ess_t <- rstan::ess_tail(arr)
-    }
-  }
-
-  b_est <- colMeans(draws_b)
-  V_est <- stats::cov(draws_b)
-  est <- unname(b_est[eff_idx])
-  se <- sqrt(V_est[eff_idx, eff_idx])
-  prob_est <- mean(contrast_draws)
-  prob_se <- stats::sd(contrast_draws)
-
-  mcmc_ok <- is.finite(rhat_val) && (rhat_val <= 1.01) &&
-    is.finite(ess_b) && (ess_b >= 100) &&
-    is.finite(ess_t) && (ess_t >= 100) &&
-    (n_div == 0L)
-  num_ok <- is.finite(est) && is.finite(se) && (se > 0) && is.finite(prob_est) && is.finite(prob_se) && (prob_se > 0)
-  conv <- mcmc_ok && num_ok
-
-  reason_txt <- if (conv) {
-    ""
-  } else if (!mcmc_ok) {
-    sprintf("HMC diagnostics failed (Rhat=%.3f, ESS_bulk=%.0f, ESS_tail=%.0f, div=%d)",
-            rhat_val, ess_b, ess_t, as.integer(n_div))
-  } else {
-    "Non-finite HMC posterior summary"
-  }
-
-  list(
-    est = est,
-    se = se,
-    beta_full = as.numeric(b_est),
-    vcov_full = as.matrix(V_est),
-    prob_est = prob_est,
-    prob_se = prob_se,
-    singular = FALSE,
-    converged = conv,
-    status = if (conv) "converged" else "mcmc_not_converged",
-    error_reason = reason_txt
-  )
-}
-
-get_compiled_stan_model <- function(prefer = c("any", "cmdstan", "rstan")) {
-  prefer <- match.arg(prefer)
-  stan_file <- system.file("stan", "crossed_binomial_mafc.stan", package = "glmmplanr")
-  if (!nzchar(stan_file) || !file.exists(stan_file)) {
-    stan_file <- file.path("inst", "stan", "crossed_binomial_mafc.stan")
-  }
-
-  if (prefer %in% c("any", "cmdstan")) {
-    if (!is.null(.glmmplanr_env$stan_model_cmdstan)) {
-      return(.glmmplanr_env$stan_model_cmdstan)
-    }
-    if (requireNamespace("instantiate", quietly = TRUE)) {
-      mod <- tryCatch(
-        instantiate::stan_package_model(name = "crossed_binomial_mafc", package = "glmmplanr"),
-        error = function(e) NULL
-      )
-      if (!is.null(mod)) {
-        res <- list(backend = "cmdstan", model = mod)
-        .glmmplanr_env$stan_model_cmdstan <- res
-        return(res)
-      }
-    }
-    if (file.exists(stan_file) && requireNamespace("cmdstanr", quietly = TRUE) &&
-        !is.null(tryCatch(cmdstanr::cmdstan_path(), error = function(e) NULL))) {
-      mod <- tryCatch(cmdstanr::cmdstan_model(stan_file, dir = tempdir()), error = function(e) NULL)
-      if (!is.null(mod)) {
-        res <- list(backend = "cmdstan", model = mod)
-        .glmmplanr_env$stan_model_cmdstan <- res
-        return(res)
-      }
-    }
-    if (prefer == "cmdstan") return(NULL)
-  }
-
-  if (prefer %in% c("any", "rstan")) {
-    if (!is.null(.glmmplanr_env$stan_model_rstan)) {
-      return(.glmmplanr_env$stan_model_rstan)
-    }
-    if (file.exists(stan_file) && requireNamespace("rstan", quietly = TRUE)) {
-      mod <- tryCatch(rstan::stan_model(stan_file), error = function(e) NULL)
-      if (!is.null(mod)) {
-        res <- list(backend = "rstan", model = mod)
-        .glmmplanr_env$stan_model_rstan <- res
-        return(res)
-      }
-    }
-  }
-  NULL
-}
-
-build_numeric_glmm_df <- function(df, X, Z_s, Z_i, Z_t, corr_mode, pkg = "lme4") {
-  out <- data.frame(
-    y = as.integer(df$y),
-    subj = factor(df$subj_id),
-    item = factor(df$item_id)
-  )
-  if (ncol(Z_t) > 0L) {
-    out$testlet <- factor(df$testlet_id)
-  }
-  x_names <- character(ncol(X))
-  x_names[1L] <- "(Intercept)"
-  if (ncol(X) > 1L) {
-    for (j in 2L:ncol(X)) {
-      nm <- paste0("fx_", j - 1L)
-      out[[nm]] <- X[, j]
-      x_names[j] <- nm
-    }
-  }
-  fx_rhs <- if (ncol(X) > 1L) paste(x_names[-1L], collapse = " + ") else "1"
-
-  re_block <- function(Z_mat, grp_nm, prefix) {
-    if (ncol(Z_mat) == 1L) {
-      return(sprintf("(1 | %s)", grp_nm))
-    }
-    z_nms <- character(ncol(Z_mat) - 1L)
-    for (k in 2L:ncol(Z_mat)) {
-      zn <- sprintf("%s_%d", prefix, k - 1L)
-      out[[zn]] <<- Z_mat[, k]
-      z_nms[k - 1L] <- zn
-    }
-    if (corr_mode == 1L) {
-      sprintf("(1 + %s | %s)", paste(z_nms, collapse = " + "), grp_nm)
-    } else if (pkg == "glmmTMB") {
-      sprintf("diag(1 + %s | %s)", paste(z_nms, collapse = " + "), grp_nm)
-    } else {
-      parts <- c(sprintf("(1 | %s)", grp_nm), sprintf("(0 + %s | %s)", z_nms, grp_nm))
-      paste(parts, collapse = " + ")
-    }
-  }
-
-  re_s <- re_block(Z_s, "subj", "zs")
-  re_i <- re_block(Z_i, "item", "zi")
-  re_terms <- c(re_s, re_i)
-  if (ncol(Z_t) > 0L) {
-    re_terms <- c(re_terms, re_block(Z_t, "testlet", "zt"))
-  }
-
-  fml <- stats::as.formula(sprintf("y ~ %s + %s", fx_rhs, paste(re_terms, collapse = " + ")))
-  list(formula = fml, data = out, x_names = x_names)
-}
-
 #' Evaluate Monte Carlo Replications at a Single (n_subj, n_item) Design Point
 #'
 #' Runs `nsim` independent Monte Carlo simulations with reproducible
@@ -1112,6 +691,13 @@ build_numeric_glmm_df <- function(df, X, Z_s, Z_i, Z_t, corr_mode, pkg = "lme4")
 #'   and `n_invalid_*` counts those with an invalid target fit. `max_obs_*`
 #'   gives the largest observed response count for an all-correct or
 #'   all-incorrect unit (0 if absent). See [response_patterns()] for unit counts.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
+#' # Small run to inspect the output.
+#' r <- evaluate_design_point(spec, 16, 8, nsim = 5L)
+#' r[c("nsim", "n_valid", "power")]
 #' @export
 evaluate_design_point <- function(
   spec,
@@ -1123,6 +709,9 @@ evaluate_design_point <- function(
   stream_seeds = 1L,
   verbose = FALSE
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("evaluate_design_point", environment(), match.call()))
+  }
   if (!inherits(spec, "glmmplanr_spec")) {
     cli::cli_abort("{.arg spec} must be a {.cls glmmplanr_spec} object.")
   }
@@ -1664,13 +1253,22 @@ null_target_spec <- function(spec) {
 #' structure fixed. On the logit scale it sets the focal coefficient to zero.
 #' @inheritParams evaluate_design_point
 #' @param seed Integer seed for this independent fixed-size validation.
-#' @return Two rows (null and planned), including the true target, detection and
+#' @return A data frame with two rows (null and planned), including the true target, detection and
 #'   its Wilson interval under the chosen failure policy, valid-fit coverage
 #'   and its Wilson interval, and the valid-fit count. Null detection is the
 #'   Type I error. Response-pattern counts follow [evaluate_design_point()].
 #'   Prespecify validation tolerances and replication counts.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
+#' r <- validate_design_point(spec, 16, 8, nsim = 5L)
+#' r[c("condition", "nsim", "n_valid", "detection", "coverage")]
 #' @export
 validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026L, verbose = FALSE) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("validate_design_point", environment(), match.call()))
+  }
   if (!inherits(spec, "glmmplanr_spec")) cli::cli_abort("Supply a target specification.")
   if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) ||
       nsim < 1 || nsim != floor(nsim)) cli::cli_abort("{.arg nsim} must be a positive integer.")
@@ -1711,6 +1309,11 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
 #' @param alpha Significance level (default `0.05`).
 #' @param seed Integer RNG seed (default `2026L`).
 #' @return A `data.frame` of class `"glmmplanr_stress_test"`.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' comparison <- stress_test_models(dgp, "condition", 16, 8, nsim = 3L)
+#' head(comparison)
 #' @export
 stress_test_models <- function(
   dgp,
@@ -1722,6 +1325,9 @@ stress_test_models <- function(
   alpha = 0.05,
   seed = 2026L
 ) {
+  if (uses_box_muller()) {
+    return(isolated_seeded_call("stress_test_models", environment(), match.call()))
+  }
   if (!inherits(dgp, "glmmplanr_dgp")) {
     cli::cli_abort("{.arg dgp} must be a {.cls glmmplanr_dgp} object.")
   }
@@ -1729,7 +1335,7 @@ stress_test_models <- function(
     list(label = "Maximal ML", engine = "cpp_laplace", re = "maximal"),
     list(label = "Uncorrelated Slopes ML", engine = "cpp_laplace", re = "uncorrelated"),
     list(label = "Intercept-Only ML", engine = "cpp_laplace", re = "intercept_only"),
-    list(label = "Regularized Bayes (LKJ)", engine = "bayes_laplace", re = "maximal")
+    list(label = "Regularized Laplace", engine = "bayes_laplace", re = "maximal")
   )
 
   base_st <- allocate_stage_point_streams(seed, stage_slot = 1L, grid_ids = 1L:2L, stride = 2L)

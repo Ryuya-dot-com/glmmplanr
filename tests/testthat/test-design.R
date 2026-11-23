@@ -122,7 +122,7 @@ test_that("search and validation use admissible bank sizes and per-person worklo
                                nsim_sensitivity = 0, verbose = FALSE)
   expect_equal(sort(unique(plan$verified$n_item)), 5:6)
   expect_true(all(plan$verified$n_trials_scheduled == 80))
-  expect_match(report_plan(plan, "en", FALSE), "5 distinct items")
+  expect_match(report_plan(plan, print_output = FALSE), "5 distinct items")
   expect_error(optimize_sample_size(sp, 16, 4, verbose = FALSE), "bank")
   sparse <- generate_design_schedule(des, 16, 100)
   cache <- glmmplanr:::prepare_cpp_schedule_cache(sp, sparse)

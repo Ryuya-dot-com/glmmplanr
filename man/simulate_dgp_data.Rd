@@ -25,3 +25,9 @@ factors with the selected contrasts attached, and cell index \code{cell_id}.
 Generates binary trial-level responses from the maximal crossed (and optional
 testlet-nested) data-generating process with optional random trial attrition.
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+trials <- simulate_dgp_data(dgp, n_subj = 8, n_item = 4)
+head(trials[c("subj", "item", "condition", "y")])
+}

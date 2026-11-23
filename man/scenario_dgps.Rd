@@ -29,3 +29,9 @@ that can be passed directly to \code{optimize_sample_size(..., scenarios = ...)}
 to find both the standard-assumption optimum and the worst-case robust
 optimum along with the additional sample size required for robustness.
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+models <- scenario_dgps(dgp, "condition", c(smaller = 5, larger = 10))
+lapply(models, function(x) x$target_cell_probs)
+}

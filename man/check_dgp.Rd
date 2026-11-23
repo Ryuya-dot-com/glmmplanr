@@ -4,20 +4,28 @@
 \alias{check_dgp}
 \title{Inspect and Plot Prior-Predictive Diagnostics of a Calibrated DGP}
 \usage{
-check_dgp(dgp, plot = TRUE, n_draws = 3000L)
+check_dgp(dgp, plot = TRUE, n_draws = 3000L, seed = 42L)
 }
 \arguments{
 \item{dgp}{A \code{"glmmplanr_dgp"} object (or \code{"glmmplanr_spec"} / \code{"glmmplanr_result"}).}
 
-\item{plot}{Logical; if \code{TRUE} (default), returns a \code{ggplot2} object showing
+\item{plot}{Logical; if \code{TRUE} (default), includes a plot showing
 cell-level probability distributions and guessing floor.}
 
 \item{n_draws}{Number of Monte Carlo draws per cell for density plotting
 (default \code{3000L}).}
+
+\item{seed}{Integer seed for the plot draws. Use \code{NULL} to draw a master seed
+from the caller's random stream. Ignored when \code{plot = FALSE}.}
 }
 \value{
-Invisibly returns a list with \code{coefficients}, \code{cell_diagnostics}, and
-(when \code{plot = TRUE}) \code{plot} (also printed when called interactively).
+A visible S3 list of class \code{glmmplanr_dgp_check} with the data frames
+\code{coefficients}, \code{cell_diagnostics}, \code{marginal_effects}, and \code{plot} (a ggplot
+or \code{NULL}). \code{marginal_effects} gives each non-intercept model-matrix
+contrast of the integrated cell probabilities in percentage points, using
+the design coding. With two binary factors coded -0.5/+0.5 the interaction
+is the full difference in differences.
+Its print method displays the tables and, interactively, the plot.
 In \code{cell_diagnostics}, \code{quad_prob} averages over the random effects and
 \code{conditional_prob} gives the response probability with all random effects
 set to zero. Both include the specified guessing floor.
@@ -27,4 +35,9 @@ Displays how marginal cell probabilities map onto conditional fixed effects,
 quantifies non-collapsibility attenuation relative to naive logit conversion,
 and optionally plots the prior-predictive trial probability distributions
 across experimental cells.
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+check_dgp(dgp, plot = FALSE)$cell_diagnostics[c("cell", "quad_prob", "conditional_prob")]
 }

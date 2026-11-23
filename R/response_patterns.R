@@ -1,11 +1,21 @@
 #' Count Observed and Correct Responses by Participant and Item
 #'
+#' Counts describe the observed answers. One correct answer out of one and
+#' twenty out of twenty both give `all_correct`. Check `n_observed` alongside
+#' the label. A unit with zero observed answers is `unobserved`.
+#'
+#' Crossed GLMM fits keep the observed responses of all-correct and
+#' all-incorrect participants and items. A whole *experimental cell* with
+#' one response category has a different consequence for unpenalized
+#' estimation. See [specify_target()] for that case and
+#' [plan_rasch_fixed_bank()] for person and item scores in Rasch calibration.
+#'
 #' @param y A numeric or logical vector of binary responses (1 is correct).
 #'   Missing responses are omitted from the observed count.
 #' @param participant,item Participant and item identifiers, one per response.
 #'   Supply factors with all planned levels to include units with no trial rows.
 #'   The `subj` and `item` factors from [simulate_dgp_data()] retain these levels.
-#' @return One row per unit with `unit`, `id`, `n_observed`, `n_correct`, and
+#' @return A data frame with one row per unit with `unit`, `id`, `n_observed`, `n_correct`, and
 #'   `pattern` (all_correct, all_incorrect, mixed, or unobserved).
 #' @examples
 #' response_patterns(c(1, 1, 0, NA), factor(c("A", "A", "B", "C")),
@@ -67,7 +77,7 @@ combine_pattern_totals <- function(a, b) {
   totals
 }
 
-# Old saved plans have no pattern measurements for their original replications.
+# Saved plans without pattern columns contribute zero prior counts.
 pooled_pattern_totals <- function(old, extra) {
   previous <- empty_pattern_totals
   if (isTRUE(old$pattern_nsim > 0L)) previous <- unlist(old[pattern_columns], use.names = TRUE)

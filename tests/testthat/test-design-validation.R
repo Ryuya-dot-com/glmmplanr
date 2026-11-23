@@ -20,13 +20,21 @@ test_that("joint attainment counts the intersection and pools replication counts
     nsim_sensitivity = 0L, workers = 1L, verbose = FALSE)
   res$spec$power_min <- mean(c(res$verified$joint_mc_lo, res$verified$joint_mc_hi))
   res$verified$decision_status <- "indeterminate"
-  updated <- topup_verification(res, 3L, verbose = FALSE)$verified
+  indep_res <- topup_verification(res, 3L, verbose = FALSE)
+  expect_equal(indep_res$verified$nsim, 3L)
+  expect_false(isTRUE(indep_res$search_meta$adaptive_pooled))
+  expect_warning(updated_res <- topup_verification(res, 3L, topup_policy = "pooled", verbose = FALSE), "adaptive")
+  updated <- updated_res$verified
+  expect_true(isTRUE(updated_res$search_meta$adaptive_pooled))
   expect_equal(updated$nsim, 7L)
   expect_equal(updated$pattern_nsim, 7L)
   expect_equal(updated$pattern_n_invalid, updated$nsim - updated$n_valid)
   legacy <- res
+  legacy$search_meta$simulation_version <- 2L
   legacy$verified <- legacy$verified[setdiff(names(legacy$verified), c(pattern_columns, "replications"))]
-  topped <- topup_verification(legacy, 3L, verbose = FALSE)$verified
+  expect_warning(topped <- topup_verification(legacy, 3L, topup_policy = "pooled", verbose = FALSE)$verified, "adaptive")
+  legacy$spec$prior_tau_sd <- 0.1
+  expect_error(topup_verification(legacy, 3L, topup_policy = "pooled", verbose = FALSE), "prior_tau_sd")
   expect_equal(topped$nsim, 7L)
   expect_equal(topped$pattern_nsim, 3L)
   expect_equal(updated$joint_prob, updated$k_joint / updated$nsim)

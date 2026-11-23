@@ -5,9 +5,9 @@
 [![R >= 4.1.0](https://img.shields.io/badge/R-%3E%3D%204.1.0-276DC3.svg)](https://www.r-project.org/)
 [![Backend: RcppEigen](https://img.shields.io/badge/Backend-C%2B%2B%20%2F%20RcppEigen-059669.svg)](src/glmm_laplace.cpp)
 
-`glmmplanr` is an end-to-end R package for planning **two-dimensional ($N_{\text{subj}} \times N_{\text{item}}$) sample sizes and estimation precision** in crossed binary Generalized Linear Mixed Models (GLMMs) and Explanatory Item Response Models (EIRMs).
+`glmmplanr` helps answer two questions. How many learners and words would you need to detect an improvement from 60% to 70% correct? How many examinees would you need to estimate the difficulty of every word on a fixed list? The input is a planned study with a **binary response on each trial**. A three-choice task uses correct or incorrect scoring with a guessing probability of one third. Ordinal Likert ratings, reaction times, counts, and the identity of a chosen distractor are outside the implemented response models.
 
-Without requiring either a pre-fitted pilot model or custom data-generation loops, `glmmplanr` translates **declarative experimental/assessment schedules (Latin-square, incomplete-block, testlet) $\times$ substantive marginal percentage-point effects** directly into **verified non-dominated Pareto-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs** with explicit Monte Carlo confidence bounds.
+For an experiment, supply the expected accuracies and how learners will see the items. The package simulates repeated studies and reports which combinations of learner and item counts meet your power or precision target. For a fixed Rasch bank, supply item difficulties and a tolerable calibration error. The package reports how often the whole bank meets that tolerance.
 
 In studies where participants judge binary preferences (e.g., endorse = `1`, reject = `0`), set `chance = 0` to plan marginal endorsement differences across conditions. When each participant sees only a subset of an item bank, specify the total bank size via `n_item` and the number of distinct items presented per participant via `items_per_subject`. Cluster-randomized school interventions and longitudinal daily-diary designs require different correlation structures; see [Scope Across Research Designs](inst/validation-guide.md#cross-field-designs).
 
@@ -18,16 +18,18 @@ In studies where participants judge binary preferences (e.g., endorse = `1`, rej
 ```r
 # Install from GitHub (requires a C++ compiler toolchain for RcppEigen)
 # install.packages("remotes")
-remotes::install_github("Ryuya-dot-com/glmmplanr")
+remotes::install_github("Ryuya-dot-com/glmmplanr", build_vignettes = TRUE)
 ```
 
-After installation, inspect the bundled validation conditions and benchmarks via `vignette("validation-and-scope", package = "glmmplanr")` (or `system.file("validation-guide.md", package = "glmmplanr")`). Because detecting a condition contrast in crossed binary experiments, testing Rasch model misfit, and calibrating a fixed operational item bank answer distinct statistical questions, we summarize inputs, outputs, and scope across 19 related R packages in [Related R Packages by Research Goal](inst/validation-guide.md#related-packages).
+For a first analysis, open `vignette("planning-workflows", package = "glmmplanr")`. The [worked examples](vignettes/planning-workflows.Rmd) take a three-choice experiment from expected accuracies to a verified design table, then show how to check the worst-item error in a fixed Rasch bank.
+
+The companion `vignette("validation-and-scope", package = "glmmplanr")` describes the validation conditions and benchmarks. For a comparison of inputs, outputs, and scope across 19 related R packages, see [Related R Packages by Research Goal](inst/validation-guide.md#related-packages).
 
 ---
 
 ## Visual Recipe Gallery & Interactive Explorer
 
-Explore four complete domain case studies — **(1) Psycholinguistic $2 \times 2$ Latin-Square 3AFC Experiments**, **(2) Between-Subject Incomplete-Block Designs & Logistic Non-Collapsibility**, **(3) Testlet-Nested Reading Passages & Multi-Scenario Robustness**, and **(4) Random-Item vs. Fixed-Item-Bank Rasch Calibration** — with publication-ready figures, copy-ready R scripts, and Registered Report justifications:
+Explore four worked examples with figures, R scripts, and sample size justifications. The examples cover **(1) Psycholinguistic $2 \times 2$ Latin-Square 3AFC Experiments**, **(2) Between-Subject Incomplete-Block Designs & Logistic Non-Collapsibility**, **(3) Testlet-Nested Reading Passages & Multi-Scenario Robustness**, and **(4) Random-Item vs. Fixed-Item-Bank Rasch Calibration**.
 
 - **GitHub Visual Recipe Gallery**: [`inst/gallery/GALLERY.md`](inst/gallery/GALLERY.md)
 - **Interactive HTML Explorer** (135-cell hover surface, live Pareto trade-off switcher, and real-time Gauss-Hermite non-collapsibility calculator): [**Launch Online Demo**](https://ryuya-dot-com.github.io/glmmplanr/) or open locally from R via:
@@ -50,7 +52,7 @@ Explore four complete domain case studies — **(1) Psycholinguistic $2 \times 2
    - Built-in factor codings: centered deviation `sum` (`-0.5` and `+0.5` for two-level factors; zero column means for multi-level factors), orthogonal unit-step `helmert`, and reference-level `treatment`. Automatic standardization to SD units and grand-/group-mean centering of continuous covariates are not performed.
 
 2. **Exact Marginal Probability & $m$-AFC Guessing Calibration (`calibrate_dgp()`, `cell_probs_from_diffs()`)**
-   - Numerically solves via 2D Gauss-Hermite quadrature for conditional GLMM fixed effects $\boldsymbol{\beta}$ that reproduce researcher-specified population-averaged cell probabilities in the presence of crossed random effects and lower guessing asymptotes ($g = 1/m$, e.g., `1/3` for 3AFC, `0.25` for 4AFC).
+   - Numerically solves via exact 1D Gauss-Hermite quadrature over the combined cell normal variance for conditional GLMM fixed effects $\boldsymbol{\beta}$ that reproduce researcher-specified population-averaged cell probabilities in the presence of crossed random effects and lower guessing asymptotes ($g = 1/m$, e.g., `1/3` for 3AFC, `0.25` for 4AFC).
    - Use `check_dgp(dgp, plot = FALSE)$cell_diagnostics` to compare population-averaged `quad_prob` against zero-random-effect `conditional_prob` cell by cell ([Passing Calibrated Parameters to PowRPriori and Verifying in simr](inst/validation-guide.md#package-calibration)).
 
 3. **Percentage-Point Power and Interval-Width Planning (`specify_target(scale = "pp")`)**
@@ -59,8 +61,8 @@ Explore four complete domain case studies — **(1) Psycholinguistic $2 \times 2
    - Stage-1 exploration, `prob_se_method = "joint_delta"`, and probability diagnostics attached to logit targets propagate both fixed-effect curvature and log variance-component uncertainty (including logistic non-collapsibility sensitivity) analytically via Gauss-Hermite derivatives. Stan engines compute the posterior mean and SD of the contrast across joint HMC draws ([Hedeker et al., 2018](https://doi.org/10.1111/biom.12707); [lme4::bootMer](https://lme4.github.io/lme4/reference/bootMer.html)).
 
 4. **Stabilized C++ Estimation & Conservative Monte Carlo Decisions**
-   - The built-in C++ engine (`cpp_laplace` / `bayes_laplace`) uses globally concave safeguarded PIRLS weights for forced-choice tasks (`chance > 0`) with Armijo backtracking, observed response-specific Laplace determinant/gradient corrections, and joint fixed-effect covariance matrices (`vcov`) combining Tierney-Kadane Laplace curvature with variance-component sensitivity.
-   - Required $(N_{\text{subj}}, N_{\text{item}})$ for conditional-logit precision in 3AFC tasks depends on the planned estimator: across 40 paired $48 \times 32$ 3AFC datasets, joint Laplace mean SE is `0.227` logit (`40/40` coverage), whereas RStan HMC integrating over the right tail of half-Student-$t_3$ random-slope priors yields mean posterior SD `0.270` logit; in 192 independent confirmation datasets, both $72 \times 32$ and $48 \times 48$ pass with `192/192` width attainment and `94.8%` / `96.4%` coverage ([Estimator Width & Coverage Comparison](inst/validation-guide.md#three-choice-precision)).
+   - The built-in C++ engine (`cpp_laplace` / `bayes_laplace`) uses safeguarded PIRLS updates for forced-choice tasks (`chance > 0`) with Armijo backtracking, observed response-specific Laplace determinant/gradient corrections, and joint fixed-effect covariance matrices (`vcov`) combining Tierney-Kadane Laplace curvature with variance-component sensitivity.
+   - Required $(N_{\text{subj}}, N_{\text{item}})$ for conditional-logit precision in 3AFC tasks depends on the planned estimator: in a paired benchmark across 40 $48 \times 32$ 3AFC datasets, joint Laplace mean SE is `0.227` logit (`40/40` coverage), and RStan HMC yields mean posterior SD `0.270` logit; in 192 independent confirmation datasets, both $72 \times 32$ and $48 \times 48$ pass with `192/192` width attainment and `94.8%` / `96.4%` coverage ([Estimator Width & Coverage Comparison](inst/validation-guide.md#three-choice-precision)).
    - Candidate recommendations require `decision_status == "pass"` (Wilson lower confidence bound $\ge$ target threshold; across multiple scenarios, the same design must pass every scenario). When `feasible = FALSE`, `optimal` marks an unconfirmed candidate for follow-up and `optimal_high_confidence` is empty.
    - `criterion = "both"` enforces separate thresholds on power (`power_min`) and width attainment (`ci_assurance`), whereas `criterion = "joint"` compares same-replication simultaneous detection and width attainment (`joint_prob`) against `power_min`.
    - Independent coverage benchmarks on $64 \times 20$ designs are documented in [Marginal Interval Coverage Recheck](inst/validation-guide.md#coverage-recheck). Because pointwise Wilson intervals do not guarantee simultaneous familywise coverage across an entire search, confirm final pre-registered designs at a fresh seed and prespecified `nsim` via `validate_design_point()`, which evaluates paired null (`detection` = Type I error) and planned (`detection` = power) operating characteristics ([Morris et al., 2019](https://doi.org/10.1002/sim.8086)).
@@ -106,11 +108,14 @@ plan <- plan_rasch_precision(
   engine    = "cpp_laplace",
   seed      = 518307
 )
-subset(plan$summary, target == "joint")
+subset(as.data.frame(plan), target == "joint")
+plot(plan)
 plan$pareto
 ```
 
 `ability` and `difficulty` bound within-replication RMSE across all scheduled persons or items (`unobserved` units count as not meeting the bank-wide difficulty tolerance, and estimation failures remain in the denominator); `person_sd` / `item_sd` bound absolute SD errors (logit) and `person_variance` / `item_variance` bound variance errors ($\text{logit}^2$). See [Random-Item Rasch Benchmarks](inst/validation-guide.md#rasch-precision).
+
+For a fixed-bank result `bank`, use `plot(bank, type = "items", metric = "bias")` to see where item errors change direction and how many studies yielded finite estimates. `summary(bank)` retains all candidate/target rows. `report_plan(bank)` prints the English justification.
 
 - To bound the **worst-case error across every individual item**, include `difficulty_max_abs_error` in `max_error`.
 - To plan examinee sample sizes for calibrating a **fixed vector of operational item difficulties** across replications, use `plan_rasch_fixed_bank()` (`method = "fixed_item"` for Marginal Maximum Likelihood via built-in `"mml"` or `"tam"`, or `method = "random_item"` for Empirical Bayes shrinkage via `"cpp_laplace"` or `"lme4"`; see [Fixed 16-Item Bank Comparison with TAM](inst/validation-guide.md#rasch-fixed-bank)).
@@ -128,6 +133,8 @@ subset(patterns, pattern %in% c("all_correct", "all_incorrect", "unobserved"))
 ```
 
 `summary(plan_res)` reports how many replications exhibited `all_correct`, `all_incorrect`, or `unobserved` participants/items, how many of those replications yielded invalid target-scale estimates, and the maximum observed trial count among affected units.
+
+Keep the denominator in view. One wrong answer on an item seen once and 32 wrong answers on an item seen 32 times get the same label. The crossed GLMM uses the observed answers in both cases. If a whole **experimental condition cell** has only one outcome, its unpenalized fixed-effect logit has no finite estimate. Regularized fits can still yield an estimate that depends on the prior. In fixed-item Rasch calibration, an item with constant answers has missing difficulty, while an extreme-scoring person can receive a finite ability estimate if they answered at least one estimable item. See `?plan_rasch_fixed_bank` for the effect on whole-bank accuracy.
 
 ---
 
@@ -208,11 +215,12 @@ switch_preference(plan_res, prefer = "fewer_items")
 
 # 5. Publication tables, 2D contours / Pareto curves / 3D surfaces, and Methods text
 summary(plan_res)
+head(as.data.frame(plan_res))  # One row per verified candidate, ready for write.csv()
 as_gt(plan_res)
 plot(plan_res, type = "contour", metric = "prob_ci_width_pp")
 plot(plan_res, type = "pareto")
 plot(plan_res, type = "surface3d", metric = "power")
-report_plan(plan_res, lang = "en")
+report_plan(plan_res)
 ```
 
 ---

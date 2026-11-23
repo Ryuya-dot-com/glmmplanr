@@ -40,3 +40,8 @@ A \code{ggplot} object or \code{plotly} htmlwidget.
 \description{
 Plot 2D Iso-Power / Iso-Precision Contours, 3D Surfaces, and Pareto Trade-offs
 }
+\examples{
+# Create the five-replication demonstration plan from the optimizer help.
+example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+plot(plan, type = "pareto")
+}

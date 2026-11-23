@@ -13,6 +13,33 @@ test_that("response patterns retain observation counts and scheduled but unseen 
   expect_error(response_patterns(1, "p", 1:2), "item")
 })
 
+test_that("unpenalized factorial fits distinguish separated cells from constant units", {
+  d <- design_crossed(list(group = c("A", "B")), allocation = "latin_square")
+  g <- calibrate_dgp(d, c(.55, .75), chance = 1/3, subj_sd = .6, item_sd = .45,
+                     slope_sd_ratio = 0)
+  s <- generate_design_schedule(d, 24, 12)
+  sp <- specify_target(g, "group", engine = "cpp_laplace", analysis_re = "intercept_only")
+  set.seed(131)
+  tr <- simulate_dgp_data(g, s)
+  tr$y[tr$subj_id == 1L | tr$item_id == 1L] <- 0L
+  expect_true(fit_single_dataset(tr, sp)$converged)
+
+  cache <- prepare_cpp_schedule_cache(sp, s)
+  keep <- tr$subj_id != 1L
+  for (value in 0:1) {
+    tr$y[tr$cell_id == 2L] <- value
+    for (engine in c("cpp_laplace", "lme4", "lme4_fast", "glmmTMB")) {
+      fit <- fit_single_dataset(tr, sp, engine_use = engine)
+      expect_identical(fit$status, "separation")
+      expect_match(fit$error_reason, "cell 'B'")
+    }
+    cached <- fit_via_cpp_cached(list(y = tr$y[keep], keep = keep), cache, sp,
+                                 FALSE, "intercept_only", FALSE)
+    expect_identical(cached$status, "separation")
+  }
+  expect_true(fit_single_dataset(tr, sp, engine_use = "bayes_laplace")$converged)
+})
+
 test_that("design diagnostics agree with observed trials across execution paths and top-ups", {
   des <- design_crossed(list(A = c("a", "b")), attrition = .2, participant_dropout = .3)
   g <- calibrate_dgp(des, c(.6, .8), subj_sd = .4, item_sd = .3)

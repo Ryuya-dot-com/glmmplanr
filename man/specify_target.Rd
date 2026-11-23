@@ -121,8 +121,15 @@ intervals used to classify borderline candidates as \code{"pass"},
 \code{"indeterminate"}, or \code{"fail"} (default \code{0.95}; Morris et al., 2019).}
 
 \item{engine}{Primary estimation backend: \code{"glmmTMB"}, \code{"lme4_fast"},
-\code{"lme4"}, \code{"stan_laplace"}, \code{"stan_hmc"}, \code{"bayes_laplace"}, or
-\code{"cpp_laplace"}.}
+\code{"lme4"}, \code{"stan_hmc"}, \code{"bayes_laplace"}, \code{"cpp_laplace"}, or legacy alias
+\code{"stan_laplace"} (deprecated; executes full HMC/NUTS via \code{"stan_hmc"}
+rather than Laplace approximation). Unpenalized engines flag separation if
+all observed responses in any fixed-effect design cell are 0 or all are 1.
+Each cell has its own linear predictor in the factorial model. The primary
+fit is then invalid, and a bootstrap refit with this pattern is also
+invalid. Regularized engines can return finite estimates in these cases.
+Check sensitivity to the fixed-effect prior. An individual participant or
+item with a constant response pattern can contribute to either fit.}
 
 \item{stage1_engine}{Fast estimation backend used during Stage-1 surrogate
 exploration before Stage-2 verification.}
@@ -143,13 +150,21 @@ random-effects boundary: \code{"flag_and_compare"} (default), \code{"flag_only"}
 (default) or \code{"logit"}.}
 
 \item{lkj_eta}{Shape parameter \eqn{\eta} for the LKJ correlation prior in
-Bayesian / regularized engines (default \code{2.0}).}
+Stan (default \code{2.0}); in \code{"bayes_laplace"}, controls unit-diagonal
+correlation shrinkage \eqn{n / (n + 2\max(\eta - 1, 0))} toward the
+identity matrix.}
 
 \item{prior_beta_sd}{Weakly informative Normal prior SD on non-intercept
 fixed effects in Bayesian engines (default \code{2.5}).}
 
-\item{prior_tau_sd}{Prior scale for random-effect SDs in Bayesian engines
-(default \code{1.5}).}
+\item{prior_tau_sd}{Scale parameter for the Half-Student-t(\eqn{\nu = 3})
+prior on random-effect SDs in both Stan (\code{"stan_hmc"}) and the built-in
+regularized Laplace engine (\code{"bayes_laplace"}), default \code{1.5}. Whereas
+Stan performs full joint HMC/NUTS over \eqn{(\beta, \tau, L, z)},
+\code{"bayes_laplace"} uses an EM-Laplace approximation with exact
+\eqn{\log \tau}-space Half-Student-t(3) MAP variance updates and
+LKJ-scaled correlation shrinkage, so finite-sample intervals can still
+differ between the two engines.}
 
 \item{prob_boot}{Number of parametric bootstrap refits per final marginal
 probability-scale replication when \code{prob_se_method = "bootstrap"}
@@ -175,4 +190,20 @@ exclusion) on either the conditional log-odds (\code{"logit"}) scale or the
 substantive response-probability difference (\code{"pp"} percentage points /
 \code{"prob"}) scale, along with the estimation backend, estimation-failure
 accounting policy, and Monte Carlo uncertainty confidence level.
+}
+\details{
+For a population difference such as 60\% versus 70\%, choose \code{scale = "pp"}
+(10 percentage points). The default targets a conditional logit coefficient.
+For a quick marginal pp grid, set \code{prob_se_method = "joint_delta"}.
+A surrogate search already screens cheaply in Stage 1. Final grid or
+surrogate verification with the default bootstrap can require 99 refits
+per simulated study. To check one selected pair with bootstrap intervals,
+specify the final method and call \code{\link[=validate_design_point]{validate_design_point()}} with a fresh seed.
+\code{\link[=formula]{formula()}} and \code{\link[=family]{family()}} give the planned model structure and analysis link.
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+spec <- specify_target(dgp, "condition", scale = "pp", criterion = "ci_width", ci_width = 12)
+spec$true_effect_target
 }

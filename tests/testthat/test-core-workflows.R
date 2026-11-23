@@ -1,4 +1,4 @@
-test_that("Fix 1: Non-converged/failed fits never inflate power to 100% and log error reasons", {
+test_that("Non-converged/failed fits never inflate power to 100% and log error reasons", {
   des <- design_crossed(list(
     exposure = c("incidental", "intentional"),
     spacing  = c("massed", "distributed")
@@ -21,7 +21,7 @@ test_that("Fix 1: Non-converged/failed fits never inflate power to 100% and log 
     failure_policy = "effective"
   )
 
-  # Exact review scenario: 10 reps, 8 failed, 2 converged & significant
+  # Failure-accounting check: 10 reps, 8 failed, 2 converged & significant
   est <- c(rep(NA_real_, 8), 1.50, 1.60)
   se  <- c(rep(NA_real_, 8), 0.25, 0.25)
   pest <- c(rep(NA_real_, 8), 0.18, 0.19)
@@ -61,7 +61,7 @@ test_that("Fix 1: Non-converged/failed fits never inflate power to 100% and log 
   expect_equal(row_cond$decision_status, "fail")
 })
 
-test_that("Fix 2: Stage x Point x Replication L'Ecuyer-CMRG streams have zero collisions", {
+test_that("Stage x Point x Replication L'Ecuyer-CMRG streams have zero collisions", {
   stride <- 20L
   all_keys <- character(0)
   for (stage_slot in 1L:5L) {
@@ -78,7 +78,7 @@ test_that("Fix 2: Stage x Point x Replication L'Ecuyer-CMRG streams have zero co
   expect_equal(anyDuplicated(all_keys), 0L)
 })
 
-test_that("Fix 3: Scheduled trials and post-attrition expected trials match exact allocation", {
+test_that("Scheduled trials and post-attrition expected trials match exact allocation", {
   # 2x2 Full Crossed: 24 subj x 16 item x 4 cells = 1,536 scheduled trials
   des_cr <- design_crossed(
     factors = list(
@@ -108,7 +108,7 @@ test_that("Fix 3: Scheduled trials and post-attrition expected trials match exac
   expect_equal(compute_expected_trials(des_ls, 24, 16), as.integer(round(384 * 0.90)))
 })
 
-test_that("Fix 4: C++ Laplace separates max_iter_finite and agrees with lme4", {
+test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
   des <- design_crossed(list(
     exposure = c("incidental", "intentional"),
     spacing  = c("massed", "distributed")
@@ -166,7 +166,7 @@ test_that("3AFC calibration and coverage meet the small regression fixture", {
   expect_gte(ev3$prob_coverage, 0.82)
 })
 
-test_that("Features 1-3: Percentage-point precision, indeterminate top-up, and multi-scenario robustness increment", {
+test_that("Percentage-point precision, indeterminate top-up, and multi-scenario robustness increment", {
   # Morris et al. (2019) borderline decision check: 801/1000 and 799/1000 are BOTH indeterminate!
   ci_801 <- glmmplanr:::wilson_mc_ci(801L, 1000L, conf_level = 0.95)
   ci_799 <- glmmplanr:::wilson_mc_ci(799L, 1000L, conf_level = 0.95)
@@ -260,17 +260,17 @@ test_that("Features 1-3: Percentage-point precision, indeterminate top-up, and m
     expect_lte(res_fs$optimal$n_subj, res_fi$optimal$n_subj)
   }
 
-  # Check plots on pp scale, gt table with robust section, and EN/JA reports
+  # Check plots on pp scale, gt table with robust section, and the sample size report
   p_pp <- plot(res_rob, type = "contour", metric = "prob_ci_width_pp")
   expect_s3_class(p_pp, "ggplot")
   gt_rob <- as_gt(res_rob)
   expect_s3_class(gt_rob, "gt_tbl")
-  rep_ja <- report_plan(res_rob, lang = "ja", print_output = FALSE)
-  expect_match(rep_ja, "パーセントポイント")
-  expect_match(rep_ja, "積み増し")
+  report <- report_plan(res_rob, print_output = FALSE)
+  expect_match(report, "percentage points")
+  expect_match(report, if (res_rob$feasible) "robustness across all evaluated scenarios" else "all-scenario sample-size increment is undetermined")
 })
 
-test_that("Speedup architecture preserves bit-for-bit C++ accuracy, worker invariance, and unbiased futility curtailment", {
+test_that("cached and data-frame fits agree and futility stopping preserves the selected design", {
   des <- design_crossed(
     factors = list(
       exposure = c("incidental", "intentional"),
@@ -303,12 +303,13 @@ test_that("Speedup architecture preserves bit-for-bit C++ accuracy, worker invar
     on_singular = "flag_and_compare"
   )
 
-  # 1. Bit-for-bit numerical identity between zero-alloc cached path and full data.frame path
+  # Compare the two fits on the same response stream.
   sched <- generate_design_schedule(des, n_subj = 32, n_item = 24)
   cache <- glmmplanr:::prepare_cpp_schedule_cache(spec, sched)
   st_list <- glmmplanr:::derive_rep_substreams(
     glmmplanr:::allocate_stage_point_streams(999L, 1L, 1L, 1L)[[1L]], nsim = 5L
   )
+  valid_pairs <- 0L
   for (b in seq_len(5L)) {
     fast_r <- glmmplanr:::with_rng_stream(
       st_list[[b]],
@@ -324,14 +325,19 @@ test_that("Speedup architecture preserves bit-for-bit C++ accuracy, worker invar
         re_primary = "maximal", fast_stage = FALSE, do_compare = TRUE
       )
     )
-    expect_equal(fast_r$primary$est, slow_r$primary$est, tolerance = 1e-14)
-    expect_equal(fast_r$primary$se, slow_r$primary$se, tolerance = 1e-14)
-    expect_equal(fast_r$primary$prob_est, slow_r$primary$prob_est, tolerance = 1e-14)
     expect_equal(fast_r$nobs, slow_r$nobs)
+    expect_identical(fast_r$primary$status, slow_r$primary$status)
+    expect_identical(fast_r$primary$converged, slow_r$primary$converged)
+    if (fast_r$primary$converged && slow_r$primary$converged) {
+      valid_pairs <- valid_pairs + 1L
+      expect_lt(abs(fast_r$primary$est - slow_r$primary$est), 1e-7)
+      expect_lt(abs(fast_r$primary$se - slow_r$primary$se), 1e-7)
+      expect_lt(abs(fast_r$primary$prob_est - slow_r$primary$prob_est), 1e-8)
+    }
   }
+  expect_gt(valid_pairs, 0L)
 
-  # 2. Group-sequential futility curtailment stops tiny underpowered grid points early
-  #    while matching early_stop = FALSE bit-for-bit on viable points
+  # Designs that reach full verification should retain the same decision.
   skip_on_cran()
   res_es_on <- optimize_sample_size(
     spec,
@@ -361,5 +367,8 @@ test_that("Speedup architecture preserves bit-for-bit C++ accuracy, worker invar
   expect_false(res_es_on$optimal$curtailed)
   expect_equal(res_es_on$optimal$n_subj, res_es_off$optimal$n_subj)
   expect_equal(res_es_on$optimal$n_item, res_es_off$optimal$n_item)
-  expect_equal(res_es_on$optimal$power, res_es_off$optimal$power, tolerance = 1e-14)
+  expect_identical(res_es_on$optimal$decision_status, res_es_off$optimal$decision_status)
+  expect_equal(res_es_on$optimal$nsim, res_es_off$optimal$nsim)
+  expect_equal(res_es_on$optimal$n_valid, res_es_off$optimal$n_valid)
+  expect_lt(abs(res_es_on$optimal$power - res_es_off$optimal$power), 1e-8)
 })

@@ -4,7 +4,13 @@
 \alias{generate_design_schedule}
 \title{Generate a Balanced Experimental Trial Schedule for (n_subj, n_item)}
 \usage{
-generate_design_schedule(design, n_subj, n_item, strict = TRUE)
+generate_design_schedule(
+  design,
+  n_subj,
+  n_item,
+  strict = TRUE,
+  diagnostics = FALSE
+)
 }
 \arguments{
 \item{design}{A \code{"glmmplanr_design"} object.}
@@ -17,6 +23,11 @@ of \code{design$k_item}).}
 
 \item{strict}{Logical; if \code{TRUE} (default), abort if \code{n_subj} or \code{n_item} is
 not an exact multiple of \code{k_subj} / \code{k_item}.}
+
+\item{diagnostics}{If TRUE, include \code{item_exposure} with one row per planned
+item. \code{n_scheduled} counts trials before missingness or dropout. Items share
+a \code{component} if a chain of participants was scheduled to see them in common.
+Unscheduled items each form an isolated component.}
 }
 \value{
 A list containing the trial schedule data frame \code{trials} (with
@@ -27,4 +38,9 @@ columns) plus row index mappings into \code{design$X_cells}.
 Constructs the exact trial-by-trial layout (before optional random trial
 attrition) enforcing Latin-square list balance, between-unit partitions, and
 passage/testlet nesting.
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+schedule <- generate_design_schedule(des, n_subj = 4, n_item = 4)
+head(schedule$trials)
 }

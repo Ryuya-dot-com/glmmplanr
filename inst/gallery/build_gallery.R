@@ -5,7 +5,7 @@
 #   - man/figures/gallery_01_latin_square_3afc.png
 #   - man/figures/gallery_02_incomplete_block_dgp.png
 #   - man/figures/gallery_03_testlet_robustness.png
-#   - man/figures/gallery_05_rasch_calibration.png
+#   - man/figures/gallery_04_rasch_calibration.png
 #   - gallery_payload.json in tempdir() (or --json-out=PATH)
 # ==============================================================================
 
@@ -448,7 +448,7 @@ bank_eb5 <- plan_rasch_fixed_bank(
   seed              = 850502L
 )
 
-rj5 <- subset(rasch_rand5$summary, target == "joint")
+rj5 <- subset(as.data.frame(rasch_rand5), target == "joint")
 p5_left <- ggplot(rj5, aes(x = n_subj, y = attainment * 100, color = factor(n_item), group = factor(n_item))) +
   geom_hline(yintercept = 80, linetype = "dashed", color = "#64748b", linewidth = 0.6) +
   geom_errorbar(aes(ymin = mc_lo * 100, ymax = mc_hi * 100), width = 4.0, alpha = 0.65) +
@@ -473,9 +473,9 @@ p5_left <- ggplot(rj5, aes(x = n_subj, y = attainment * 100, color = factor(n_it
   )
 
 b_comb5 <- rbind(
-  transform(subset(bank_mml5$summary, target %in% c("difficulty", "difficulty_max_abs_error")),
+  transform(subset(as.data.frame(bank_mml5), target %in% c("difficulty", "difficulty_max_abs_error")),
             estimator = "Fixed-Item MML"),
-  transform(subset(bank_eb5$summary, target %in% c("difficulty", "difficulty_max_abs_error")),
+  transform(subset(as.data.frame(bank_eb5), target %in% c("difficulty", "difficulty_max_abs_error")),
             estimator = "Random-Item EB")
 )
 b_comb5$series <- paste0(
@@ -517,7 +517,7 @@ p5_right <- ggplot(b_comb5, aes(x = n_subj, y = attainment * 100, color = series
   theme_minimal(base_size = 11) +
   theme(legend.position = "bottom", legend.text = element_text(size = 8.8), plot.title = element_text(face = "bold"))
 
-save_two_panel("man/figures/gallery_05_rasch_calibration.png", p5_left, p5_right)
+save_two_panel("man/figures/gallery_04_rasch_calibration.png", p5_left, p5_right)
 
 # ------------------------------------------------------------------------------
 # Export JSON payload for Interactive HTML Gallery
@@ -528,7 +528,8 @@ ver1_cols <- c(
   "prob_ci_width_mean_pp", "aipe_prob", "joint_prob",
   "valid_rate", "singular_rate", "decision_status"
 )
-ver1_df <- res1$verified[order(res1$verified$n_item, res1$verified$n_subj), ver1_cols, drop = FALSE]
+ver1_df <- as.data.frame(res1)
+ver1_df <- ver1_df[order(ver1_df$n_item, ver1_df$n_subj), ver1_cols, drop = FALSE]
 par1_keys <- paste(res1$verified_pareto$n_subj, res1$verified_pareto$n_item)
 ver1_df$is_pareto <- paste(ver1_df$n_subj, ver1_df$n_item) %in% par1_keys
 
@@ -536,7 +537,7 @@ payload <- list(
   recipe1 = list(
     optimal = as.list(res1$optimal[1L, ver1_cols, drop = FALSE]),
     grid = ver1_df,
-    report_en = report_plan(res1, lang = "en")
+    report_en = report_plan(res1, print_output = FALSE)
   ),
   recipe2 = list(
     scale_shift = scale_df2,
@@ -552,7 +553,7 @@ payload <- list(
     delta_item = res3$robust$delta_item,
     scenarios = se3[, c("scenario", "n_subj", "n_item", "n_trials_scheduled", "power", "power_mc_lo", "power_mc_hi", "prob_ci_width_mean_pp", "decision_status")],
     sensitivity = sens3[, c("scenario", "slope_multiplier", "power", "power_mc_lo", "power_mc_hi", "prob_ci_width_mean_pp", "decision_status")],
-    report_en = report_plan(res3, lang = "en")
+    report_en = report_plan(res3, print_output = FALSE)
   ),
   recipe4 = list(
     random_rasch = rj5[, c("n_subj", "n_item", "nsim", "attainment", "mc_lo", "mc_hi", "decision")],

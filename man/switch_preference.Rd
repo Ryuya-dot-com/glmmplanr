@@ -26,3 +26,9 @@ Re-ranks already verified Pareto-optimal \verb{(N_subj, N_item)} candidates unde
 a different \code{prefer} rule (\code{"balanced"}, \code{"fewer_subj"}, \code{"fewer_items"}, or
 \code{"fewer_trials"}).
 }
+\examples{
+# Create the five-replication demonstration plan from the optimizer help.
+example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+reordered <- switch_preference(plan, "fewer_items", verbose = FALSE)
+reordered$optimal[c("n_subj", "n_item", "decision_status")]
+}

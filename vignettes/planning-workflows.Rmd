@@ -1,0 +1,234 @@
+---
+title: "Planning a crossed experiment or a fixed-bank calibration"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Planning a crossed experiment or a fixed-bank calibration}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+In a vocabulary experiment, the question might be whether instruction improves
+accuracy across new learners and words. In an item-bank calibration, the
+question might be whether each word on a particular list can be assigned a
+difficulty precise enough for reuse. The first example varies the numbers of
+learners and words. The second holds the words fixed and varies the number of
+examinees. Both examples use small simulation counts so you can run them and
+inspect the output.
+
+The response on each trial is correct/incorrect or yes/no. For a choice task,
+record whether the answer was correct. A five-point acceptability rating, a
+reaction time, or an error count requires a different response model.
+
+## Estimate a difference in accuracy
+
+Suppose each learner responds to each word once in a three-choice task. Two
+lists rotate the learning condition across words so each learner encounters
+both conditions and each word appears in both conditions across learners.
+We expect 60% correct after incidental exposure and 70% after instruction,
+averaged over learners and words. The assumed between-learner and between-word
+standard deviations below are in logits. This example assumes random intercepts
+and a common conditional instruction effect.
+
+```{r design}
+library(glmmplanr)
+design <- design_crossed(list(learning = c("incidental", "instruction")),
+                         allocation = "latin_square")
+model <- calibrate_dgp(design, cell_probs = c(incidental = .60, instruction = .70),
+                       chance = 1/3, subj_sd = .8, item_sd = .6, slope_sd_ratio = 0)
+check_dgp(model, plot = FALSE)$cell_diagnostics[c("cell", "target_prob", "quad_prob")]
+```
+
+Read the first row as a check on your assumptions. Averaged over learners and
+words, incidental exposure should give 60% correct. The last column recovers
+that input accuracy from the model. We want 80% power for a two-sided
+interval to exclude zero when instruction raises accuracy by 10 percentage points.
+
+```{r target}
+target <- specify_target(model, effect = "learning", scale = "pp",
+                         engine = "bayes_laplace",
+                         analysis_re = "intercept_only", prob_se_method = "joint_delta")
+```
+
+The scale is explicit because the default is a conditional logit coefficient.
+The model uses population-average accuracy, a power target of .80 and the
+joint delta method for the grid. Printing `target` shows these choices and
+the primary analysis model.
+
+### If you can recruit 48 learners
+
+With 24 words available, check this one design first. In the null row,
+detection is a false positive. In the planned row, detection is power.
+Coverage is the fraction of valid intervals that contain the true difference.
+
+```{r validate}
+check <- validate_design_point(target, n_subj = 48, n_item = 24,
+                               nsim = 16L, seed = 731L)
+check[c("condition", "true_target", "nsim", "n_valid",
+        "detection", "detection_lo", "detection_hi", "coverage")]
+```
+
+The lower bound for power is `r sprintf("%.1f%%", 100 * check$detection_lo[check$condition == "planned"])`.
+Compare it with the .80 target. Each row represents only 16 simulated studies,
+so the bounds can be wide.
+
+### If the numbers of learners and words are both flexible
+
+Evaluate nine combinations and compare the uncertainty in each power estimate.
+
+```{r plan}
+plan <- optimize_sample_size(target,
+                             n_subj_range = c(24, 32, 48), n_item_range = c(12, 16, 24),
+                             method = "grid", nsim_final = 16L, nsim_sensitivity = 0L,
+                             workers = 1L, seed = 417L, verbose = FALSE)
+as.data.frame(plan)[c("n_subj", "n_item", "nsim", "n_valid", "power",
+                "power_mc_lo", "power_mc_hi", "decision_status")]
+```
+
+For the default failure policy, failed fits count as missed detections.
+A lower Monte Carlo bound of at least .80 gives `pass`. An upper bound
+below .80 gives `fail`. An interval crossing the target gives
+`indeterminate`. For a study decision, prespecify enough simulations to
+distinguish the power values that matter to you.
+
+`plan$verified_pareto` contains the passing combinations where reducing
+learners or words would require more of the other among the tested
+candidates. If recruiting learners is the constraint, read the row with the
+fewest learners. If preparing materials is the constraint, read the row with
+the fewest words. An empty table means the grid has no confirmed pass.
+
+### Confirming a candidate and analysing the responses
+
+For a final check of the example 48-by-24 design, use a new seed and the
+interval method you intend to report. The marginal bootstrap attempts 99
+refits for each successfully fitted simulated study, in each of the null and
+planned conditions. Specify the simulation count before inspecting these
+results. For the power target above, compare the lower planned detection
+bound with .80 and inspect null detection, valid fits and coverage.
+
+```{r final-check, eval=FALSE}
+final <- specify_target(model, "learning", scale = "pp", engine = "bayes_laplace",
+                        analysis_re = "intercept_only", prob_se_method = "bootstrap")
+validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 1000L, seed = 8201L)
+```
+
+For collected data, keep one row per observed response, with binary `y` and
+the same learner and word identifiers used for assignment. These calls show
+the model formula and the three-choice link.
+
+```{r analysis-model}
+formula(target)
+family(target)
+```
+
+```{r observed-analysis, eval=FALSE}
+responses$learning <- factor(responses$learning, levels = design$factors$learning)
+contrasts(responses$learning) <- design$contrasts$learning
+fit <- lme4::glmer(formula(target), data = responses, family = family(target))
+```
+
+Here the formula is `y ~ learning + (1 | subj) + (1 | item)` and the family
+is `mafc_binomial(1/3)`. This fits the same link and random intercepts by
+maximum likelihood. Our plan used a regularized Laplace fit. If maximum
+likelihood is the intended analysis, specify `engine = "lme4"` when planning.
+The learning coefficient is conditional and in logits. To estimate the
+population accuracy difference, integrate each condition's probability over
+the fitted random effects and subtract the two means.
+
+### Checking an interaction or a proficiency assumption
+
+With two factors coded -0.5 and +0.5, an interaction of four percentage
+points means the effect of one factor changes by four points across levels
+of the other. For the probabilities below the spacing benefit is two points
+after incidental exposure and six after instruction.
+
+```{r interaction}
+two <- design_crossed(list(learning = c("incidental", "instruction"),
+                           spacing = c("massed", "distributed")), contrast = "sum")
+cells <- cell_probs_from_diffs(two, .65, c(learning = 8, spacing = 4, "learning:spacing" = 4))
+cells
+g <- calibrate_dgp(two, cells, subj_sd = .8, item_sd = .6)
+check_dgp(g, plot = FALSE)$marginal_effects
+```
+
+If a pretest is expected to explain 25% of the **latent participant
+random-intercept variance**, try `subj_sd = .8 * sqrt(1 - .25)` (about .69
+logit) and compare the plan with the original .8. This is a residual-variance
+sensitivity analysis. It assumes the same marginal cell probabilities and
+does not simulate proficiency, estimate its coefficient, or account for
+confounding. An R-squared for observed binary responses measures something
+different. With random slopes, supply the full `subj_sd` vector to hold
+their SDs fixed as the intercept SD changes.
+
+## Calibrate a fixed list of words
+
+Suppose a pilot suggests the following eight Rasch difficulties. Each new
+examinee responds to the whole list. The planning values stay fixed across
+simulated studies and examinees are sampled anew. We require a bank-wide RMSE
+of at most 0.35 logits and an absolute error of at most 0.60 logits for
+**every** word in the same study.
+
+```{r bank}
+bank <- c(-2, -1, -.6, -.2, .2, .6, 1, 2)
+calibration <- plan_rasch_fixed_bank(
+  item_difficulties = bank, n_subj = c(40L, 100L), person_sd = .8,
+  max_error = c(difficulty = .35, difficulty_max_abs_error = .60),
+  method = "fixed_item", engine = "mml", assurance = .80,
+  nsim = 16L, workers = 1L, seed = 417L
+)
+summary(calibration)[c("n_subj", "target", "n_met", "nsim", "mc_lo", "mc_hi", "decision")]
+```
+
+At 100 examinees, `r with(summary(calibration), n_met[n_subj == 100 & target == "joint"])`
+of 16 studies met both tolerances. The `joint` row gives the interval for this
+attainment probability. An acceptable average
+error can coexist with an inaccurate estimate for a very easy or very difficult
+word. In the fixed-item analysis, an item with no correct or no incorrect
+responses has no finite unpenalized difficulty estimate. That study remains in
+the denominator for the whole-bank criterion. The item-level counts show where
+this occurred.
+
+```{r items}
+subset(calibration$item_summary, n_subj == 40L,
+       select = c(item_id, true_difficulty, rmse, n_finite, n_zero_correct, n_all_correct))
+```
+
+Item-level RMSE describes replications with a finite estimate for that item.
+An examinee who gets every administered word right or every word wrong can
+still contribute. Fixed-item calibration averages their ability over its
+posterior distribution using the items with estimable difficulties. If they
+answered only constant items, their ability is missing. For random-item
+calibration a constant, observed word can have a finite difficulty because
+information is shared across words. Check its error against the original
+difficulty, especially at the ends of the bank.
+
+For a study sampling **new words** from a population on every replication, use
+`plan_rasch_precision()`. For external comparisons, larger simulation runs,
+and their Monte Carlo intervals, see the
+[validation and scope vignette](validation-and-scope.html).
+
+```{r rasch-plot, fig.width=6.5, fig.height=4.5, fig.alt="Item RMSE and finite-estimate counts by true word difficulty and examinee count."}
+plot(calibration, type = "items", metric = "rmse")
+```
+
+Use `plot(calibration)` for joint attainment and its Monte Carlo interval,
+or `metric = "bias"` in the item plot to inspect the direction of error.
+`report_plan(calibration, print_output = FALSE)` returns the English methods text.
+The scale origin is the examinee population mean of zero. Comparing banks
+across populations with unknown mean differences requires a linking design.
+
+For partial presentation, inspect the proposed schedule before simulating.
+
+```{r exposure}
+partial <- design_crossed(list(), items_per_subject = 2L, item_seed = 1L)
+exposure <- generate_design_schedule(partial, 8L, 12L, diagnostics = TRUE)$item_exposure
+c(min_scheduled = min(exposure$n_scheduled), components = length(unique(exposure$component)))
+subset(exposure, n_scheduled == 0L)
+```
+
+A single component means all items are linked through shared examinees.
+Multiple components identify separate groups or unused items. Missing trials
+and participant dropout may reduce the overlap after scheduling.

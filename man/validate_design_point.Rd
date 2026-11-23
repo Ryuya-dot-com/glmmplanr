@@ -28,7 +28,7 @@ validate_design_point(
 replications (default \code{FALSE}).}
 }
 \value{
-Two rows (null and planned), including the true target, detection and
+A data frame with two rows (null and planned), including the true target, detection and
 its Wilson interval under the chosen failure policy, valid-fit coverage
 and its Wilson interval, and the valid-fit count. Null detection is the
 Type I error. Response-pattern counts follow \code{\link[=evaluate_design_point]{evaluate_design_point()}}.
@@ -40,4 +40,11 @@ effect and a null on the same target scale, using disjoint random streams.
 On the probability scale the null shifts cell logits along the supplied
 contrast until its probability difference is zero, holding the covariance
 structure fixed. On the logit scale it sets the focal coefficient to zero.
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
+r <- validate_design_point(spec, 16, 8, nsim = 5L)
+r[c("condition", "nsim", "n_valid", "detection", "coverage")]
 }

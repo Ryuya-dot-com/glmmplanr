@@ -58,7 +58,7 @@ or \code{"sequential"}).}
 \item{verbose}{Logical; display live progress bar with ETA (default \code{FALSE}).}
 }
 \value{
-A list with \code{summary} (per-target and joint attainment, counts, Wilson
+A \code{glmmplanr_rasch} list (see \link{rasch_plan_methods}) with \code{summary} (per-target and joint attainment, counts, Wilson
 bounds, and decision), \code{pareto} (non-dominated designs passing the joint
 criterion), \code{replications} (errors and fit diagnostics), and the settings.
 The \code{rmse} column is the root mean square of the evaluable replication
@@ -80,5 +80,5 @@ design <- design_crossed(list(), allocation = "crossed")
 dgp <- calibrate_dgp(design, 0.65, subj_sd = 0.8, item_sd = 0.6)
 plan <- plan_rasch_precision(dgp, data.frame(n_subj = 48, n_item = 12),
                              c(difficulty = 0.30), nsim = 4)
-plan$summary
+as.data.frame(plan)
 }

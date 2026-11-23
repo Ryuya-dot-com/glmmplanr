@@ -21,3 +21,6 @@ Numeric vector \code{c(low, high)} of response probabilities.
 \description{
 Convert Random-Effect SD Back to Conditional Probability Interval
 }
+\examples{
+sd_to_prob_range(sd = 0.5, intercept = qlogis(0.7))
+}

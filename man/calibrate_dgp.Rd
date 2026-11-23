@@ -35,11 +35,12 @@ by \code{"_"} or \code{":"} (e.g., \code{c(incidental_massed = 0.50, ...)}).}
 \code{0} for recall/production, \code{1/3} for 3AFC, \code{0.25} for 4AFC).}
 
 \item{subj_prob_range}{Optional numeric vector \code{c(low, high)} giving the 95\%
-subject accuracy interval at a baseline condition (converted via
-\code{\link[=prob_range_to_sd]{prob_range_to_sd()}}). Ignored if \code{subj_sd} is supplied directly.}
+subject accuracy range used to specify the intercept SD via its width on
+the adjusted logit scale. Calibration sets the location from \code{cell_probs},
+so the fitted endpoints can shift. Ignored when \code{subj_sd} is supplied.}
 
 \item{item_prob_range}{Optional numeric vector \code{c(low, high)} giving the 95\%
-item accuracy interval at a baseline condition. Ignored if \code{item_sd} is
+item accuracy range used in the same way. Ignored if \code{item_sd} is
 supplied directly.}
 
 \item{testlet_prob_range}{Optional numeric vector \code{c(low, high)} for passage
@@ -64,13 +65,20 @@ equicorrelation scalar \eqn{\rho} (default \code{0.20}), \code{"zero"} (uncorrel
 random effects), a correlation matrix, or a named list
 \code{list(subj = ..., item = ...)}.}
 
-\item{n_quad}{Integer number of Gauss-Hermite quadrature nodes per dimension
-(default \code{21L}, giving a 441-point 2D tensor rule).}
+\item{n_quad}{Integer number of 1D Gauss-Hermite quadrature nodes (initially
+\code{21L}). Because independent normal participant, item, and testlet random
+effects sum to a single normal random variable in each cell, 1D quadrature
+over the total cell SD is mathematically exact. The rule is refined up to
+\code{256L} nodes when quadrature differs from adaptive normal integration by
+more than \code{1e-10} (and aborts if the discrepancy still exceeds \code{1e-7} at
+\code{256L} nodes). The result stores the effective \code{n_quad} and the
+discrepancy in \code{solver_info}.}
 
 \item{check_nsim}{Integer number of Monte Carlo draws per cell used to build
 the prior-predictive sanity-check summary (default \code{4000L}).}
 
-\item{seed}{Optional integer seed for the prior-predictive check.}
+\item{seed}{Integer seed for the prior-predictive check. Use \code{NULL} to draw
+a master seed from the caller's random stream.}
 
 \item{participant_testlet_sd}{Conditional logit SD of an independent participant-by-
 passage intercept in the generating model. Use positive values to stress-test
@@ -87,9 +95,10 @@ predictive check results.
 Numerically inverts researcher-specified marginal cell response probabilities
 \eqn{P(Y = 1 \mid X)} into data-generating conditional fixed-effect
 coefficients \eqn{\beta} on the guessing-adjusted logit scale using
-two-dimensional Gauss-Hermite quadrature and \code{nleqslv}, correcting both
-non-collapsibility (random-effect attenuation toward the midpoint) and lower
-guessing asymptotes (\eqn{g = 1/m} in forced-choice tasks).
+exact 1D Gauss-Hermite quadrature over the combined normal random-effect
+variance per cell and \code{nleqslv}, correcting both non-collapsibility
+(random-effect attenuation toward the midpoint) and lower guessing
+asymptotes (\eqn{g = 1/m} in forced-choice tasks).
 }
 \examples{
 des <- design_crossed(

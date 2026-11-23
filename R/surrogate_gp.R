@@ -4,7 +4,7 @@
 #' corner anchors with maximin Latin Hypercube Sampling so the Gaussian process
 #' surrogate covers the full 2D search domain without extrapolation.
 #'
-#' @keywords internal
+#' @noRd
 select_initial_lhs_points <- function(grid_df, n_init = 16L, seed = 1L) {
   M <- nrow(grid_df)
   n_init <- min(as.integer(n_init), M)
@@ -74,7 +74,7 @@ normalize_unit <- function(x) {
 #' Monte Carlo binomial noise and trend-parameter estimation uncertainty,
 #' followed by Dykstra 2D isotonic projection over `(n_subj, n_item)`.
 #'
-#' @keywords internal
+#' @noRd
 fit_monotone_gp_prob <- function(
   eval_df,
   grid_df,
@@ -154,7 +154,7 @@ fit_monotone_gp_prob <- function(
 }
 
 #' Fit a Monotone GP Surrogate for Expected 95% CI Width
-#' @keywords internal
+#' @noRd
 fit_monotone_gp_width <- function(eval_df, grid_df, width_col = "ci_width_mean") {
   valid <- is.finite(eval_df[[width_col]]) & (eval_df[[width_col]] > 0)
   ev <- eval_df[valid, , drop = FALSE]
@@ -300,7 +300,7 @@ fit_predict_matern52 <- function(U_obs, y_resid, noise_var, U_pred, H_obs = NULL
 }
 
 #' 2D Isotonic Projection via Dykstra Alternating Projections + PAVA
-#' @keywords internal
+#' @noRd
 project_2d_monotone_grid <- function(
   vals,
   n_subj,
@@ -351,7 +351,7 @@ project_2d_monotone_grid <- function(
 }
 
 #' Compute Sample-Size Effort Score for `prefer` Ranking
-#' @keywords internal
+#' @noRd
 compute_preference_score <- function(
   grid_df,
   prefer = c("balanced", "fewer_subj", "fewer_items", "fewer_trials")
@@ -371,7 +371,7 @@ compute_preference_score <- function(
 }
 
 #' Compute Contour-Straddle + Preference-Aware Acquisition Scores Over Grid
-#' @keywords internal
+#' @noRd
 compute_surrogate_acquisition <- function(
   grid_df,
   spec,

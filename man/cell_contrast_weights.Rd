@@ -32,3 +32,7 @@ difference \eqn{\bar{P}_{A2} - \bar{P}_{A1}}),
 (difference-in-differences \eqn{(P_{22} - P_{21}) - (P_{12} - P_{11})}).
 }
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+cell_contrast_weights(des, "condition")
+}

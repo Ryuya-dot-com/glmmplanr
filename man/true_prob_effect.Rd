@@ -16,9 +16,15 @@ and optional testlet random effects via Gauss-Hermite quadrature) or
 \code{"conditional"} (evaluates at average cluster random effects \eqn{u = 0}).}
 }
 \value{
-Numeric scalar giving the true probability contrast \eqn{\Delta P \in (-1, 1)}
+Numeric scalar giving the weighted sum of cell probabilities
 (multiply by \code{100} for percentage points).
 }
 \description{
 Compute True Population-Marginal or Conditional Probability Contrast from DGP
+}
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+w <- cell_contrast_weights(des, "condition")
+c(marginal = true_prob_effect(dgp, w), conditional = true_prob_effect(dgp, w, "conditional"))
 }

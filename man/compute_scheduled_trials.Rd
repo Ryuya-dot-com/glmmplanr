@@ -26,3 +26,8 @@ for full crossed designs). With partial presentation, \code{items_per_subject}
 replaces the bank size in both formulas. The design tracks expected post-attrition observations
 separately. Expected observations are rounded to the nearest whole trial.
 }
+\examples{
+des <- design_crossed(list(), attrition = 0.1)
+compute_scheduled_trials(des, 20, 10)
+compute_expected_trials(des, 20, 10)
+}
