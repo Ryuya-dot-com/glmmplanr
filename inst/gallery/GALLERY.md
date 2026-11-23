@@ -77,7 +77,6 @@ res1 <- optimize_sample_size(
   n_item_range = c(16, 48),
   prefer       = "balanced",
   method       = "grid",
-  nsim_init    = 60,
   nsim_final   = 180,
   nsim_topup   = 80,
   workers      = 4,
@@ -197,7 +196,6 @@ res3 <- optimize_sample_size(
   scenarios         = scens3,
   standard_scenario = "standard_8pp",
   method            = "grid",
-  nsim_init         = 50,
   nsim_final        = 150,
   nsim_topup        = 60,
   workers           = 4,
@@ -229,11 +227,11 @@ Psychometric sample size planning depends critically on **which items you genera
 
 ```r
 # Part A: Random-item Rasch precision (generalizing to new examinees & new items)
-des5 <- design_crossed(list(), allocation = "crossed")
-dgp5 <- calibrate_dgp(des5, cell_probs = 0.65, chance = 0, subj_sd = 0.85, item_sd = 0.65)
+des4 <- design_crossed(list(), allocation = "crossed")
+dgp4 <- calibrate_dgp(des4, cell_probs = 0.65, chance = 0, subj_sd = 0.85, item_sd = 0.65)
 
-rasch_rand5 <- plan_rasch_precision(
-  dgp5,
+rasch_rand4 <- plan_rasch_precision(
+  dgp4,
   designs   = expand.grid(n_subj = c(60, 90, 120, 160), n_item = c(16, 24, 36)),
   max_error = c(ability = 0.50, difficulty = 0.30, item_sd = 0.22),
   assurance = 0.80,
@@ -244,10 +242,10 @@ rasch_rand5 <- plan_rasch_precision(
 )
 
 # Part B: Fixed 16-item bank with two +/-3.0 logit anchors (MML vs. Random-Item EB)
-b_bank5 <- c(-3.0, seq(-1.1, 1.1, length.out = 14), 3.0)
+b_bank4 <- c(-3.0, seq(-1.1, 1.1, length.out = 14), 3.0)
 
-bank_mml5 <- plan_rasch_fixed_bank(
-  item_difficulties = b_bank5,
+bank_mml4 <- plan_rasch_fixed_bank(
+  item_difficulties = b_bank4,
   n_subj            = c(40, 80, 120, 180, 240),
   person_sd         = 0.85,
   max_error         = c(difficulty = 0.45, difficulty_max_abs_error = 0.60),
@@ -258,9 +256,9 @@ bank_mml5 <- plan_rasch_fixed_bank(
   workers           = 4,
   seed              = 850502
 )
-subset(as.data.frame(bank_mml5), target == "joint")
-plot(bank_mml5, type = "items", metric = "bias")
-report_plan(bank_mml5)
+subset(as.data.frame(bank_mml4), target == "joint")
+plot(bank_mml4, type = "items", metric = "bias")
+report_plan(bank_mml4)
 ```
 
 ### Visual Output & Interpretation

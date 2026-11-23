@@ -1,4 +1,7 @@
 # End-to-End Demo: 2x2 Latin-Square 3AFC GLMM Sample Size Plan (Pareto & pp Scale)
+# Note: This script uses full-scale settings (3 scenarios, nsim_final = 1000).
+# For a quick exploratory run, set prob_se_method = "joint_delta", reduce nsim_final,
+# and adjust `workers` to match your available CPU cores.
 library(glmmplanr)
 
 # 1. 2x2 Latin-square design (within-subject x within-item, 4-list balance, 5% trial attrition)
