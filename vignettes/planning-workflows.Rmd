@@ -1,8 +1,11 @@
 ---
-title: "Planning a crossed experiment or a fixed-bank calibration"
-output: rmarkdown::html_vignette
+title: "From published results to a sample-size plan"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 2
 vignette: >
-  %\VignetteIndexEntry{Planning a crossed experiment or a fixed-bank calibration}
+  %\VignetteIndexEntry{From published results to a sample-size plan}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -11,132 +14,340 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-In a vocabulary experiment, the question might be whether instruction improves
-accuracy across new learners and words. In an item-bank calibration, the
-question might be whether each word on a particular list can be assigned a
-difficulty precise enough for reuse. The first example varies the numbers of
-learners and words. The second holds the words fixed and varies the number of
-examinees. Both examples use small simulation counts so you can run them and
-inspect the output.
+<style type="text/css">
+#TOC {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
+}
+#TOC ul { width: auto; box-sizing: border-box; }
+pre, div.sourceCode {
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+img { max-width: 100%; height: auto; }
+:not(pre) > code { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}
+</style>
 
-The response on each trial is correct/incorrect or yes/no. For a choice task,
-record whether the answer was correct. A five-point acceptability rating, a
-reaction time, or an error count requires a different response model.
+You have a paper reporting condition means, standard deviations, or a GLMM
+table, and want to decide how many participants and items to collect. Start by
+identifying what each reported number measures. An observed accuracy SD, a
+random-effect SD, and a coefficient's standard error are different quantities;
+they cannot be entered into the same argument.
 
-## Estimate a difference in accuracy
+This tutorial walks through two published GLMM reporting formats from different
+fields, showing how to translate each into a runnable two-dimensional
+(`N_subj x N_item`) simulation plan:
 
-Suppose each learner responds to each word once in a three-choice task. Two
-lists rotate the learning condition across words so each learner encounters
-both conditions and each word appears in both conditions across learners.
-We expect 60% correct after incidental exposure and 70% after instruction,
-averaged over learners and words. The assumed between-learner and between-word
-standard deviations below are in logits. This example assumes random intercepts
-and a common conditional instruction effect.
+- **Route A -- Condition means and observed SDs (L2 vocabulary learning):**
+  uses [Route A](#from-means), based on a foreign-language vocabulary retrieval
+  practice experiment analyzed with a crossed binary GLMM (Huang et al., 2025).
+  It covers the common case where a paper reports `M +/- SD` per condition and
+  significance tests, but omits the random-effect variance table.
+- **Route B -- GLMM coefficients, odds ratios, and variance components
+  (psychometrics / explanatory IRT):** uses [Route B](#from-coefficients),
+  uses new fits to the Verbal Aggression dataset (`lme4::VerbAgg`) discussed
+  by De Boeck et al. (2011). It shows how to map a full `glmer()` table into
+  `glmmplanr` and compare participant and item counts for a between-item effect.
+- **Random slopes and a model formula:** read
+  [Match the random effects and formula](#random-effects), including a worked
+  random-slope extension fitted directly to `VerbAgg`.
+- **Difficulties for a fixed item bank:** go to
+  [Calibrate a fixed list of items](#fixed-bank), continuing from the same
+  `VerbAgg` Rasch model.
+
+Small simulation counts (`nsim = 16L`) are used below so every code chunk runs
+in seconds; they demonstrate the workflow and do not establish a final
+sample-size recommendation.
+
+The response on each trial is binary (correct/incorrect or yes/no). For a
+multiple-choice task, record whether the answer was correct and set `chance` to
+the guessing asymptote. An ordinal rating scale, a reaction time, or an error
+count requires a different response model.
+
+## What goes where? {#paper-inputs}
+
+Read the table headings and the model description in the source paper before
+copying any numbers. A participant-level mean accuracy is averaged across
+trials, whereas a GLMM fixed coefficient describes the conditional log-odds of
+an individual response given zero random effects.
+
+| Information in a paper | Input or next step in `glmmplanr` |
+|---|---|
+| Mean accuracy `M = 0.42` (or `42%`) in one condition | Put `0.42` in that condition's `cell_probs`, if it represents the population-average accuracy you want to plan for. Supply one probability per design cell. |
+| Mean score `M = 18` out of 30 equally weighted binary items | `18 / 30 = 0.60` can supply a cell probability when everyone has the same denominator. This does not recover item difficulties or random-effect variances. |
+| Observed SD of participants' proportions, e.g., `SD = 0.26` | **Do not use `subj_sd = 0.26` or `subj_sd = 26`.** This observed-score SD mixes binomial trial noise with item and person variation on the proportion scale. It does not identify a latent logit random-intercept SD. |
+| Fixed-effect estimate `beta = -1.058` or odds ratio `OR = 0.347` | These are conditional effect inputs for [Route B](#from-coefficients), with `beta = log(OR)`. Neither belongs directly in `cell_probs`. |
+| Fixed-effect `SE`, confidence interval, or p-value | These describe estimation uncertainty in the source study. They are not `subj_sd`, `item_sd`, or the sample-size target. Use plausible effects in sensitivity scenarios. |
+| Participant random-intercept **variance** `1.886` | `subj_sd = sqrt(1.886)`, or `1.373`. If the table already prints **Std.Dev. = 1.373**, enter `1.373` without another square root. |
+| Item random-intercept **variance** `0.996` | `item_sd = sqrt(0.996)`, or `0.998`. Always use the latent logit scale of the fitted binary GLMM. |
+| Random-slope SDs and intercept-slope correlations | Supply full `subj_sd` / `item_sd` vectors and `corr_structure`; see [the worked mapping](#random-effects). |
+| Model formula and contrast coding | Use `factors`, `allocation`, `contrast`, and `analysis_re`, then inspect `formula(target)`. A formula is not passed to `calibrate_dgp()`. |
+
+If a paper reports only condition `M +/- SD` and significance tests, you do
+**not** yet know the participant and item random-effect SDs separately. Obtain
+the model output, code, or pilot data, or state explicit variance assumptions
+and bracket them in a sensitivity analysis. An observed 95% confidence interval
+for a mean is also not a `subj_prob_range`: that argument describes
+between-person heterogeneity, not uncertainty about the mean.
+
+For a fitted `lme4` model, `lme4::VarCorr(fit)` reports the random-effect SDs
+and correlations; `lme4::fixef(fit)` gives the fixed coefficients. See the
+[VarCorr documentation](https://lme4.github.io/lme4/reference/VarCorr.html)
+for the distinction between the variance and SD columns.
+
+## Route A: I have mean accuracies (L2 vocabulary case study) {#from-means}
+
+### 1. Read the published reporting format
+
+Consider a foreign-language vocabulary learning experiment by Huang et al.
+(2025; *Behavioral Sciences*, 15(11), 1540; `doi:10.3390/bs15111540`). They
+recruited `108` Chinese-native learners (`54` per learning-round group) who
+studied `60` Swahili-Chinese word pairs divided into four counterbalanced
+sublists. Each learner studied half the words by **restudying** and half by
+**retrieval practice** with corrective feedback, with sublists counterbalanced
+across study methods and test media (computer vs. paper). Words were studied
+repeatedly during learning; each word contributed one final-test response per
+learner. Trial-level binary
+cued-recall accuracy (`1 = correct`, `0 = incorrect`) was analyzed with
+`lme4::glmer(..., family = binomial(link = "logit"))` including crossed random
+intercepts for participants and items.
+
+Like many applied linguistics papers, Huang et al. (2025) report descriptive
+cell means and observed participant-level SDs (their Table 3), likelihood-ratio
+chi-squares, and `emmeans` pairwise odds ratios, **without printing the
+`glmer` random-effect variance table**. Here is the computer-based final test
+portion of their Table 3:
+
+| Learning rounds (between learners) | Restudying (`RSC`), `M +/- SD` | Retrieval practice (`RTC`), `M +/- SD` | Mean difference |
+|---|---:|---:|---:|
+| 3-round (`n = 54`) | `0.42 +/- 0.26` | `0.50 +/- 0.25` | `+8 pp` |
+| 4-round (`n = 54`) | `0.50 +/- 0.25` | `0.65 +/- 0.24` | `+15 pp` |
+
+*Source: Summary statistics adapted from Table 3 (computer-based final test) of
+Huang et al. (2025), https://doi.org/10.3390/bs15111540, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).*
+
+First, suppose you want to plan a focused two-condition replication of the
+**3-round computer-based comparison** (`0.42` vs. `0.50`, an 8-percentage-point
+retrieval practice benefit) using a counterbalanced Latin-square list rotation
+so each learner sees both study methods and each word rotates across both
+methods. The observed SDs (`0.26` and `0.25`) are shown above specifically to
+highlight what you must **not** enter into `subj_sd`. Because the paper does
+not print `VarCorr(fit)`, we explicitly assume participant and item
+random-intercept SDs of `0.8` and `0.6` logits as our baseline planning values
+and show below how to run a sensitivity bracket around them. We start with
+random intercepts only, matching the paper's reported random-effects structure.
 
 ```{r design}
 library(glmmplanr)
-design <- design_crossed(list(learning = c("incidental", "instruction")),
-                         allocation = "latin_square")
-model <- calibrate_dgp(design, cell_probs = c(incidental = .60, instruction = .70),
-                       chance = 1/3, subj_sd = .8, item_sd = .6, slope_sd_ratio = 0)
+design <- design_crossed(
+  factors = list(study_method = c("restudy", "retrieval")),
+  allocation = "latin_square",
+  contrast = "sum"
+)
+design$cells[c("cell_name", "study_method")]
+```
+
+`study_method` is the factor name; `restudy` and `retrieval` are its levels,
+with the reference condition first. The printed `cell_name` column gives the
+exact names to use in `cell_probs`. With two factors, supply all four cell
+probabilities (shown in the `2 x 2` interaction example below).
+
+Choose `allocation` from the actual presentation schedule of your planned study:
+
+| Planned presentation | `allocation` |
+|---|---|
+| Each participant sees both conditions, but each participant-item pair occurs once; lists rotate conditions across items | `"latin_square"` |
+| Each participant belongs to one condition; groups receive a common item bank | `"between_subj"` |
+| Items belong to different conditions; participants see items from each condition | `"between_item"` |
+| Each participant sees each item repeatedly under every condition | `"crossed"` |
+
+For mixed designs -- such as Huang et al.'s (2025) full `study_method x rounds`
+experiment where `rounds` varies between learners while `study_method` rotates
+within learners and items -- specify `between_subj` and/or `between_item`
+explicitly. A crossed GLMM formula alone does not tell you which allocation was
+used.
+
+### 2. Enter the means and random-effect SD assumptions
+
+```{r means-to-model}
+model <- calibrate_dgp(
+  design = design,
+  cell_probs = c(restudy = .42, retrieval = .50),  # Huang et al. (2025), Table 3 (3-round RSC/RTC)
+  chance = 0,          # cued recall has no multiple-choice guessing floor
+  subj_sd = .8,        # assumed participant random-intercept SD (logits), NOT 0.26
+  item_sd = .6,        # assumed item random-intercept SD (logits)
+  slope_sd_ratio = 0   # match the paper's intercept-only random structure initially
+)
 check_dgp(model, plot = FALSE)$cell_diagnostics[c("cell", "target_prob", "quad_prob")]
 ```
 
-Read the first row as a check on your assumptions. Averaged over learners and
-words, incidental exposure should give 60% correct. The last column recovers
-that input accuracy from the model. We want 80% power for a two-sided
-interval to exclude zero when instruction raises accuracy by 10 percentage points.
+Read the table as a verification of your data-generating model: averaged over
+learners and words, restudying produces `42%` correct and retrieval practice
+produces `50%` correct (`quad_prob` matches `target_prob`). These are
+**marginal** (population-averaged) probabilities. The calibrated conditional
+GLMM coefficients live in `coef(model)`. The `study_method` coefficient accounts
+for averaging over the assumed random effects; it generally differs from the
+naive contrast `qlogis(0.50) - qlogis(0.42)`.
+
+Because Huang et al. (2025) used **cued recall**, we set `chance = 0` (an
+ordinary binary-logit model). If your follow-up study switches to a
+three-choice vocabulary recognition test and you wish to model a lower guessing
+asymptote, set `chance = 1 / 3` instead; every `cell_probs` entry must then lie
+strictly between `chance` and `1`.
+
+### 3. Name the effect and choose the planning goal
+
+We target `80%` power for a two-sided 95% interval to exclude zero when
+retrieval practice raises population-average recall accuracy by **8 percentage
+points** (`50% - 42%`).
 
 ```{r target}
-target <- specify_target(model, effect = "learning", scale = "pp",
-                         engine = "bayes_laplace",
-                         analysis_re = "intercept_only", prob_se_method = "joint_delta")
+target <- specify_target(
+  dgp = model,
+  effect = "study_method",          # factor name, not 8 or a logit coefficient
+  scale = "pp",                     # percentage-point difference
+  criterion = "power", power_min = .80, alpha = .05,
+  engine = "bayes_laplace",
+  analysis_re = "intercept_only",   # fitted model, matching Huang et al.'s structure
+  prob_se_method = "joint_delta"
+)
 ```
 
-The scale is explicit because the default is a conditional logit coefficient.
-The model uses population-average accuracy, a power target of .80 and the
-joint delta method for the grid. Printing `target` shows these choices and
-the primary analysis model.
+We set `scale = "pp"` explicitly because the default scale is a conditional
+logit coefficient (`"logit"`). `scale` selects the estimand whose detection or
+interval width is evaluated; **it does not change the format of `cell_probs`**.
+For a precision (AIPE) goal instead, use `criterion = "ci_width", ci_width = 10,
+ci_assurance = .80` on the `"pp"` scale: a full 95% interval no wider than 10
+percentage points in at least 80% of simulated studies. `alpha = .05` controls
+the 95% interval; `power_min = .80` controls power.
 
-### If you can recruit 48 learners
+The engine also matters. `bayes_laplace` regularizes coefficients and
+random-effect SDs; if your
+final analysis will use unpenalized `lme4::glmer()`, plan or confirm with
+`engine = "lme4"` so planning and analysis estimators match exactly.
 
-With 24 words available, check this one design first. In the null row,
-detection is a false positive. In the planned row, detection is power.
-Coverage is the fraction of valid intervals that contain the true difference.
+### If your sample size is already fixed (e.g., 54 learners x 30 words)
+
+In Huang et al. (2025), each learning-round group had `54` learners and each
+learner answered `30` word pairs on computer, with test medium counterbalanced
+across the full `60`-word bank. The example below instead plans a **new study
+with a common bank of 30 words**, all tested on computer, using the published
+means as assumptions. It does not recreate the original partial-presentation
+schedule. In the `null` row, `detection` is the
+empirical Type I error rate. In the `planned` row, `detection` is empirical
+power. `coverage` is the fraction of valid 95% intervals containing the true
+percentage-point difference (`0` under null, `8.0` under planned).
 
 ```{r validate}
-check <- validate_design_point(target, n_subj = 48, n_item = 24,
+check <- validate_design_point(target, n_subj = 54L, n_item = 30L,
                                nsim = 16L, seed = 731L)
 check[c("condition", "true_target", "nsim", "n_valid",
         "detection", "detection_lo", "detection_hi", "coverage")]
 ```
 
-The lower bound for power is `r sprintf("%.1f%%", 100 * check$detection_lo[check$condition == "planned"])`.
-Compare it with the .80 target. Each row represents only 16 simulated studies,
-so the bounds can be wide.
+The lower Monte Carlo bound for power is
+`r sprintf("%.1f%%", 100 * check$detection_lo[check$condition == "planned"])`.
+Compare it with the `.80` target. Because each row uses only `16` simulated
+studies here, the Wilson bounds are wide.
 
 ### If the numbers of learners and words are both flexible
 
-Evaluate nine combinations and compare the uncertainty in each power estimate.
+Evaluate a `3 x 3` grid of learner counts and word-bank sizes to see the
+two-dimensional trade-off. `n_subj_range` contains **total learners**, not
+learners per list; `n_item_range` contains distinct words in the stimulus bank
+(both must be multiples of 2 for a two-condition Latin square). `nsim_final` is
+the number of simulated studies per candidate, not the number of participants.
 
 ```{r plan}
 plan <- optimize_sample_size(target,
-                             n_subj_range = c(24, 32, 48), n_item_range = c(12, 16, 24),
-                             method = "grid", nsim_final = 16L, nsim_sensitivity = 0L,
+                             n_subj_range = c(24, 40, 54), n_item_range = c(16, 30, 44),
+                             method = "grid", nsim_init = 16L, nsim_final = 16L,
+                             nsim_topup = 0L, nsim_sensitivity = 0L,
                              workers = 1L, seed = 417L, verbose = FALSE)
 as.data.frame(plan)[c("n_subj", "n_item", "nsim", "n_valid", "power",
-                "power_mc_lo", "power_mc_hi", "decision_status")]
+                      "power_mc_lo", "power_mc_hi", "decision_status")]
 ```
 
-For the default failure policy, failed fits count as missed detections.
-A lower Monte Carlo bound of at least .80 gives `pass`. An upper bound
-below .80 gives `fail`. An interval crossing the target gives
-`indeterminate`. For a study decision, prespecify enough simulations to
-distinguish the power values that matter to you.
+Under the default failure policy (`failure_policy = "effective"`), non-converged
+or separated fits count as missed detections:
 
-`plan$verified_pareto` contains the passing combinations where reducing
-learners or words would require more of the other among the tested
-candidates. If recruiting learners is the constraint, read the row with the
-fewest learners. If preparing materials is the constraint, read the row with
-the fewest words. An empty table means the grid has no confirmed pass.
+- `pass`: the lower Monte Carlo bound (`power_mc_lo`) reaches `.80`.
+- `fail`: the upper bound (`power_mc_hi`) falls below `.80`.
+- `indeterminate`: the interval straddles `.80`.
 
-### Choosing starting inputs when pilot data are limited
+With only 16 simulations, even `16 / 16` successes yield a 95% Wilson lower
+bound of `0.806`, so `nsim = 16L` is strictly for fast illustration. For an
+actual study decision, prespecify a larger budget (for example, `nsim_final =
+200L` to `400L`).
 
-If you do not yet have pilot GLMM variance estimates, avoid committing to a single
-optimistic guess. The numbers below are **illustrative starting values for
-sensitivity bracketing, not universal field-wide recommendations**—replace them
-with domain-specific pilot estimates or accuracy ranges whenever available:
+`plan$verified_pareto` lists the non-dominated passing `(n_subj, n_item)`
+combinations where reducing learners requires adding words (and vice versa). If
+learner recruitment is your bottleneck, choose the row with the fewest learners;
+if creating balanced vocabulary stimuli is your bottleneck, choose the row with
+the fewest words. An empty table means no candidate reached `pass` yet.
+
+### Choosing starting inputs when the source paper omits `VarCorr`
+
+Because Huang et al. (2025) did not report `VarCorr(fit)`, avoid committing to
+a single optimistic variance guess. The values below are **illustrative starting
+brackets for sensitivity analysis, not universal field-wide recommendations**
+-- replace them with pilot GLMM estimates or accuracy ranges whenever available:
 
 - **Random-intercept SDs (`subj_sd`, `item_sd`)**: As a tentative sensitivity
-  grid on the logit scale, you might compare low (`0.4–0.6`), moderate
-  (`0.6–0.9`), and large (`1.0–1.2`) heterogeneity, or supply expected 95%
-  accuracy ranges directly via `subj_prob_range` and `item_prob_range`.
-- **Random slopes (`slope_sd_ratio`)**: When condition varies within
-  participants or items, an illustrative starting bracket is `0.25–0.35` (use
-  `0` only if you plan an intercept-only model and accept the mismatch risk).
+  grid on the logit scale, compare low (`0.4-0.6`), moderate (`0.6-0.9`), and
+  large (`1.0-1.2`) heterogeneity, or supply expected 95% accuracy ranges
+  directly via `subj_prob_range` and `item_prob_range`.
+- **Random slopes (`slope_sd_ratio`)**: When condition varies within learners or
+  words, an illustrative sensitivity bracket is `0.25-0.35` (use `0` only if
+  you plan an intercept-only model and accept the mismatch risk).
 - **3-scenario effect-size bracket**: Wrap your baseline `dgp` in
-  `scenario_dgps(dgp, effect = "learning", effect_diffs_pp = c(conservative = 6, standard = 10, optimistic = 14))`
-  and pass `scenarios = ...` to `optimize_sample_size()` so the plan shows how
-  many extra participants or items are needed if the true effect is smaller than
-  expected.
+  `scenario_dgps(model, effect = "study_method", effect_diffs_pp = c(conservative = 5, standard = 8, optimistic = 12))`
+  and pass `scenarios = ...` to `optimize_sample_size()` to see how many extra
+  learners or words are needed if the retrieval benefit is smaller than the
+  published `+8 pp`.
 
-### Confirming a candidate and analysing the responses
+The effect-size bracket changes mean differences, not the missing variance
+components. To vary those components while keeping the published means fixed,
+construct separate generating models, for example:
 
-For a final check of the example 48-by-24 design, use a new seed and the
-interval method you intend to report. Note the computational cost before
-launching: the marginal bootstrap attempts 99 refits for each valid simulated
-study in both the null and planned conditions (at `nsim = 1000L`, up to
-`2 * 1,000 * 99 = 198,000` inner refits). Always time a small pilot first
-(`nsim = 10L`) and scale to estimate wall-clock time (`pilot_sec * nsim / 10`):
+```{r variance-scenarios}
+sd_assumptions <- list(lower = c(.5, .4), baseline = c(.8, .6), higher = c(1.1, .9))
+variance_scenarios <- lapply(sd_assumptions, function(sds) {
+  calibrate_dgp(design, cell_probs = c(restudy = .42, retrieval = .50),
+                chance = 0, subj_sd = sds[1], item_sd = sds[2],
+                slope_sd_ratio = 0)
+})
+```
+
+Pass `scenarios = variance_scenarios` to `optimize_sample_size()` to evaluate
+these SD assumptions. They are illustrative, not variance estimates reported
+by Huang et al. (2025).
+
+### Confirming a candidate and analysing collected data
+
+Before pre-registering a candidate such as `54` learners x `30` words, confirm
+it on a fresh seed with the exact interval method you plan to report. Check the
+computational budget first: `prob_se_method = "bootstrap"` runs 99 parametric
+refits per valid simulated study in both `null` and `planned` conditions (at
+`nsim = 1000L`, up to `2 * 1000 * 99 = 198,000` inner refits). Time a 10-rep
+pilot first and scale by `nsim / 10`:
 
 ```{r final-check, eval=FALSE}
-final <- specify_target(model, "learning", scale = "pp", engine = "bayes_laplace",
+final <- specify_target(model, "study_method", scale = "pp", engine = "bayes_laplace",
                         analysis_re = "intercept_only", prob_se_method = "bootstrap")
-# 1. Time a 10-rep pilot to estimate runtime before a large confirmation run
-system.time(validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 10L, seed = 8200L))
+# 1. Time a 10-rep pilot to estimate wall-clock time
+system.time(validate_design_point(final, n_subj = 54L, n_item = 30L, nsim = 10L, seed = 8200L))
 
 # 2. Run pre-specified confirmation (e.g., nsim = 200L-1000L depending on budget)
-val <- validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 200L, seed = 8201L)
+val <- validate_design_point(final, n_subj = 54L, n_item = 30L, nsim = 200L, seed = 8201L)
 val[c("condition", "n_valid", "detection", "detection_lo", "detection_hi",
       "coverage", "coverage_lo", "coverage_hi")]
 ```
@@ -157,13 +368,11 @@ rather than point estimates alone:
   ceiling (increase `nsim` if merely uncertain, or revise the estimator /
   random-slope specification if truly miscalibrated).
 
-For collected data, keep one row per observed response, with binary `y` and
-the same learner and word identifiers used for assignment. If maximum
-likelihood via `lme4` is your planned final analysis, set `engine = "lme4"`
-during planning so the planning and analysis estimators match exactly. These
-calls show the model formula, three-choice link, and how to recover the same
-population-averaged (marginal) percentage-point difference from the fitted
-`lme4::glmer()` object:
+When analysing collected data, keep one row per trial with binary `y` and the
+learner (`subj`) and word (`item`) IDs. If unpenalized maximum likelihood via
+`lme4::glmer()` is your planned final analysis, set `engine = "lme4"` during
+planning as well. These calls show the exact formula, family, and marginal
+percentage-point recovery matching the planned estimand:
 
 ```{r analysis-model}
 formula(target)
@@ -171,16 +380,16 @@ family(target)
 ```
 
 ```{r observed-analysis, eval=FALSE}
-responses$learning <- factor(responses$learning, levels = design$factors$learning)
-contrasts(responses$learning) <- design$contrasts$learning
+responses$study_method <- factor(responses$study_method, levels = design$factors$study_method)
+contrasts(responses$study_method) <- design$contrasts$study_method
 fit <- lme4::glmer(formula(target), data = responses, family = family(target))
 
-# Recover the same marginal percentage-point difference over fitted random effects
+# Recover the same population-averaged percentage-point difference
 b <- lme4::fixef(fit)
 vc <- lme4::VarCorr(fit)
 sd_tot <- sqrt(vc$subj[1, 1] + vc$item[1, 1])
 eta <- drop(design$X_cells %*% b)
-g <- 1 / 3
+g <- 0  # replace with 1 / 3 if using a 3-choice guessing link
 marg_p <- vapply(eta, function(e) {
   stats::integrate(
     function(z) (g + (1 - g) * stats::plogis(e + sd_tot * z)) * stats::dnorm(z),
@@ -190,89 +399,464 @@ marg_p <- vapply(eta, function(e) {
 diff_pp <- 100 * (marg_p[2] - marg_p[1])
 ```
 
-### Checking an interaction or a proficiency assumption
+### Extending to the paper's `2 x 2` interaction (and a proficiency pretest)
 
-With two factors coded -0.5 and +0.5, an interaction of four percentage
-points means the effect of one factor changes by four points across levels
-of the other. For the probabilities below the spacing benefit is two points
-after incidental exposure and six after instruction.
+Huang et al. (2025) reported a `study_method x learning_round` likelihood-ratio
+test of `chi^2(1) = 7.97, p = .0048` in their analysis including test medium.
+For the computer-test means alone, the descriptive retrieval advantage grows
+from `+8 pp` (`0.42` vs. `0.50`) to `+15 pp` (`0.50` vs. `0.65`), giving a
+`+7 pp` difference-in-differences. This arithmetic contrast of rounded means
+does **not** reproduce the paper's logit-scale test or its p-value.
+
+To plan a new computer-only study, use these four means as assumptions.
+Because `rounds` varied **between learners** while
+`study_method` rotated within learners and words, declare `between_subj =
+"rounds"` and supply all four cells from Table 3:
 
 ```{r interaction}
-two <- design_crossed(list(learning = c("incidental", "instruction"),
-                           spacing = c("massed", "distributed")), contrast = "sum")
-cells <- cell_probs_from_diffs(two, .65, c(learning = 8, spacing = 4, "learning:spacing" = 4))
-cells
-g <- calibrate_dgp(two, cells, subj_sd = .8, item_sd = .6)
+two <- design_crossed(
+  factors = list(study_method = c("restudy", "retrieval"),
+                 rounds = c("three", "four")),
+  between_subj = "rounds",
+  contrast = "sum"
+)
+two$cells[c("cell_name", "study_method", "rounds")]
+cells <- c(
+  restudy_three   = .42,
+  retrieval_three = .50,
+  restudy_four    = .50,
+  retrieval_four  = .65
+)
+g <- calibrate_dgp(two, cells, chance = 0, subj_sd = .8, item_sd = .6,
+                   slope_sd_ratio = 0)
 check_dgp(g, plot = FALSE)$marginal_effects
 ```
 
-If a pretest is expected to explain 25% of the **latent participant
-random-intercept variance**, try `subj_sd = .8 * sqrt(1 - .25)` (about .69
-logit) and compare the plan with the original .8. This is a residual-variance
-sensitivity analysis. It assumes the same marginal cell probabilities and
-does not simulate proficiency, estimate its coefficient, or account for
-confounding. An R-squared for observed binary responses measures something
-different. With random slopes, supply the full `subj_sd` vector to hold
-their SDs fixed as the intercept SD changes.
+`check_dgp()` confirms the two `+11.5 pp` average main effects and the exact
+`+7.0 pp` interaction (`study_method1:rounds1`). You can now pass `effect =
+"study_method:rounds"` to `specify_target()` to plan directly for the
+interaction.
 
-## Calibrate a fixed list of words
+Huang et al. (2025) also measured L2 proficiency with LexTALE (Table 1). If you
+expect a continuous proficiency covariate to explain 25% of the **latent
+participant random-intercept variance**, run a residual-variance sensitivity
+check with `subj_sd = .8 * sqrt(1 - .25)` (about `0.69` logit) and compare the
+resulting plan with `0.8`. This holds marginal cell probabilities fixed and
+does not simulate proficiency, estimate its slope, or account for confounding;
+an observed-scale $R^2$ for binary scores measures something different. With
+random slopes, pass the full `subj_sd` vector so slope SDs stay fixed when the
+intercept SD changes.
 
-Suppose a pilot suggests the following eight Rasch difficulties. Each new
-examinee responds to the whole list. The planning values stay fixed across
-simulated studies and examinees are sampled anew. We require a bank-wide RMSE
-of at most 0.35 logits and an absolute error of at most 0.60 logits for
-**every** word in the same study.
+## Route B: I have beta or odds ratios (Psychometrics / Explanatory IRT case study) {#from-coefficients}
+
+Now consider the reporting format of a complete crossed GLMM table.
+De Boeck et al. (2011; *Journal of Statistical Software*, 39(12), 1--28;
+`doi:10.18637/jss.v039.i12`) describe **explanatory item response models**,
+including the Linear Logistic Test Model with random item error (LLTM + error).
+We apply that framework to `lme4::VerbAgg`, their example dataset (originally
+De Boeck & Wilson, 2004). **The numerical tables below are tutorial reanalyses
+of the public data, not tables transcribed from the 2011 article.**
+
+`VerbAgg` contains `7,584` responses from `316` respondents answering all `24`
+items. We use the already dichotomized `r2` outcome: `"Y"` combines the original
+"yes" and "perhaps" categories, and `"N"` means "no". This is a binary
+endorsement analysis, not a model for the original three response categories.
+Twelve items describe
+situations where **another person** is to blame (`situ = "other"`), and twelve
+describe situations where **oneself** is to blame (`situ = "self"`). Because
+each item belongs permanently to one `situ` level while every respondent
+answers items from both levels, `situ` is a **between-item** covariate
+(`allocation = "between_item"`).
+
+The following fit produces the rounded output below (verified with
+`lme4` 2.1.0). Small numerical differences can occur across software versions.
+
+```r
+data(VerbAgg, package = "lme4")
+VerbAgg$situ <- factor(VerbAgg$situ, levels = c("other", "self"))
+contrasts(VerbAgg$situ) <- contr.treatment(levels(VerbAgg$situ))
+fit_va <- lme4::glmer(r2 ~ situ + (1 | id) + (1 | item),
+                      data = VerbAgg, family = binomial())
+summary(fit_va)
+```
+
+| Model component (`lme4::VerbAgg`) | Rounded tutorial refit | Value needed for `glmmplanr` |
+|---|---:|---:|
+| Fixed `(Intercept)` (`situ = "other"`) | `0.3663` (SE `0.3008`, `p = .223`) | `0.3663` logits |
+| Fixed `situself` (`"self"` vs. `"other"`) | `-1.0577` (SE `0.4114`, `p = .010`; `OR` about `0.347`) | `-1.0577` logits |
+| Person (`id`) random-intercept Std.Dev. (Var) | `1.3733` (`1.8858`) | `subj_sd = 1.3733` |
+| Residual item (`item`) random-intercept Std.Dev. (Var) | `0.9978` (`0.9956`) | `item_sd = 0.9978` |
+
+When a table already reports unstandardized logit coefficients (`-1.0577`), use
+them directly without taking `log()`. Use `log(OR)` only when the paper reports
+a conditional odds ratio for the same response, coding, and unit of change
+using the unrounded OR when available. Rounding an OR before taking its log
+can introduce small differences. A standardized coefficient, risk ratio, or probit
+coefficient cannot be substituted here.
+
+**An OR or slope alone is insufficient.** You also need the baseline
+(intercept), contrast coding, allocation (`between_item` vs. `between_subj` vs.
+`latin_square`), and both random-effect SDs. Do not silently plug `qlogis()` of
+a raw marginal mean into the conditional intercept.
+
+### Keep the source model's allocation and coding
+
+```{r paper-design}
+library(glmmplanr)
+va_design <- design_crossed(
+  factors = list(situ = c("other", "self")),
+  allocation = "between_item",  # each item has one situ level; persons answer all items
+  contrast = "treatment"        # 0 = other, 1 = self (matching lme4 default)
+)
+va_design$X_cells
+
+# Order: (Intercept), then self versus other.
+va_beta <- setNames(c(0.3663, -1.0577), colnames(va_design$X_cells))
+va_subj_sd <- 1.3733
+va_item_sd <- 0.9978
+```
+
+Always inspect `X_cells` before copying coefficients. `glmmplanr`'s default
+`contrast = "sum"` uses `-0.5, +0.5`, whereas R's `lme4::glmer()` defaults to
+treatment coding (`0, 1`) and `contr.sum(2)` uses `+1, -1`. Changing coding
+changes intercepts, slopes, and random-effect covariances. See R's
+[contrast documentation](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/contrast.html).
+
+### Convert the GLMM table to marginal cell probabilities
+
+`calibrate_dgp()` accepts marginal cell probabilities rather than raw `beta`
+inputs. For an intercept-only crossed binary logit model, integrate the
+conditional probability over the combined normal random-effect SD
+$\sqrt{\sigma_{\text{person}}^2 + \sigma_{\text{item}}^2}$. You can copy this
+helper verbatim for any intercept-only binary logit table:
+
+```{r paper-probabilities}
+average_probability <- function(eta, sd) {
+  stats::integrate(
+    function(z) stats::plogis(eta + sd * z) * stats::dnorm(z),
+    lower = -Inf, upper = Inf, rel.tol = 1e-10
+  )$value
+}
+
+va_eta <- drop(va_design$X_cells %*% va_beta)
+va_total_sd <- sqrt(va_subj_sd^2 + va_item_sd^2)
+va_probs <- setNames(
+  vapply(va_eta, average_probability, numeric(1), sd = va_total_sd),
+  va_design$cells$cell_name
+)
+data.frame(
+  cell = names(va_probs),
+  probability_at_zero_random_effects = plogis(va_eta),
+  marginal_probability_to_enter = unname(va_probs)
+)
+```
+
+Notice how much the two columns differ because person (`1.37`) and residual
+item (`1.00`) heterogeneity are substantial: `plogis(va_eta)` (equivalent to
+`predict(fit, re.form = NA, type = "response")`) omits the random effects,
+whereas `marginal_probability_to_enter` averages over them. Always pass
+**`marginal_probability_to_enter`** to `calibrate_dgp()`. See the
+[lme4 prediction documentation](https://lme4.github.io/lme4/reference/predict.merMod.html).
+
+```{r paper-model}
+va_model <- calibrate_dgp(
+  design = va_design,
+  cell_probs = va_probs,
+  chance = 0,                 # ordinary logit, matching lme4::glmer()
+  subj_sd = va_subj_sd,
+  item_sd = va_item_sd,
+  slope_sd_ratio = 0
+)
+data.frame(
+  term = names(va_beta),
+  source_beta = unname(va_beta),
+  recovered_beta = unname(coef(va_model))
+)
+```
+
+The recovered coefficients agree with `0.3663` and `-1.0577` to numerical
+precision, confirming that the marginal probabilities, coding, and variance
+components reproduce the rounded planning inputs. This checks the conversion;
+it does not independently validate the fitted model. Keep `chance = 0` whenever reproducing
+an ordinary logit table; switching to a guessing link changes the meaning of
+every coefficient. If the source model includes random slopes, use the
+[cell-specific variance formula below](#beta-with-slopes) instead of a constant
+`va_total_sd`.
+
+### Plan respondents x items: seeing the between-item bottleneck
+
+Now plan a new explanatory IRT study to detect the `-1.0577`-logit `situ`
+effect at `80%` power on the conditional logit scale (`scale = "logit"`). In
+our refit of `VerbAgg`, `316` respondents answered `24` items (`p` about `.010`). What happens if
+we vary both examinees (`24, 48, 72`) and items (`16, 24, 48`)?
+
+```{r paper-plan}
+va_target <- specify_target(
+  dgp = va_model,
+  effect = "situ",
+  scale = "logit",              # test the conditional item-property coefficient
+  criterion = "power", power_min = .80,
+  engine = "bayes_laplace",     # use engine = "lme4" to match unpenalized ML exactly
+  analysis_re = "intercept_only"
+)
+formula(va_target)
+
+va_plan <- optimize_sample_size(
+  va_target,
+  n_subj_range = c(24, 48, 72), n_item_range = c(16, 24, 48),
+  method = "grid", nsim_init = 16L, nsim_final = 16L,
+  nsim_topup = 0L, nsim_sensitivity = 0L,
+  workers = 1L, seed = 9101L, verbose = FALSE
+)
+as.data.frame(va_plan)[c("n_subj", "n_item", "nsim", "n_valid", "power",
+                         "power_mc_lo", "power_mc_hi", "decision_status")]
+```
+
+Read the table in both directions: compare `24`, `48`, and `72` respondents
+at a fixed item count, then compare `16`, `24`, and `48` items at a fixed
+respondent count. Use `power_mc_lo`, `power_mc_hi`, and `decision_status`
+alongside each point estimate. A point estimate above `.80` is not itself a
+confirmed `pass`. With only 16 replications, the differences between rows can
+include substantial Monte Carlo noise; this demonstration cannot establish
+that tripling respondents has no benefit or that 48 items are sufficient.
+
+Because `situ` is a **between-item** property, its effect is estimated by
+comparing different items. Additional respondents improve measurement within
+items, whereas additional items supply more independent units for that
+comparison under the assumed random-item model. Both axes should therefore
+be evaluated before choosing a design.
+To plan a population-average endorsement difference instead, switch `scale =
+"pp"` and choose `prob_se_method` in `specify_target()` without changing
+`va_model`. If your real analysis will use unpenalized `lme4::glmer()`, confirm
+your chosen design with `engine = "lme4"` and a larger `nsim` via
+`validate_design_point()`.
+
+## Match the random effects and formula {#random-effects}
+
+A random intercept allows participants or items to differ in baseline accuracy
+or endorsement. A random slope allows the condition effect itself to vary
+across participants or items. A fixed effect's `SE` measures uncertainty about
+the population average; it is not a random-slope SD.
+
+### Within-participant and within-item slopes (Route A sensitivity)
+
+In Route A's L2 vocabulary Latin-square design (`design`), `study_method`
+varies within **both** learners and words, so both `(study_method | subj)` and
+`(study_method | item)` are estimable. Because Huang et al. (2025) fitted
+random intercepts only, suppose we run a random-slope sensitivity check using
+illustrative SDs and correlations on Route A's `-0.5, +0.5` sum coding:
+
+| Group | Intercept SD | `study_method` slope SD | Intercept-slope correlation |
+|---|---:|---:|---:|
+| Learner (`subj`) | `.8` | `.3` | `.25` |
+| Word (`item`) | `.6` | `.2` | `-.10` |
+
+First check the exact column order of the random-effect design matrices. The
+supplied SD vectors are **positional**; `glmmplanr` does not reorder them by
+name.
+
+```{r slope-term-order}
+colnames(design$Z_subj_cells)
+colnames(design$Z_item_cells)
+```
+
+Enter **intercept first, slope second**, matching the printed order:
+
+```{r slope-inputs}
+slope_model <- calibrate_dgp(
+  design = design,
+  cell_probs = c(restudy = .42, retrieval = .50),
+  chance = 0,
+  subj_sd = c(.8, .3),
+  item_sd = c(.6, .2),
+  corr_structure = list(subj = .25, item = -.10)
+)
+slope_target <- specify_target(
+  dgp = slope_model, effect = "study_method", scale = "pp",
+  engine = "bayes_laplace", analysis_re = "maximal",
+  prob_se_method = "joint_delta"
+)
+formula(slope_target)
+```
+
+The returned formula includes `(study_method | subj)` and
+`(study_method | item)`. Supplying full SD vectors overrides `slope_sd_ratio`.
+If you give only scalar SDs and omit `slope_sd_ratio`, the default generates
+eligible slope SDs at **0.35 times the intercept SD**; omitting
+`slope_sd_ratio` does **not** mean intercepts only. With multiple factors,
+inspect `Z_subj_cells` and `Z_item_cells` again because interaction slopes may
+also be eligible.
+
+Keep two separate choices aligned:
+
+- **Data generation (`calibrate_dgp`)**: `subj_sd`, `item_sd`,
+  `slope_sd_ratio`, and `corr_structure` define the variation assumed to exist
+  in the population.
+- **Analysis (`specify_target`)**: `analysis_re` selects what each simulated
+  study fits -- `"intercept_only"`, `"maximal"` (all eligible within-unit
+  slopes with correlations), or `"uncorrelated"` (eligible slopes with zero
+  correlations). Setting `analysis_re = "intercept_only"` alone does not remove
+  random slopes from the data-generating model.
+
+`glmmplanr` determines eligible slopes automatically from `allocation` (for
+example, a between-participant factor cannot have a participant random slope,
+and a between-item factor cannot have an item random slope). It provides these
+structured presets rather than an arbitrary formula parser: continuous
+covariates, custom subsets of slopes, or extra grouping levels (such as
+schools) are not imported by pasting a formula. Always inspect
+`formula(target)` before planning. For current analytical uncertainty limits in
+complex random-slope or guessing models, consult the
+[validation and scope guide](validation-and-scope.html).
+
+### If the beta table also includes random slopes (real `VerbAgg` fit) {#beta-with-slopes}
+
+In Route B's `VerbAgg` study, `situ` varies **within respondents** but
+**between items**. Thus respondents can have a person-specific `situ` slope
+while items can only have a random intercept. Fitting that model to
+`lme4::VerbAgg`:
+
+```r
+fit_va_slope <- lme4::glmer(r2 ~ situ + (1 + situ | id) + (1 | item),
+                            data = VerbAgg, family = binomial())
+```
+
+gives `(Intercept) = 0.4161`, `situself = -1.1012`, person (`id`) SDs
+`1.6544` (intercept) and `0.9039` (`situself` slope) with correlation `-0.594`,
+and item (`item`) intercept SD `1.0256`.
+
+With random slopes, total latent variance differs between cells (`other` vs.
+`self`), so replace the constant `va_total_sd` with the cell-specific variance
+computed from `Z_subj_cells` and `Z_item_cells`:
+
+```{r paper-with-slopes}
+colnames(va_design$Z_subj_cells)  # intercept + situ slope (within-person)
+colnames(va_design$Z_item_cells)  # intercept only (situ is between-item)
+
+va_sl_beta <- setNames(c(0.4161, -1.1012), colnames(va_design$X_cells))
+va_sl_subj_sd <- c(1.6544, 0.9039)
+va_sl_subj_cor <- matrix(c(1, -0.594, -0.594, 1), 2, 2)
+va_sl_item_sd <- 1.0256
+
+subj_cov <- tcrossprod(va_sl_subj_sd) * va_sl_subj_cor
+Zs <- va_design$Z_subj_cells
+cell_sd <- sqrt(rowSums((Zs %*% subj_cov) * Zs) + va_sl_item_sd^2)
+
+va_sl_eta <- drop(va_design$X_cells %*% va_sl_beta)
+va_sl_probs <- setNames(
+  mapply(average_probability, eta = va_sl_eta, sd = cell_sd),
+  va_design$cells$cell_name
+)
+va_sl_model <- calibrate_dgp(
+  design = va_design, cell_probs = va_sl_probs, chance = 0,
+  subj_sd = va_sl_subj_sd, item_sd = va_sl_item_sd,
+  corr_structure = list(subj = va_sl_subj_cor)
+)
+data.frame(
+  term = names(va_sl_beta),
+  source_beta = unname(va_sl_beta),
+  recovered_beta = unname(coef(va_sl_model))
+)
+```
+
+Again, the recovered coefficients agree with `0.4161` and `-1.1012` to
+numerical precision. Pair `va_sl_model` with `analysis_re = "maximal"` if you
+plan to fit `(1 + situ | id) + (1 | item)` in your new study. Because estimated
+random-slope SDs and correlations carry substantial estimation uncertainty,
+always pair point-estimate planning with sensitivity scenarios.
+
+## Calibrate a fixed list of items {#fixed-bank}
+
+A tutorial refit of the **random-item Rasch model**
+`r2 ~ 1 + (1 | id) + (1 | item)` to `VerbAgg` gives a person trait SD of about
+`1.37` logits. The fitted item easiness is the fixed intercept plus each item's
+random effect; negate that sum to obtain item difficulty on a person-mean-zero
+scale. These item estimates are shrunk random-effect estimates, not the
+unpenalized item coefficients from a fixed-item Rasch fit.
+
+The following optional code reconstructs the eight items used below. This is
+our selection from a new fit, not a bank recommended by De Boeck et al. (2011).
+
+```r
+data(VerbAgg, package = "lme4")
+fit_bank <- lme4::glmer(r2 ~ 1 + (1 | id) + (1 | item),
+                        data = VerbAgg, family = binomial())
+item_re <- lme4::ranef(fit_bank)$item
+difficulty <- setNames(-lme4::fixef(fit_bank)[1] - item_re[, 1], rownames(item_re))
+bank_ids <- c("S2WantCurse", "S4wantCurse", "S1WantScold", "S1WantShout",
+              "S4WantScold", "S1DoShout", "S3DoScold", "S3DoShout")
+round(difficulty[bank_ids], 2)
+attr(lme4::VarCorr(fit_bank)$id, "stddev")
+```
+
+Treat these rounded estimates as fixed planning truths for a new calibration
+of the **same eight items**. Uncertainty in the original estimates is not
+propagated by this plug-in example. The simulation below uses fixed-item MML,
+so its calibration estimator differs from the random-item fit supplying the
+starting values.
+
+Each examinee answers all 8 items, the true difficulties remain fixed across
+replications while examinees are sampled anew, and you require **both** a
+bank-wide RMSE of at most `0.35` logits **and** a worst-item absolute error of
+at most `0.65` logits in the same study (`assurance = .80`):
 
 ```{r bank}
-bank <- c(-2, -1, -.6, -.2, .2, .6, 1, 2)
+va_bank <- c(S2WantCurse = -1.64, S4wantCurse = -1.02,
+             S1WantScold = -.53, S1WantShout = -.07,
+             S4WantScold = .33, S1DoShout = .83,
+             S3DoScold = 1.42, S3DoShout = 2.77)
 calibration <- plan_rasch_fixed_bank(
-  item_difficulties = bank, n_subj = c(40L, 100L), person_sd = .8,
-  max_error = c(difficulty = .35, difficulty_max_abs_error = .60),
+  item_difficulties = va_bank, n_subj = c(40L, 150L), person_sd = 1.37,
+  max_error = c(difficulty = .35, difficulty_max_abs_error = .65),
   method = "fixed_item", engine = "mml", assurance = .80,
   nsim = 16L, workers = 1L, seed = 417L
 )
 summary(calibration)[c("n_subj", "target", "n_met", "nsim", "mc_lo", "mc_hi", "decision")]
 ```
 
-At 100 examinees, `r with(summary(calibration), n_met[n_subj == 100 & target == "joint"])`
-of 16 studies met both tolerances. The `joint` row gives the interval for this
-attainment probability. An acceptable average
-error can coexist with an inaccurate estimate for a very easy or very difficult
-word. In the fixed-item analysis, an item with no correct or no incorrect
-responses has no finite unpenalized difficulty estimate. That study remains in
-the denominator for the whole-bank criterion. The item-level counts show where
-this occurred.
+At `40` examinees, `r with(summary(calibration), n_met[n_subj == 40 & target == "joint"])`
+of 16 studies met both tolerances, whereas at `150` examinees,
+`r with(summary(calibration), n_met[n_subj == 150 & target == "joint"])` of 16
+met both. Read the decision from the `joint` row and its Monte Carlo interval.
+Even 16/16 successes have a lower Wilson bound of only about `.806`; a final
+sample-size decision needs a larger, prespecified confirmation run.
+
+An acceptable bank-wide average RMSE can hide poor accuracy at extreme
+difficulties (such as the `+2.77`-logit item here, which is less readily endorsed).
+In fixed-item MML, any item with 0% or 100% endorsement has no finite unpenalized difficulty
+estimate and remains in the denominator as a miss for the whole-bank criterion.
+Inspect the item-level diagnostics to see which items drive the error:
 
 ```{r items}
 subset(calibration$item_summary, n_subj == 40L,
        select = c(item_id, true_difficulty, rmse, n_finite, n_zero_correct, n_all_correct))
 ```
 
-Item-level RMSE describes replications with a finite estimate for that item.
-An examinee who gets every administered word right or every word wrong can
-still contribute. Fixed-item calibration averages their ability over its
-posterior distribution using the items with estimable difficulties. If they
-answered only constant items, their ability is missing. For random-item
-calibration a constant, observed word can have a finite difficulty because
-information is shared across words. Check its error against the original
-difficulty, especially at the ends of the bank.
+Item-level RMSE summarizes replications with a finite estimate for that item.
+Respondents who endorse every item or none still contribute through their
+marginal posterior distribution over estimable items (unless all items they
+answered were constant). For random-item calibration (`method = "random_item"`),
+partial pooling yields finite estimates even for constant items, so always
+check shrinkage bias at the extremes of the bank.
 
-For a study sampling **new words** from a population on every replication, use
-`plan_rasch_precision()`. For external comparisons, larger simulation runs,
-and their Monte Carlo intervals, see the
+For a study sampling **new items** from a population on every replication
+(rather than calibrating one fixed operational bank), use
+`plan_rasch_precision()`. For external comparisons against `TAM`, larger
+simulation runs, and Monte Carlo intervals, see the
 [validation and scope vignette](validation-and-scope.html).
 
-```{r rasch-plot, fig.width=6.5, fig.height=4.5, fig.alt="Item RMSE and finite-estimate counts by true word difficulty and examinee count."}
+```{r rasch-plot, fig.width=6.5, fig.height=4.5, fig.alt="Item RMSE and finite-estimate counts by true item difficulty and examinee count."}
 plot(calibration, type = "items", metric = "rmse")
 ```
 
-Use `plot(calibration)` for joint attainment and its Monte Carlo interval,
-or `metric = "bias"` in the item plot to inspect the direction of error.
-`report_plan(calibration, print_output = FALSE)` returns the English methods text.
-The scale origin is the examinee population mean of zero. Comparing banks
-across populations with unknown mean differences requires a linking design.
+Use `plot(calibration)` for joint attainment with Monte Carlo bounds, or
+`metric = "bias"` in the item plot to check error direction.
+`report_plan(calibration, print_output = FALSE)` generates a draft English
+methods paragraph. The scale origin is the examinee population mean of zero;
+comparing banks across populations with unknown mean shifts requires a linking
+design.
 
-For partial presentation, inspect the proposed schedule before simulating.
+When using partial presentation (`items_per_subject`), verify item connectivity
+before simulating:
 
 ```{r exposure}
 partial <- design_crossed(list(), items_per_subject = 2L, item_seed = 1L)
@@ -281,6 +865,21 @@ c(min_scheduled = min(exposure$n_scheduled), components = length(unique(exposure
 subset(exposure, n_scheduled == 0L)
 ```
 
-A single component means all items are linked through shared examinees.
-Multiple components identify separate groups or unused items. Missing trials
-and participant dropout may reduce the overlap after scheduling.
+A single connected component (`components = 1`) means all items are linked
+through shared examinees; multiple components indicate disconnected sub-banks
+or unused items. Trial missingness and participant dropout can further reduce
+overlap after scheduling.
+
+## References
+
+- De Boeck, P., Bakker, M., Zwitser, R., Nivard, M., Hofman, A., Tuerlinckx,
+  F., & Partchev, I. (2011). The estimation of item response models with the
+  `lmer` function from the `lme4` package in R. *Journal of Statistical
+  Software*, 39(12), 1--28. https://doi.org/10.18637/jss.v039.i12
+- De Boeck, P., & Wilson, M. (Eds.). (2004). *Explanatory item response models:
+  A generalized linear and nonlinear approach*. Springer.
+  https://doi.org/10.1007/978-1-4757-3990-9
+- Huang, S., Cao, H.-W., Wang, J., & Liu, S. (2025). The moderating role of
+  learning rounds: Effects on retrieval practice and context dependence in
+  digital flashcard foreign language vocabulary learning. *Behavioral Sciences*,
+  15(11), 1540. https://doi.org/10.3390/bs15111540 (CC BY 4.0)

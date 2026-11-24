@@ -36,7 +36,7 @@ remotes::install_github("Ryuya-dot-com/glmmplanr")
 remotes::install_github("Ryuya-dot-com/glmmplanr", build_vignettes = TRUE)
 ```
 
-For a step-by-step walkthrough, read the [Planning Workflows Tutorial](vignettes/planning-workflows.Rmd) (or run `vignette("planning-workflows", package = "glmmplanr")` if you built vignettes). For statistical benchmarks and a comparison with 19 related R packages, see [Scope, Validation & Related Packages](inst/validation-guide.md#related-packages).
+Start with the [Planning Workflows Tutorial](vignettes/planning-workflows.Rmd) to map a paper's mean accuracies, odds ratios or logit coefficients, random-effect SDs, and model formula to the package arguments. It includes separate routes for condition means and GLMM tables, with checks on the resulting inputs. You can also run `vignette("planning-workflows", package = "glmmplanr")` if you built vignettes. For statistical benchmarks and a comparison with 19 related R packages, see [Scope, Validation & Related Packages](inst/validation-guide.md#related-packages).
 
 ---
 
