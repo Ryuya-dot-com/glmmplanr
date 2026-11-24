@@ -1,0 +1,17 @@
+"layout","effect","input","group","target","supplied","implied","intercept","slope"
+"latin_square","null","direct","A",0.72,0.72,0.686771837334777,0.9444616,0
+"latin_square","null","direct","B",0.72,0.72,0.686771837334777,0.9444616,0
+"between_subj","null","direct","A",0.72,0.72,0.686771837334777,0.9444616,0
+"between_subj","null","direct","B",0.72,0.72,0.686771837334777,0.9444616,0
+"latin_square","planned","direct","A",0.72,0.72,0.686771837334777,0.9444616,0.4418328
+"latin_square","planned","direct","B",0.8,0.8,0.761256249763275,0.9444616,0.4418328
+"between_subj","planned","direct","A",0.72,0.72,0.686771837334777,0.9444616,0.4418328
+"between_subj","planned","direct","B",0.8,0.8,0.761256249763275,0.9444616,0.4418328
+"latin_square","null","calibrated","A",0.72,0.756475600323749,0.719999993546119,1.1334531,0
+"latin_square","null","calibrated","B",0.72,0.756475600323749,0.719999993546119,1.1334531,0
+"between_subj","null","calibrated","A",0.72,0.756475600323749,0.719999993546119,1.1334531,0
+"between_subj","null","calibrated","B",0.72,0.756475600323749,0.719999993546119,1.1334531,0
+"latin_square","planned","calibrated","A",0.72,0.756475600323749,0.719999993546119,1.1334531,0.5162502
+"latin_square","planned","calibrated","B",0.8,0.838850955395317,0.799999990920848,1.1334531,0.5162502
+"between_subj","planned","calibrated","A",0.72,0.756475600323749,0.719999993546119,1.1334531,0.5162502
+"between_subj","planned","calibrated","B",0.8,0.838850955395317,0.799999990920848,1.1334531,0.5162502

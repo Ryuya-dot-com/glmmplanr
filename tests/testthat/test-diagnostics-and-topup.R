@@ -179,3 +179,38 @@ test_that("independent top-up applies sequential multiplicity control across rou
   expect_gt(unadj_10, 0.14)
   expect_lt(geom_10, 0.035)
 })
+
+test_that("evaluate_design_point and validate_design_point accept custom data_fn for misspecification tests", {
+  des <- design_crossed(list(A = c("a", "b")), allocation = "latin_square")
+  dgp <- calibrate_dgp(des, c(a = 0.50, b = 0.72), subj_sd = 0.6, item_sd = 0.4, slope_sd_ratio = 0)
+  sp <- specify_target(dgp, "A", scale = "logit", criterion = "power",
+                       engine = "bayes_laplace", analysis_re = "intercept_only",
+                       on_singular = "flag_only")
+
+  # Custom misspecified DGP: drop the lowest-performing 25% of subjects (MNAR-like dropout)
+  mnar_fn <- function(schedule, spec) {
+    df <- simulate_dgp_data(spec$dgp, schedule = schedule)
+    means <- tapply(df$y, df$subj_id, mean)
+    keep_s <- as.integer(names(means)[means >= stats::quantile(means, 0.25)])
+    df[df$subj_id %in% keep_s, , drop = FALSE]
+  }
+
+  ev_custom <- evaluate_design_point(sp, 16L, 8L, nsim = 6L, stream_seeds = 901L, data_fn = mnar_fn)
+  expect_equal(ev_custom$nsim, 6L)
+  expect_lt(ev_custom$n_trials_obs_mean, 16L * 8L)
+  expect_true(is.finite(ev_custom$power))
+
+  val_custom <- validate_design_point(sp, 16L, 8L, nsim = 4L, seed = 902L, data_fn = mnar_fn)
+  expect_equal(nrow(val_custom), 2L)
+  expect_equal(val_custom$condition, c("null", "planned"))
+
+  # Invalid data_fn output produces clear errors
+  expect_error(
+    evaluate_design_point(sp, 16L, 8L, nsim = 1L, data_fn = function(schedule, spec) list(a = 1)),
+    "data.frame"
+  )
+  expect_error(
+    evaluate_design_point(sp, 16L, 8L, nsim = 1L, data_fn = function(schedule, spec) schedule$trials),
+    "binary"
+  )
+})

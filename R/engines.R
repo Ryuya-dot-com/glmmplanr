@@ -567,6 +567,42 @@ fit_via_cpp_cached <- function(
   )
 }
 
+validate_custom_data <- function(df_b, schedule) {
+  if (!is.data.frame(df_b)) {
+    cli::cli_abort("{.arg data_fn} must return a {.cls data.frame}.")
+  }
+  if (!("y" %in% names(df_b))) {
+    cli::cli_abort("{.arg data_fn} must return a {.cls data.frame} containing a binary {.field y} column.")
+  }
+  if (nrow(df_b) > 0L) {
+    y_num <- as.numeric(df_b$y)
+    if (any(!is.finite(y_num)) || any(!(y_num %in% c(0, 1)))) {
+      cli::cli_abort("{.field y} returned by {.arg data_fn} must contain only 0 and 1 values.")
+    }
+    df_b$y <- as.integer(y_num)
+  }
+  if (!("subj_id" %in% names(df_b)) && ("subj" %in% names(df_b))) {
+    df_b$subj_id <- as.integer(as.factor(df_b$subj))
+  }
+  if (!("item_id" %in% names(df_b)) && ("item" %in% names(df_b))) {
+    df_b$item_id <- as.integer(as.factor(df_b$item))
+  }
+  if (!("subj" %in% names(df_b)) && ("subj_id" %in% names(df_b))) {
+    df_b$subj <- factor(sprintf("S%04d", as.integer(df_b$subj_id)))
+  }
+  if (!("item" %in% names(df_b)) && ("item_id" %in% names(df_b))) {
+    df_b$item <- factor(sprintf("I%04d", as.integer(df_b$item_id)))
+  }
+  req_cols <- c("subj_id", "item_id", "cell_id")
+  missing_cols <- setdiff(req_cols, names(df_b))
+  if (length(missing_cols) > 0L) {
+    cli::cli_abort(
+      "{.arg data_fn} output is missing required column(s): {.val {missing_cols}}. Start from {.code schedule$trials} or {.fn simulate_dgp_data}."
+    )
+  }
+  df_b
+}
+
 #' Execute One Monte Carlo Replication (Zero-Alloc C++ Path or External Backend)
 #' @noRd
 execute_single_replication <- function(
@@ -576,9 +612,10 @@ execute_single_replication <- function(
   engine_use,
   re_primary,
   fast_stage,
-  do_compare
+  do_compare,
+  data_fn = NULL
 ) {
-  if (!is.null(cpp_cache)) {
+  if (!is.null(cpp_cache) && is.null(data_fn)) {
     sim_dat <- simulate_fast_y_keep(cpp_cache)
     reg_prim <- (engine_use == "bayes_laplace")
     primary <- fit_via_cpp_cached(
@@ -624,7 +661,11 @@ execute_single_replication <- function(
                 patterns = patterns))
   }
 
-  df_b <- simulate_dgp_data(spec$dgp, schedule = schedule)
+  df_b <- if (is.null(data_fn)) {
+    simulate_dgp_data(spec$dgp, schedule = schedule)
+  } else {
+    validate_custom_data(data_fn(schedule, spec), schedule)
+  }
   primary <- fit_single_dataset(
     df_b, spec = spec, engine_use = engine_use,
     re_structure = re_primary, fast_stage = fast_stage
@@ -679,6 +720,12 @@ execute_single_replication <- function(
 #' @param fast_stage Logical; whether to use Stage-1 fast tolerances.
 #' @param stream_seeds List of `nsim` L'Ecuyer-CMRG substream seeds (or integer
 #'   master seed).
+#' @param data_fn Optional custom data-generating function `function(schedule, spec)`
+#'   returning a trial `data.frame` (starting from `schedule$trials` or
+#'   [simulate_dgp_data()] with binary `y`, `subj_id`, `item_id`, and `cell_id`)
+#'   for evaluating structural misspecification such as ability-dependent
+#'   dropout, item-specific guessing, or non-normal random effects. Default
+#'   `NULL` uses the built-in parametric DGP in `spec$dgp`.
 #' @param verbose Logical; display a live `cli` progress bar with ETA across
 #'   replications (default `FALSE`).
 #' @return A single-row `data.frame` summarizing all evaluation and diagnostic
@@ -707,6 +754,7 @@ evaluate_design_point <- function(
   engine_use = spec$engine,
   fast_stage = FALSE,
   stream_seeds = 1L,
+  data_fn = NULL,
   verbose = FALSE
 ) {
   if (uses_box_muller()) {
@@ -714,6 +762,9 @@ evaluate_design_point <- function(
   }
   if (!inherits(spec, "glmmplanr_spec")) {
     cli::cli_abort("{.arg spec} must be a {.cls glmmplanr_spec} object.")
+  }
+  if (!is.null(data_fn) && !is.function(data_fn)) {
+    cli::cli_abort("{.arg data_fn} must be NULL or a function of {.code (schedule, spec)}.")
   }
   nsim <- as.integer(nsim)
   if (!is.list(stream_seeds)) {
@@ -723,7 +774,7 @@ evaluate_design_point <- function(
 
   schedule <- generate_design_schedule(spec$dgp$design, n_subj = n_subj, n_item = n_item)
   re_primary <- if (fast_stage && !is.null(spec$stage1_re)) spec$stage1_re else spec$analysis_re
-  cpp_cache <- if (engine_use %in% c("cpp_laplace", "bayes_laplace")) {
+  cpp_cache <- if (is.null(data_fn) && engine_use %in% c("cpp_laplace", "bayes_laplace")) {
     prepare_cpp_schedule_cache(spec, schedule)
   } else {
     NULL
@@ -769,7 +820,8 @@ evaluate_design_point <- function(
         engine_use = engine_use,
         re_primary = re_primary,
         fast_stage = fast_stage,
-        do_compare = do_compare
+        do_compare = do_compare,
+        data_fn = data_fn
       )
     )
 
@@ -1265,11 +1317,14 @@ null_target_spec <- function(spec) {
 #' r <- validate_design_point(spec, 16, 8, nsim = 5L)
 #' r[c("condition", "nsim", "n_valid", "detection", "coverage")]
 #' @export
-validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026L, verbose = FALSE) {
+validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026L, data_fn = NULL, verbose = FALSE) {
   if (uses_box_muller()) {
     return(isolated_seeded_call("validate_design_point", environment(), match.call()))
   }
   if (!inherits(spec, "glmmplanr_spec")) cli::cli_abort("Supply a target specification.")
+  if (!is.null(data_fn) && !is.function(data_fn)) {
+    cli::cli_abort("{.arg data_fn} must be NULL or a function of {.code (schedule, spec)}.")
+  }
   if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) ||
       nsim < 1 || nsim != floor(nsim)) cli::cli_abort("{.arg nsim} must be a positive integer.")
   specs <- list(null = null_target_spec(spec), planned = spec)
@@ -1280,7 +1335,7 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
       cli::cli_inform("Validating {.val {names(specs)[i]}} condition at ({n_subj} x {n_item})...")
     }
     ev <- evaluate_design_point(sp, n_subj, n_item, nsim,
-      stream_seeds = derive_rep_substreams(bases[[i]], nsim), verbose = verbose)
+      stream_seeds = derive_rep_substreams(bases[[i]], nsim), data_fn = data_fn, verbose = verbose)
     cover <- wilson_mc_ci(round(ev$coverage * ev$n_valid), ev$n_valid, sp$mc_conf_level)
     data.frame(condition = names(specs)[i], scale = sp$scale, true_target = sp$true_effect_target,
       nsim = nsim, n_valid = ev$n_valid, valid_rate = ev$valid_rate,

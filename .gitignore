@@ -21,7 +21,7 @@
 /inst/stan/crossed_binomial_mafc
 /inst/stan/*.exe
 
-# Local project notes and development validation
+# Local project notes and separate manuscript archive
 /AGENTS.md
 /ROADMAP.md
-/validation/
+/validation/manuscript_archive/

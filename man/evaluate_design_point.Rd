@@ -12,6 +12,7 @@ evaluate_design_point(
   engine_use = spec$engine,
   fast_stage = FALSE,
   stream_seeds = 1L,
+  data_fn = NULL,
   verbose = FALSE
 )
 }
@@ -31,6 +32,13 @@ evaluate_design_point(
 
 \item{stream_seeds}{List of \code{nsim} L'Ecuyer-CMRG substream seeds (or integer
 master seed).}
+
+\item{data_fn}{Optional custom data-generating function \verb{function(schedule, spec)}
+returning a trial \code{data.frame} (starting from \code{schedule$trials} or
+\code{\link[=simulate_dgp_data]{simulate_dgp_data()}} with binary \code{y}, \code{subj_id}, \code{item_id}, and \code{cell_id})
+for evaluating structural misspecification such as ability-dependent
+dropout, item-specific guessing, or non-normal random effects. Default
+\code{NULL} uses the built-in parametric DGP in \code{spec$dgp}.}
 
 \item{verbose}{Logical; display a live \code{cli} progress bar with ETA across
 replications (default \code{FALSE}).}

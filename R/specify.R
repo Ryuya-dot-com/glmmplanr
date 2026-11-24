@@ -88,6 +88,12 @@
 #'   Each cell has its own linear predictor in the factorial model. The primary
 #'   fit is then invalid, and a bootstrap refit with this pattern is also
 #'   invalid. Regularized engines can return finite estimates in these cases.
+#'   For `"cpp_laplace"` and `"bayes_laplace"`, analytical fixed-effect SEs
+#'   combine the Tierney-Kadane Laplace Hessian with a diagonal log-SD variance
+#'   propagation term; off-diagonal covariances among SD estimates and
+#'   uncertainty in random-slope correlation parameters are not propagated, so
+#'   correlated-slope designs (especially under $m$-AFC or sparsity) should be
+#'   cross-checked against `"stan_hmc"` or parametric bootstrap SEs.
 #'   Check sensitivity to the fixed-effect prior. An individual participant or
 #'   item with a constant response pattern can contribute to either fit.
 #' @param stage1_engine Fast estimation backend used during Stage-1 surrogate

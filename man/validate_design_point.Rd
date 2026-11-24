@@ -10,6 +10,7 @@ validate_design_point(
   n_item,
   nsim = 200L,
   seed = 2026L,
+  data_fn = NULL,
   verbose = FALSE
 )
 }
@@ -23,6 +24,13 @@ validate_design_point(
 \item{nsim}{Number of Monte Carlo replications.}
 
 \item{seed}{Integer seed for this independent fixed-size validation.}
+
+\item{data_fn}{Optional custom data-generating function \verb{function(schedule, spec)}
+returning a trial \code{data.frame} (starting from \code{schedule$trials} or
+\code{\link[=simulate_dgp_data]{simulate_dgp_data()}} with binary \code{y}, \code{subj_id}, \code{item_id}, and \code{cell_id})
+for evaluating structural misspecification such as ability-dependent
+dropout, item-specific guessing, or non-normal random effects. Default
+\code{NULL} uses the built-in parametric DGP in \code{spec$dgp}.}
 
 \item{verbose}{Logical; display a live \code{cli} progress bar with ETA across
 replications (default \code{FALSE}).}
