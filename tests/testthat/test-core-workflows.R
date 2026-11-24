@@ -109,26 +109,42 @@ test_that("Scheduled trials and post-attrition expected trials match exact alloc
 })
 
 test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
-  des <- design_crossed(list(
-    exposure = c("incidental", "intentional"),
-    spacing  = c("massed", "distributed")
-  ))
-  dgp0 <- calibrate_dgp(
-    des,
-    cell_probs = c(
-      incidental_massed       = 0.35,
-      incidental_distributed  = 0.50,
-      intentional_massed      = 0.55,
-      intentional_distributed = 0.78
-    ),
-    chance = 0,
-    subj_sd = 0.70,
-    item_sd = 0.60,
-    slope_sd_ratio = 0.30,
-    corr_structure = 0.15
-  )
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
+  if (on_cran) {
+    des <- design_crossed(list(exposure = c("incidental", "intentional")))
+    dgp0 <- calibrate_dgp(
+      des,
+      cell_probs = c(incidental = 0.40, intentional = 0.72),
+      chance = 0,
+      subj_sd = 0.70,
+      item_sd = 0.60,
+      slope_sd_ratio = 0.30,
+      corr_structure = 0.15
+    )
+    n_s <- 40L; n_i <- 24L
+  } else {
+    des <- design_crossed(list(
+      exposure = c("incidental", "intentional"),
+      spacing  = c("massed", "distributed")
+    ))
+    dgp0 <- calibrate_dgp(
+      des,
+      cell_probs = c(
+        incidental_massed       = 0.35,
+        incidental_distributed  = 0.50,
+        intentional_massed      = 0.55,
+        intentional_distributed = 0.78
+      ),
+      chance = 0,
+      subj_sd = 0.70,
+      item_sd = 0.60,
+      slope_sd_ratio = 0.30,
+      corr_structure = 0.15
+    )
+    n_s <- 48L; n_i <- 32L
+  }
 
-  sched <- generate_design_schedule(des, n_subj = 48, n_item = 32)
+  sched <- generate_design_schedule(des, n_subj = n_s, n_item = n_i)
   set.seed(2026)
   df0 <- simulate_dgp_data(dgp0, schedule = sched)
   X <- des$X_cells[df0$cell_id, , drop = FALSE]
@@ -136,8 +152,8 @@ test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
   # 4a. Strict separation of max_iter_finite vs converged
   f_cap <- glmmplanr:::cpp_fit_crossed_glmm(
     y = as.integer(df0$y), X = X,
-    subj_idx = df0$subj_id - 1L, Z_subj = X, n_subj = 48L,
-    item_idx = df0$item_id - 1L, Z_item = X, n_item = 32L,
+    subj_idx = df0$subj_id - 1L, Z_subj = X, n_subj = n_s,
+    item_idx = df0$item_id - 1L, Z_item = X, n_item = n_i,
     testlet_idx = integer(0), Z_testlet = matrix(0, nrow(df0), 0), n_testlet = 0L,
     chance = 0.0, corr_mode = 1L, regularized = FALSE,
     max_em_iter = 2L, tol = 1e-7
@@ -158,12 +174,19 @@ test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
 })
 
 test_that("3AFC calibration and coverage meet the small regression fixture", {
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   dgp3 <- three_choice_reference_dgp()
   sp3 <- specify_target(dgp3, effect = "exposure", engine = "bayes_laplace", on_singular = "flag_only")
-  ev3 <- evaluate_design_point(sp3, n_subj = 56, n_item = 32, nsim = 35L, stream_seeds = 303L)
-  expect_gt(ev3$valid_rate, 0.95)
-  expect_gte(ev3$coverage, 0.82)
-  expect_gte(ev3$prob_coverage, 0.82)
+  ev3 <- evaluate_design_point(
+    sp3,
+    n_subj = if (on_cran) 48 else 56,
+    n_item = if (on_cran) 24 else 32,
+    nsim = if (on_cran) 10L else 35L,
+    stream_seeds = 303L
+  )
+  expect_gt(ev3$valid_rate, if (on_cran) 0.85 else 0.95)
+  expect_gte(ev3$coverage, if (on_cran) 0.70 else 0.82)
+  expect_gte(ev3$prob_coverage, if (on_cran) 0.70 else 0.82)
 })
 
 test_that("Percentage-point precision, indeterminate top-up, and multi-scenario robustness increment", {

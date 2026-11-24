@@ -24,6 +24,7 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     corr_structure  = 0.20
   )
 
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   spec <- specify_target(
     dgp,
     effect      = "exposure:spacing",
@@ -31,21 +32,30 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
     power_min   = 0.75,
     ci_width    = 0.95,
     engine      = "glmmTMB",
-    on_singular = "flag_and_compare"
+    on_singular = if (on_cran) "flag_only" else "flag_and_compare"
   )
+
+  subj_rng <- if (on_cran) c(16, 32) else c(24, 64)
+  item_rng <- if (on_cran) c(12, 24) else c(16, 40)
+  n_init   <- if (on_cran) 4L else 8L
+  n_adapt  <- if (on_cran) 2L else 4L
+  ns_init  <- if (on_cran) 4L else 15L
+  ns_final <- if (on_cran) 6L else 25L
+  n_ver    <- if (on_cran) 2L else 3L
+  ns_sens  <- if (on_cran) 4L else 15L
 
   res_w1 <- optimize_sample_size(
     spec,
-    n_subj_range     = c(24, 64),
-    n_item_range     = c(16, 40),
+    n_subj_range     = subj_rng,
+    n_item_range     = item_rng,
     prefer           = "balanced",
     method           = "surrogate_gp",
-    n_eval_init      = 8L,
-    n_eval_adapt     = 4L,
-    nsim_init        = 15L,
-    nsim_final       = 25L,
-    n_verify         = 3L,
-    nsim_sensitivity = 15L,
+    n_eval_init      = n_init,
+    n_eval_adapt     = n_adapt,
+    nsim_init        = ns_init,
+    nsim_final       = ns_final,
+    n_verify         = n_ver,
+    nsim_sensitivity = ns_sens,
     workers          = 1L,
     seed             = 20261119L,
     verbose          = FALSE
@@ -54,16 +64,16 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
   caller_rng <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)
   res_w2 <- optimize_sample_size(
     spec,
-    n_subj_range     = c(24, 64),
-    n_item_range     = c(16, 40),
+    n_subj_range     = subj_rng,
+    n_item_range     = item_rng,
     prefer           = "balanced",
     method           = "surrogate_gp",
-    n_eval_init      = 8L,
-    n_eval_adapt     = 4L,
-    nsim_init        = 15L,
-    nsim_final       = 25L,
-    n_verify         = 3L,
-    nsim_sensitivity = 15L,
+    n_eval_init      = n_init,
+    n_eval_adapt     = n_adapt,
+    nsim_init        = ns_init,
+    nsim_final       = ns_final,
+    n_verify         = n_ver,
+    nsim_sensitivity = ns_sens,
     workers          = 2L,
     seed             = 20261119L,
     verbose          = FALSE

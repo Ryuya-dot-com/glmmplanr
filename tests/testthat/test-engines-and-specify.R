@@ -28,13 +28,18 @@ test_that("C++ Laplace, Regularized Bayes Laplace, and lme4 engines run and prod
   sp2 <- specify_target(dgp, effect = "spacing:exposure", criterion = "both", power_min = 0.80, ci_width = 0.80, engine = "bayes_laplace")
   expect_equal(sp1$effect_col, sp2$effect_col)
 
-  ev_ml <- evaluate_design_point(sp1, n_subj = 48, n_item = 32, nsim = 12L, stream_seeds = 99L)
-  ev_by <- evaluate_design_point(sp2, n_subj = 48, n_item = 32, nsim = 12L, stream_seeds = 99L)
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
+  ns_ev <- if (on_cran) 32L else 48L
+  ni_ev <- if (on_cran) 20L else 32L
+  n_rep <- if (on_cran) 5L else 12L
+
+  ev_ml <- evaluate_design_point(sp1, n_subj = ns_ev, n_item = ni_ev, nsim = n_rep, stream_seeds = 99L)
+  ev_by <- evaluate_design_point(sp2, n_subj = ns_ev, n_item = ni_ev, nsim = n_rep, stream_seeds = 99L)
 
   expect_equal(ev_ml$error_rate, 0)
-  expect_equal(ev_ml$n_valid + as.integer(round(ev_ml$max_iter_rate * 12L)), 12L)
+  expect_equal(ev_ml$n_valid + as.integer(round(ev_ml$max_iter_rate * n_rep)), n_rep)
   expect_gt(ev_ml$n_valid, 0L)
-  expect_equal(ev_by$n_valid, 12L)
+  expect_equal(ev_by$n_valid, n_rep)
   # Regularized Bayesian engine never suffers singular variance collapse
   expect_equal(ev_by$singular_rate, 0)
   expect_true(is.finite(ev_ml$power) && ev_ml$power >= 0 && ev_ml$power <= 1)
@@ -47,7 +52,13 @@ test_that("C++ Laplace, Regularized Bayes Laplace, and lme4 engines run and prod
   expect_equal(ev_lme4$n_valid, 3L)
 
   # Stress test models under maximal DGP
-  st <- stress_test_models(dgp, effect = "exposure:spacing", n_subj = 32, n_item = 20, nsim = 8L, include_null = TRUE, seed = 42L)
+  st <- stress_test_models(
+    dgp, effect = "exposure:spacing",
+    n_subj = if (on_cran) 24L else 32L,
+    n_item = if (on_cran) 16L else 20L,
+    nsim = if (on_cran) 4L else 8L,
+    include_null = TRUE, seed = 42L
+  )
   expect_s3_class(st, "glmmplanr_stress_test")
   expect_equal(nrow(st), 4L)
   expect_s3_class(as_gt(st), "gt_tbl")

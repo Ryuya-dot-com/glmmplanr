@@ -39,13 +39,14 @@ test_that("switch_preference re-ranks verified Pareto designs instantaneously wi
     engine = "cpp_laplace", on_singular = "flag_only"
   )
 
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   res_bal <- optimize_sample_size(
     spec,
-    n_subj_range = c(24L, 44L, 64L),
-    n_item_range = c(12L, 24L, 36L),
+    n_subj_range = if (on_cran) c(24L, 48L) else c(24L, 44L, 64L),
+    n_item_range = if (on_cran) c(12L, 24L) else c(12L, 24L, 36L),
     prefer = "fewer_items",
     method = "grid",
-    nsim_final = 24L,
+    nsim_final = if (on_cran) 10L else 24L,
     nsim_topup = 0L,
     nsim_sensitivity = 0L,
     seed = 404L,
@@ -69,22 +70,28 @@ test_that("Marginal joint_delta SE and C++ batch bootstrap SE agree and preserve
     slope_sd_ratio = 0.35
   )
 
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
+  n_bt <- if (on_cran) 19L else 49L
+  n_rep <- if (on_cran) 4L else 8L
+  ns_pt <- if (on_cran) 24L else 40L
+  ni_pt <- if (on_cran) 16L else 24L
+
   sp_jd <- specify_target(
     dgp, effect = "exposure", scale = "pp", engine = "bayes_laplace",
     prob_se_method = "joint_delta", on_singular = "flag_only"
   )
   sp_bt <- specify_target(
     dgp, effect = "exposure", scale = "pp", engine = "bayes_laplace",
-    prob_se_method = "bootstrap", prob_boot = 49L, on_singular = "flag_only"
+    prob_se_method = "bootstrap", prob_boot = n_bt, on_singular = "flag_only"
   )
 
-  ev_jd <- evaluate_design_point(sp_jd, n_subj = 40L, n_item = 24L, nsim = 8L, stream_seeds = 901L)
-  ev_bt1 <- evaluate_design_point(sp_bt, n_subj = 40L, n_item = 24L, nsim = 8L, stream_seeds = 901L)
-  expect_equal(ev_jd$n_valid, 8L)
-  expect_equal(ev_bt1$n_valid, 8L)
+  ev_jd <- evaluate_design_point(sp_jd, n_subj = ns_pt, n_item = ni_pt, nsim = n_rep, stream_seeds = 901L)
+  ev_bt1 <- evaluate_design_point(sp_bt, n_subj = ns_pt, n_item = ni_pt, nsim = n_rep, stream_seeds = 901L)
+  expect_equal(ev_jd$n_valid, n_rep)
+  expect_equal(ev_bt1$n_valid, n_rep)
   expect_equal(ev_jd$prob_diff_est_pp, ev_bt1$prob_diff_est_pp, tolerance = 1e-10)
   # Mean 95% CI widths in percentage points agree closely between analytical joint delta and parametric bootstrap
-  expect_lt(abs(ev_jd$ci_width_mean - ev_bt1$ci_width_mean) / ev_bt1$ci_width_mean, 0.20)
+  expect_lt(abs(ev_jd$ci_width_mean - ev_bt1$ci_width_mean) / ev_bt1$ci_width_mean, if (on_cran) 0.30 else 0.20)
 })
 
 test_that("3AFC joint Laplace VCOV widens fixed-Sigma Schur SE and converges on extreme zero_item data", {
@@ -129,13 +136,16 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
     item_sd = c(0.60, 0.10, 0.20, 0.30)
   )
 
+  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   sp_w <- specify_target(
     dgp, effect = "A:B", scale = "logit", criterion = "ci_width",
     ci_width = 2.00, ci_assurance = 0.70, engine = "cpp_laplace", on_singular = "flag_only"
   )
   res_w <- optimize_sample_size(
-    sp_w, n_subj_range = c(32L, 40L, 48L), n_item_range = c(24L, 28L, 32L),
-    method = "grid", nsim_final = 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
+    sp_w,
+    n_subj_range = if (on_cran) 48L else c(32L, 40L, 48L),
+    n_item_range = if (on_cran) 32L else c(24L, 28L, 32L),
+    method = "grid", nsim_final = if (on_cran) 10L else 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
     seed = 515L, verbose = FALSE
   )
   rep_w <- report_plan(res_w, print_output = FALSE)
@@ -148,8 +158,10 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
     rope = c(-0.10, 0.10), power_min = 0.60, engine = "cpp_laplace", on_singular = "flag_only"
   )
   res_r <- optimize_sample_size(
-    sp_r, n_subj_range = c(32L, 40L, 48L), n_item_range = c(24L, 28L, 32L),
-    method = "grid", nsim_final = 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
+    sp_r,
+    n_subj_range = if (on_cran) 48L else c(32L, 40L, 48L),
+    n_item_range = if (on_cran) 32L else c(24L, 28L, 32L),
+    method = "grid", nsim_final = if (on_cran) 10L else 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
     seed = 516L, verbose = FALSE
   )
   rep_r <- report_plan(res_r, print_output = FALSE)
