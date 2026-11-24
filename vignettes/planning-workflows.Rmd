@@ -100,24 +100,61 @@ candidates. If recruiting learners is the constraint, read the row with the
 fewest learners. If preparing materials is the constraint, read the row with
 the fewest words. An empty table means the grid has no confirmed pass.
 
+### Choosing starting inputs when pilot data are limited
+
+If you do not yet have pilot GLMM variance estimates, avoid committing to a single
+optimistic guess. Instead, bracket plausible values across three scenarios:
+
+- **Random-intercept SDs (`subj_sd`, `item_sd`)**: On the logit scale, values
+  around `0.4–0.6` reflect modest heterogeneity, `0.6–0.9` moderate
+  heterogeneity, and `1.0–1.2` large heterogeneity. Equivalently, you can supply
+  expected 95% accuracy ranges via `subj_prob_range` and `item_prob_range`.
+- **Random slopes (`slope_sd_ratio`)**: When condition varies within
+  participants or items, start with `0.25–0.35` (or `0` only if you plan an
+  intercept-only model and accept the mismatch risk).
+- **3-scenario effect-size bracket**: Wrap your baseline `dgp` in
+  `scenario_dgps(dgp, effect = "learning", effect_diffs_pp = c(conservative = 6, standard = 10, optimistic = 14))`
+  and pass `scenarios = ...` to `optimize_sample_size()` so the plan shows how
+  many extra participants or items are needed if the true effect is smaller than
+  expected.
+
 ### Confirming a candidate and analysing the responses
 
 For a final check of the example 48-by-24 design, use a new seed and the
-interval method you intend to report. The marginal bootstrap attempts 99
-refits for each successfully fitted simulated study, in each of the null and
-planned conditions. Specify the simulation count before inspecting these
-results. For the power target above, compare the lower planned detection
-bound with .80 and inspect null detection, valid fits and coverage.
+interval method you intend to report. Note the computational cost before
+launching: the marginal bootstrap attempts 99 refits for each valid simulated
+study in both the null and planned conditions (at `nsim = 1000L`, up to
+`2 * 1,000 * 99 = 198,000` inner refits). Always time a small pilot first
+(`nsim = 10L`) and scale to estimate wall-clock time (`pilot_sec * nsim / 10`):
 
 ```{r final-check, eval=FALSE}
 final <- specify_target(model, "learning", scale = "pp", engine = "bayes_laplace",
                         analysis_re = "intercept_only", prob_se_method = "bootstrap")
-validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 1000L, seed = 8201L)
+# 1. Time a 10-rep pilot to estimate runtime before a large confirmation run
+system.time(validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 10L, seed = 8200L))
+
+# 2. Run pre-specified confirmation (e.g., nsim = 200L-1000L depending on budget)
+val <- validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 200L, seed = 8201L)
+val[c("condition", "n_valid", "detection", "detection_lo", "detection_hi", "coverage")]
 ```
 
+**How to decide (Adopt vs. Hold)**:
+
+- **Adopt** when `planned` meets your target lower bound (`detection_lo >= 0.80`),
+  `n_valid / nsim >= 0.90`, `coverage` is close to nominal (`~95%`), and `null`
+  detection (Type I error) stays near `5%`.
+- **Hold / revise** if `planned` is indeterminate (`detection_lo < 0.80` while
+  `detection_hi >= 0.80`: increase `nsim` or sample size), if `coverage` drops
+  markedly below `95%`, or if `null` detection is inflated (check estimator
+  choice or random-slope specification).
+
 For collected data, keep one row per observed response, with binary `y` and
-the same learner and word identifiers used for assignment. These calls show
-the model formula and the three-choice link.
+the same learner and word identifiers used for assignment. If maximum
+likelihood via `lme4` is your planned final analysis, set `engine = "lme4"`
+during planning so the planning and analysis estimators match exactly. These
+calls show the model formula, three-choice link, and how to recover the same
+population-averaged (marginal) percentage-point difference from the fitted
+`lme4::glmer()` object:
 
 ```{r analysis-model}
 formula(target)
@@ -128,15 +165,21 @@ family(target)
 responses$learning <- factor(responses$learning, levels = design$factors$learning)
 contrasts(responses$learning) <- design$contrasts$learning
 fit <- lme4::glmer(formula(target), data = responses, family = family(target))
-```
 
-Here the formula is `y ~ learning + (1 | subj) + (1 | item)` and the family
-is `mafc_binomial(1/3)`. This fits the same link and random intercepts by
-maximum likelihood. Our plan used a regularized Laplace fit. If maximum
-likelihood is the intended analysis, specify `engine = "lme4"` when planning.
-The learning coefficient is conditional and in logits. To estimate the
-population accuracy difference, integrate each condition's probability over
-the fitted random effects and subtract the two means.
+# Recover the same marginal percentage-point difference over fitted random effects
+b <- lme4::fixef(fit)
+vc <- lme4::VarCorr(fit)
+sd_tot <- sqrt(vc$subj[1, 1] + vc$item[1, 1])
+eta <- drop(design$X_cells %*% b)
+g <- 1 / 3
+marg_p <- vapply(eta, function(e) {
+  stats::integrate(
+    function(z) (g + (1 - g) * stats::plogis(e + sd_tot * z)) * stats::dnorm(z),
+    -8, 8
+  )$value
+}, numeric(1L))
+diff_pp <- 100 * (marg_p[2] - marg_p[1])
+```
 
 ### Checking an interaction or a proficiency assumption
 

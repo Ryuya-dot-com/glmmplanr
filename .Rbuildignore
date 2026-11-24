@@ -5,6 +5,7 @@
 ^glmmplanr_.*\.tar\.gz$
 ^glmmplanr\.Rcheck$
 ^README\.Rmd$
+^cran-comments\.md$
 ^LICENSE\.md$
 ^\.github$
 ^_pkgdown\.yml$

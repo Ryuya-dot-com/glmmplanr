@@ -7,16 +7,21 @@ Description: Plans numbers of participants and items for studies with one binary
     response per trial, including correct or incorrect answers in forced-choice
     tasks and yes or no judgments. Uses crossed generalized linear mixed models
     (GLMMs) and explanatory item response models in behavioral science,
-    psycholinguistics, and language assessment. Generates balanced Latin-square, between-within, incomplete-block,
-    and testlet-nested designs with configurable factor contrasts; numerically
-    inverts marginal cell probabilities and guessing probabilities in multiple-alternative forced-choice tasks into
-    conditional GLMM parameters by Gaussian quadrature;
-    evaluates power, accuracy in parameter estimation through interval widths,
-    exclusion of a region of practical equivalence, convergence, coverage,
-    and magnitude and sign errors; and identifies non-dominated Pareto-optimal (N_subj x N_item)
-    designs using Universal Kriging monotone Gaussian process surrogates and
-    multi-stage parallel 'C++' estimation. Supports both random-item and fixed-bank
-    Rasch parameter recovery planning.
+    psycholinguistics, and language assessment (Westfall et al., 2014,
+    <doi:10.1037/xge0000014>; De Boeck et al., 2011,
+    <doi:10.18637/jss.v039.i12>). Generates balanced Latin-square,
+    between-within, incomplete-block, and testlet-nested designs with
+    configurable factor contrasts; numerically inverts marginal cell
+    probabilities and guessing probabilities in multiple-alternative
+    forced-choice tasks into conditional GLMM parameters by Gaussian
+    quadrature; evaluates power, accuracy in parameter estimation through
+    interval widths, exclusion of a region of practical equivalence,
+    convergence, coverage, magnitude and sign errors, and Monte Carlo
+    uncertainty intervals (Morris et al., 2019, <doi:10.1002/sim.8086>); and
+    identifies non-dominated Pareto-optimal (N_subj x N_item) designs using
+    Universal Kriging monotone Gaussian process surrogates and multi-stage
+    parallel 'C++' estimation. Supports both random-item and fixed-bank Rasch
+    parameter recovery planning.
 License: MIT + file LICENSE
 URL: https://github.com/Ryuya-dot-com/glmmplanr
 BugReports: https://github.com/Ryuya-dot-com/glmmplanr/issues
