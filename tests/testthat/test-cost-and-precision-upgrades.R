@@ -29,33 +29,39 @@ test_that("switch_preference re-ranks verified Pareto designs instantaneously wi
   )
   dgp <- calibrate_dgp(
     des,
-    cell_probs = c(incidental = 0.52, intentional = 0.72),
-    subj_prob_range = c(0.35, 0.80),
-    item_prob_range = c(0.35, 0.80),
-    slope_sd_ratio = 0.30
+    cell_probs = c(incidental = 0.52, intentional = 0.68),
+    subj_sd = 0.6,
+    item_sd = 0.5,
+    slope_sd_ratio = 0
   )
   spec <- specify_target(
-    dgp, effect = "exposure", criterion = "power", power_min = 0.75,
-    engine = "cpp_laplace", on_singular = "flag_only"
+    dgp, effect = "exposure", criterion = "power", power_min = 0.55,
+    engine = "bayes_laplace", analysis_re = "intercept_only", on_singular = "flag_only"
   )
 
-  on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
+  # Length-3 vectors specify exact candidate levels (avoiding length-2 range expansion).
+  # nsim_final = 16 gives 95% Wilson lower bound >= 0.55 when >= 13/16 replications pass,
+  # ensuring a genuine multi-point verified Pareto frontier with distinct optimal trade-offs.
   res_bal <- optimize_sample_size(
     spec,
-    n_subj_range = if (on_cran) c(24L, 48L) else c(24L, 44L, 64L),
-    n_item_range = if (on_cran) c(12L, 24L) else c(12L, 24L, 36L),
+    n_subj_range = c(10L, 20L, 44L),
+    n_item_range = c(6L, 12L, 28L),
     prefer = "fewer_items",
     method = "grid",
-    nsim_final = if (on_cran) 10L else 24L,
+    nsim_final = 16L,
     nsim_topup = 0L,
     nsim_sensitivity = 0L,
     seed = 404L,
     verbose = FALSE
   )
+  expect_true(isTRUE(res_bal$feasible))
+  expect_gte(nrow(res_bal$verified_pareto), 2L)
+
   res_subj <- switch_preference(res_bal, prefer = "fewer_subj")
   expect_identical(res_subj$prefer, "fewer_subj")
-  expect_lte(res_bal$optimal$n_item, res_subj$optimal$n_item)
-  expect_gte(res_bal$optimal$n_subj, res_subj$optimal$n_subj)
+  expect_true(isTRUE(res_subj$feasible))
+  expect_lt(res_bal$optimal$n_item, res_subj$optimal$n_item)
+  expect_gt(res_bal$optimal$n_subj, res_subj$optimal$n_subj)
   expect_s3_class(plot(res_subj, type = "contour"), "ggplot")
   expect_s3_class(as_gt(res_subj), "gt_tbl")
 })
