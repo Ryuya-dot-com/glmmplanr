@@ -22,6 +22,51 @@ as_gt <- function(x, ...) {
   UseMethod("as_gt")
 }
 
+assess_inferential_validity <- function(cov, n_valid, alpha) {
+  nominal <- 1.0 - alpha
+  if (is.null(cov) || is.null(n_valid) || length(cov) == 0L || length(n_valid) == 0L ||
+      !is.finite(cov[1L]) || !is.finite(n_valid[1L]) || n_valid[1L] < 1L) {
+    return(list(
+      status = "unverified",
+      short_label = "Unverified",
+      detail = "UNVERIFIED (no valid fits to inspect coverage; run validate_design_point())",
+      cov = NA_real_, cov_lo = NA_real_, cov_hi = NA_real_, nominal = nominal
+    ))
+  }
+  cov1 <- cov[1L]
+  nv1 <- as.integer(n_valid[1L])
+  k_cov <- max(0L, min(nv1, as.integer(round(cov1 * nv1))))
+  ci <- wilson_mc_ci(k_cov, nv1, conf_level = 0.95)
+  cov_lo <- unname(ci["lo"])
+  cov_hi <- unname(ci["hi"])
+  if (nv1 >= 20L && is.finite(cov_hi) && cov_hi < (nominal - 0.02)) {
+    return(list(
+      status = "caution_low_coverage",
+      short_label = "Caution: Low Cov.",
+      detail = sprintf(
+        "CAUTION (Stage-2 H1 coverage %.1f%% [%.1f%%, %.1f%%] is below nominal %.0f%%; SEs may be anti-conservative; verify with validate_design_point())",
+        100 * cov1, 100 * cov_lo, 100 * cov_hi, 100 * nominal
+      ),
+      cov = cov1, cov_lo = cov_lo, cov_hi = cov_hi, nominal = nominal
+    ))
+  }
+  list(
+    status = "unverified",
+    short_label = "Unverified",
+    detail = sprintf(
+      "UNVERIFIED (Stage-2 H1 coverage = %.1f%% [%.1f%%, %.1f%%]; null Type I error not checked; confirm with validate_design_point())",
+      100 * cov1, 100 * cov_lo, 100 * cov_hi
+    ),
+    cov = cov1, cov_lo = cov_lo, cov_hi = cov_hi, nominal = nominal
+  )
+}
+
+inferential_validity_labels <- function(cov_vec, n_valid_vec, alpha) {
+  vapply(seq_along(cov_vec), function(i) {
+    assess_inferential_validity(cov_vec[i], n_valid_vec[i], alpha)$short_label
+  }, character(1L))
+}
+
 #' @rdname as_gt
 #' @export
 as_gt.glmmplanr_result <- function(
@@ -57,6 +102,7 @@ as_gt.glmmplanr_result <- function(
     )
   }
 
+  ver_cov <- if (x$spec$scale == "logit") ver$coverage else ver$prob_coverage
   ver_clean <- data.frame(
     section = "Stage-2 Verified Candidate & Pareto Designs",
     label = role_lbl,
@@ -71,9 +117,10 @@ as_gt.glmmplanr_result <- function(
     logit_ci_width = ver$logit_ci_width_mean,
     aipe_prob = ver$aipe_prob,
     joint_prob = if (is.null(ver$joint_prob)) NA_real_ else ver$joint_prob,
+    validity_status = inferential_validity_labels(ver_cov, ver$n_valid, x$spec$alpha),
     valid_rate = ver$valid_rate,
     singular_rate = ver$singular_rate,
-    coverage = if (x$spec$scale == "logit") ver$coverage else ver$prob_coverage,
+    coverage = ver_cov,
     stringsAsFactors = FALSE
   )
 
@@ -83,6 +130,7 @@ as_gt.glmmplanr_result <- function(
   if (!is.null(x$sensitivity)) {
     s <- x$sensitivity
     cap <- paste0(toupper(substring(s$scenario, 1L, 1L)), substring(s$scenario, 2L))
+    s_cov <- if (x$spec$scale == "logit") s$coverage else s$prob_coverage
     sens_clean <- data.frame(
       section = sprintf(
         "Random-Slope Sensitivity at (N_subj = %d, N_item = %d)",
@@ -100,9 +148,10 @@ as_gt.glmmplanr_result <- function(
       logit_ci_width = s$logit_ci_width_mean,
       aipe_prob = s$aipe_prob,
       joint_prob = if (is.null(s$joint_prob)) NA_real_ else s$joint_prob,
+      validity_status = inferential_validity_labels(s_cov, s$n_valid, x$spec$alpha),
       valid_rate = s$valid_rate,
       singular_rate = s$singular_rate,
-      coverage = if (x$spec$scale == "logit") s$coverage else s$prob_coverage,
+      coverage = s_cov,
       stringsAsFactors = FALSE
     )
   }
@@ -120,6 +169,7 @@ as_gt.glmmplanr_result <- function(
       drop = FALSE
     ]
     if (nrow(pick_rows) > 0L) {
+      p_cov <- if (x$spec$scale == "logit") pick_rows$coverage else pick_rows$prob_coverage
       rob_clean <- data.frame(
         section = if (!rc_verified) "Multi-Scenario Candidates (increment undetermined)" else sprintf(
           "Multi-Scenario Robustness (All-Scenario Increment: %+d Subj, %+d Items)",
@@ -137,9 +187,10 @@ as_gt.glmmplanr_result <- function(
         logit_ci_width = pick_rows$logit_ci_width_mean,
         aipe_prob = pick_rows$aipe_prob,
         joint_prob = if (is.null(pick_rows$joint_prob)) NA_real_ else pick_rows$joint_prob,
+        validity_status = inferential_validity_labels(p_cov, pick_rows$n_valid, x$spec$alpha),
         valid_rate = pick_rows$valid_rate,
         singular_rate = pick_rows$singular_rate,
-        coverage = if (x$spec$scale == "logit") pick_rows$coverage else pick_rows$prob_coverage,
+        coverage = p_cov,
         stringsAsFactors = FALSE
       )
     }
@@ -177,22 +228,23 @@ as_gt.glmmplanr_result <- function(
       n_item = "N_item",
       n_trials_scheduled = "Sched. Trials",
       n_trials_expected = "Exp. Obs",
-      decision = "MC Status",
+      decision = "Target Status",
       eff_power_ci = if (x$spec$failure_policy == "effective") "Effective Power [MC CI]" else "Conditional Power [MC CI]",
       conditional_power = "Cond. Power",
       prob_ci_width_pp = "CI (pp)",
       logit_ci_width = "CI (logit)",
+      validity_status = "Inferential Validity",
       valid_rate = "Valid",
       singular_rate = "Singular",
-      coverage = "Coverage"
+      coverage = "H1 Coverage"
     ) |>
     gt::tab_spanner(
       label = "Balanced Sample Size",
       columns = size_cols
     ) |>
     gt::tab_spanner(
-      label = "Estimation Health & Calibration",
-      columns = c("valid_rate", "singular_rate", "coverage")
+      label = "Inferential Validity & Estimation Health",
+      columns = c("validity_status", "coverage", "valid_rate", "singular_rate")
     ) |>
     gt::fmt_number(
       columns = c("n_trials_scheduled", "n_trials_expected"),
@@ -226,7 +278,7 @@ as_gt.glmmplanr_result <- function(
   gt_obj |>
     gt::tab_source_note(
       source_note = sprintf(
-        "MC Status uses %.0f%% Wilson intervals (Morris et al., 2019): PASS (MC lower >= target), INDETERMINATE (MC interval straddles target), FAIL (MC upper < target). Seed = %d.",
+        "Target Status uses %.0f%% Wilson intervals (Morris et al., 2019) for power/width/ROPE targets only: PASS (MC lower >= target), INDETERMINATE (straddles target), FAIL (MC upper < target). Target PASS does not confirm interval coverage or null Type I error; verify inferential validity with validate_design_point(). Seed = %d.",
         x$spec$mc_conf_level * 100,
         x$search_meta$seed
       )
@@ -709,9 +761,42 @@ report_plan <- function(x, print_output = TRUE) {
   if (isTRUE(x$search_meta$adaptive_pooled)) {
     details <- c(details,
       "Exploratory adaptive top-up pooling was applied; confirm the selected design on a fresh independent seed with validate_design_point().")
+  } else if (isTRUE(x$search_meta$topup_rounds > 0L) &&
+             identical(x$search_meta$topup_policy, "independent") &&
+             !is.null(x$search_meta$topup_mc_conf_level) &&
+             is.finite(x$search_meta$topup_mc_conf_level)) {
+    seq_mode <- if (identical(x$search_meta$sequential_adjustment, "none")) {
+      "without sequential multiplicity adjustment"
+    } else if (identical(x$search_meta$sequential_adjustment, "geometric")) {
+      "with geometric sequential alpha-spending"
+    } else {
+      "with a two-stage Bonferroni split"
+    }
+    details <- c(details, sprintf(
+      "Borderline candidates underwent %d independent top-up round(s) %s (latest Wilson level %.2f%%).",
+      as.integer(x$search_meta$topup_rounds),
+      seq_mode,
+      100 * x$search_meta$topup_mc_conf_level
+    ))
   }
-  details <- c(details,
-    "The decision concerns the specified design targets. Interval coverage can be assessed in independent simulations at the selected design.")
+  cov_val <- if (sp$scale == "logit") opt$coverage else opt$prob_coverage
+  val_info <- assess_inferential_validity(cov_val, opt$n_valid, sp$alpha)
+  if (identical(val_info$status, "caution_low_coverage")) {
+    details <- c(details, sprintf(
+      "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity. Caution: Stage-2 empirical H1 coverage was %.1f%% (95%% Wilson CI %.1f%% to %.1f%%), below the nominal %.0f%% level; narrow intervals or high detection may reflect underestimated standard errors. Confirm interval coverage and null Type I error in independent simulations with validate_design_point() or an external estimator.",
+      100 * val_info$cov, 100 * val_info$cov_lo, 100 * val_info$cov_hi, 100 * val_info$nominal
+    ))
+  } else {
+    cov_summary <- if (is.finite(val_info$cov)) {
+      sprintf("%.1f%% (95%% Wilson CI %.1f%% to %.1f%%)", 100 * val_info$cov, 100 * val_info$cov_lo, 100 * val_info$cov_hi)
+    } else {
+      "NA"
+    }
+    details <- c(details, sprintf(
+      "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity (Stage-2 H1 coverage was %s; null Type I error was not evaluated). Confirm interval coverage and Type I error in independent simulations at the selected design with validate_design_point().",
+      cov_summary
+    ))
+  }
   if (!is.null(des$items_per_subject)) {
     details <- c(details, sprintf(
       "Each participant is assigned %2$d distinct items from a bank of %1$d (allocation seed %3$d).",

@@ -45,11 +45,15 @@
 #' @param nsim_topup Pre-specified number of **independent** additional Monte
 #'   Carlo replications automatically run on Stage-2 candidates whose Monte
 #'   Carlo confidence interval straddles the target (`decision_status == "indeterminate"`),
-#'   default `0L`.
+#'   default `0L`. When `nsim_topup > 0L` and `topup_policy = "independent"`,
+#'   Stage-2 and Stage-3 Wilson intervals split the Monte Carlo error budget
+#'   equally (`1 - (1 - mc_conf_level) / 2`) so the two-stage decision controls
+#'   overall false-pass probability.
 #' @param topup_policy How top-up replications are evaluated when `nsim_topup > 0L`:
 #'   * `"independent"` (default): Evaluates `"indeterminate"` candidates solely
 #'     on the fresh independent top-up batch without pooling with Stage-2
-#'     replications, avoiding optional-stopping bias in the Wilson bounds.
+#'     replications, applying a two-stage Bonferroni split across Stage 2 and
+#'     Stage 3 to control sequential false-pass risk.
 #'   * `"pooled"`: Pools Stage-2 and top-up replications for exploratory precision
 #'     narrowing (emits a warning and flags `search_meta$adaptive_pooled = TRUE`
 #'     because data-adaptive pooling invalidates nominal fixed-sample Wilson
@@ -311,11 +315,14 @@ optimize_sample_size <- function(
 
   pareto_df <- verified_pareto
   n_decisions <- if (!is.null(robust_info)) nrow(robust_info$scenario_evaluations) else nrow(verified_df)
-  mc_conf_eff <- if (identical(mc_adjustment, "bonferroni")) {
-    bonferroni_mc_conf_level(spec$mc_conf_level, n_decisions)
-  } else {
-    spec$mc_conf_level
-  }
+  seq_two_stage <- isTRUE(nsim_topup > 0L && identical(topup_policy, "independent"))
+  n_mult <- if (identical(mc_adjustment, "bonferroni")) n_decisions else 1L
+  mc_conf_eff <- sequential_topup_conf_level(
+    spec$mc_conf_level,
+    round_num = 1L,
+    n_decisions = n_mult,
+    mode = if (seq_two_stage) "two_stage" else "none"
+  )
   used_topup_rows <- if (!is.null(robust_info)) {
     ev_chk <- robust_info$scenario_evaluations
     "nsim_topup_used" %in% names(ev_chk) && any(ev_chk$nsim_topup_used > 0L, na.rm = TRUE)
@@ -361,6 +368,9 @@ optimize_sample_size <- function(
         nsim_final = as.integer(nsim_final),
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
+        topup_rounds = if (isTRUE(used_topup_rows)) 1L else 0L,
+        sequential_topup_adjusted = seq_two_stage,
+        topup_mc_conf_level = if (isTRUE(used_topup_rows)) mc_conf_eff else NA_real_,
         adaptive_pooled = adaptive_pooled,
         mc_adjustment = mc_adjustment,
         mc_conf_level_effective = mc_conf_eff,
@@ -450,6 +460,25 @@ lookup_pref_score <- function(df_sub, grid_df) {
 attach_grid_meta <- function(df_sub, grid_df) {
   df_sub$preference_score <- lookup_pref_score(df_sub, grid_df)
   df_sub
+}
+
+sequential_topup_conf_level <- function(
+  base_conf,
+  round_num = 1L,
+  n_decisions = 1L,
+  mode = c("two_stage", "geometric", "none")
+) {
+  mode <- match.arg(mode)
+  alpha <- 1.0 - base_conf
+  m <- max(1L, as.integer(n_decisions))
+  denom <- switch(
+    mode,
+    none = as.numeric(m),
+    two_stage = 2.0 * as.numeric(m),
+    geometric = as.numeric(m) * (2.0^(max(1L, as.integer(round_num)) + 1L))
+  )
+  conf <- 1.0 - alpha / denom
+  min(1.0 - 1e-12, max(base_conf, conf))
 }
 
 reclassify_verified_mc <- function(df, spec, conf_level) {
@@ -551,6 +580,14 @@ run_single_spec_search <- function(
     attach_grid_meta(df_in, grid_df)
   }
 
+  seq_two_stage <- isTRUE(nsim_topup > 0L && identical(topup_policy, "independent"))
+  spec_look <- spec
+  if (seq_two_stage) {
+    spec_look$mc_conf_level <- sequential_topup_conf_level(
+      spec$mc_conf_level, round_num = 1L, n_decisions = 1L, mode = "two_stage"
+    )
+  }
+
   if (method == "grid" || n_grid <= (n_eval_init + n_eval_adapt)) {
     if (verbose) {
       cli::cli_inform(
@@ -558,7 +595,7 @@ run_single_spec_search <- function(
       )
     }
     s2_out <- evaluate_grid_batch(
-      spec = spec,
+      spec = spec_look,
       grid_sub = grid_df,
       point_bases = point_base_s2,
       nsim = nsim_final,
@@ -581,7 +618,7 @@ run_single_spec_search <- function(
         verified_raw = verified_raw,
         grid_df = grid_df,
         point_base_topup = point_base_topup,
-        spec = spec,
+        spec = spec_look,
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
         workers = workers,
@@ -590,7 +627,12 @@ run_single_spec_search <- function(
       )
     }
     if (identical(mc_adjustment, "bonferroni")) {
-      conf_eff <- bonferroni_mc_conf_level(spec$mc_conf_level, nrow(verified_df))
+      conf_eff <- sequential_topup_conf_level(
+        spec$mc_conf_level,
+        round_num = 1L,
+        n_decisions = nrow(verified_df),
+        mode = if (seq_two_stage) "two_stage" else "none"
+      )
       verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
     }
     eval_all <- verified_df
@@ -663,7 +705,7 @@ run_single_spec_search <- function(
       )
     }
     s2_out <- evaluate_grid_batch(
-      spec = spec,
+      spec = spec_look,
       grid_sub = grid_df[verify_idx, , drop = FALSE],
       point_bases = point_base_s2[verify_idx],
       nsim = nsim_final,
@@ -692,7 +734,7 @@ run_single_spec_search <- function(
       if (length(gp_feas_idx) > 0L) {
         best_backup <- gp_feas_idx[order(surf_refit$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
         ex_out <- evaluate_grid_batch(
-          spec = spec,
+          spec = spec_look,
           grid_sub = grid_df[best_backup, , drop = FALSE],
           point_bases = point_base_s2[best_backup],
           nsim = nsim_final,
@@ -718,7 +760,7 @@ run_single_spec_search <- function(
                            verified_df$n_item == grid_df$n_item[max_idx])
       if (!already_max) {
         cn_out <- evaluate_grid_batch(
-          spec = spec,
+          spec = spec_look,
           grid_sub = grid_df[max_idx, , drop = FALSE],
           point_bases = point_base_s2[max_idx],
           nsim = nsim_final,
@@ -743,7 +785,7 @@ run_single_spec_search <- function(
         verified_raw = verified_raw,
         grid_df = grid_df,
         point_base_topup = point_base_topup,
-        spec = spec,
+        spec = spec_look,
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
         workers = workers,
@@ -753,7 +795,12 @@ run_single_spec_search <- function(
     }
 
     if (identical(mc_adjustment, "bonferroni")) {
-      conf_eff <- bonferroni_mc_conf_level(spec$mc_conf_level, nrow(verified_df))
+      conf_eff <- sequential_topup_conf_level(
+        spec$mc_conf_level,
+        round_num = 1L,
+        n_decisions = nrow(verified_df),
+        mode = if (seq_two_stage) "two_stage" else "none"
+      )
       verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
     }
 
@@ -911,6 +958,17 @@ pool_replications <- function(initial, extra, spec, row, extra_summary) {
 #' an existing `"glmmplanr_result"` object to narrow simulation uncertainty near
 #' the target threshold.
 #'
+#' Even when each top-up batch is independent of earlier replications, repeatedly
+#' re-evaluating only `"indeterminate"` candidates across multiple rounds inflates
+#' the overall false-pass probability if unadjusted pointwise intervals are used.
+#' By default (`sequential_adjustment = "geometric"`), each independent top-up
+#' round \eqn{r = 1, 2, \dots} tightens its Wilson confidence level to
+#' \eqn{1 - (1 - \text{mc\_conf\_level}) / 2^{r + 1}} (further divided by the
+#' number of verified Stage-2 decisions when `mc_adjustment = "bonferroni"`), so
+#' the cumulative added false-pass error across all subsequent rounds remains
+#' bounded. For a single unpenalized final confirmation of a chosen design, use
+#' [validate_design_point()].
+#'
 #' @param result A `"glmmplanr_result"` object.
 #' @param nsim_extra Positive integer number of independent additional
 #'   replications per borderline candidate (default `1000L`).
@@ -918,10 +976,18 @@ pool_replications <- function(initial, extra, spec, row, extra_summary) {
 #'   candidates:
 #'   * `"independent"` (default): Evaluates each `"indeterminate"` candidate
 #'     solely on the fresh `nsim_extra` batch without pooling prior Stage-2
-#'     draws, preserving nominal fixed-sample Wilson coverage.
+#'     draws.
 #'   * `"pooled"`: Pools prior and new replications (emits a warning and flags
 #'     `search_meta$adaptive_pooled = TRUE` because data-adaptive pooling
 #'     invalidates nominal fixed-sample Wilson coverage).
+#' @param sequential_adjustment Multiplicity adjustment applied across repeated
+#'   independent top-up rounds on `"indeterminate"` candidates:
+#'   * `"geometric"` (default): Applies geometric alpha-spending
+#'     (\eqn{\alpha_r = \alpha / 2^{r+1}}) to round \eqn{r} Wilson intervals so
+#'     repeated re-evaluation does not accumulate unbounded false-pass risk.
+#'   * `"none"`: Uses unadjusted round-wise Wilson intervals (emits a warning
+#'     because repeated independent testing of `"indeterminate"` candidates
+#'     inflates the overall false-pass rate).
 #' @param workers Integer number of parallel workers.
 #' @param parallel_backend Parallel backend (`"auto"`, `"mirai"`, `"multicore"`,
 #'   or `"sequential"`).
@@ -937,6 +1003,7 @@ topup_verification <- function(
   result,
   nsim_extra = 1000L,
   topup_policy = c("independent", "pooled"),
+  sequential_adjustment = c("geometric", "none"),
   workers = result$search_meta$workers,
   parallel_backend = "auto",
   verbose = TRUE
@@ -948,6 +1015,7 @@ topup_verification <- function(
     cli::cli_abort("{.arg result} must be a {.cls glmmplanr_result} object.")
   }
   topup_policy <- match.arg(topup_policy)
+  sequential_adjustment <- match.arg(sequential_adjustment)
   nsim_extra <- as.integer(nsim_extra)
   if (nsim_extra < 1L) cli::cli_abort("{.arg nsim_extra} must be a positive integer.")
 
@@ -960,7 +1028,7 @@ topup_verification <- function(
       any(vapply(old_specs, function(sp) isTRUE(sp$dgp$design$attrition > 0), logical(1)))) {
     cli::cli_abort("Rerun this plan before pooling results from different trial missingness mechanisms.")
   }
-  round_num <- if (is.null(meta$topup_rounds)) 1L else meta$topup_rounds + 1L
+  round_num <- if (is.null(meta$topup_rounds)) 1L else as.integer(meta$topup_rounds) + 1L
   rc <- result$robust
   decisions <- if (is.null(rc)) result$verified else rc$scenario_evaluations
   if (!any(decisions$decision_status == "indeterminate")) return(result)
@@ -979,16 +1047,44 @@ topup_verification <- function(
       "Pooling prior Stage-2 and adaptive top-up replications ({.code topup_policy = 'pooled'}).",
       "i" = "Data-adaptive pooling invalidates nominal fixed-sample Wilson coverage; use {.code topup_policy = 'independent'} or confirm the final design with {.fn validate_design_point}."
     ))
+  } else {
+    if (identical(sequential_adjustment, "none")) {
+      cli::cli_warn(c(
+        "Unadjusted repeated top-up verification ({.code sequential_adjustment = 'none'}) inflates overall false-pass probability across rounds.",
+        "i" = "Use {.code sequential_adjustment = 'geometric'} or run a single independent confirmation via {.fn validate_design_point}."
+      ))
+    }
+    if (round_num >= 2L) {
+      cli::cli_warn(c(
+        "Running sequential top-up round {round_num} on {.val indeterminate} candidates.",
+        "i" = "Repeated re-evaluation triggers progressively stricter Wilson bounds; for a final confirmation on a chosen design, run {.fn validate_design_point} once."
+      ))
+    }
   }
   mc_adj <- if (!is.null(meta$mc_adjustment)) meta$mc_adjustment else "none"
+  n_mult <- if (identical(mc_adj, "bonferroni")) nrow(decisions) else 1L
+  conf_round <- if (identical(topup_policy, "independent")) {
+    sequential_topup_conf_level(
+      result$spec$mc_conf_level,
+      round_num = round_num,
+      n_decisions = n_mult,
+      mode = sequential_adjustment
+    )
+  } else {
+    sequential_topup_conf_level(
+      result$spec$mc_conf_level,
+      round_num = 1L,
+      n_decisions = n_mult,
+      mode = "none"
+    )
+  }
+
   if (is.null(rc)) {
-    result$verified <- topup_rows(result$verified, result$spec, result, nsim_extra,
-                                 50L + round_num, topup_policy, workers, parallel_backend, verbose)
-    if (identical(mc_adj, "bonferroni")) {
-      conf_eff <- bonferroni_mc_conf_level(result$spec$mc_conf_level, nrow(result$verified))
-      result$verified <- reclassify_verified_mc(result$verified, result$spec, conf_eff)
-      result$search_meta$mc_conf_level_effective <- conf_eff
-    }
+    result$verified <- topup_rows(
+      result$verified, result$spec, result, nsim_extra,
+      50L + round_num, topup_policy, workers, parallel_backend, verbose,
+      conf_level_override = conf_round
+    )
   } else {
     if (is.null(rc$specs)) cli::cli_abort("Rerun this saved plan to recover the scenario models for top-up.")
     ev <- rc$scenario_evaluations
@@ -996,28 +1092,36 @@ topup_verification <- function(
     slots <- max(50L, 30L + 2L * length(names_s), 7L + 5L * length(names_s)) + (round_num - 1L) * length(names_s) + seq_along(names_s)
     updated <- lapply(seq_along(names_s), function(i) {
       sn <- names_s[i]
-      topup_rows(ev[ev$scenario == sn, , drop = FALSE], rc$specs[[sn]], result,
-                 nsim_extra, slots[i], topup_policy, workers, parallel_backend, verbose)
+      topup_rows(
+        ev[ev$scenario == sn, , drop = FALSE], rc$specs[[sn]], result,
+        nsim_extra, slots[i], topup_policy, workers, parallel_backend, verbose,
+        conf_level_override = conf_round
+      )
     })
     ev_new <- align_and_bind_rows(updated)
-    if (identical(mc_adj, "bonferroni")) {
-      conf_eff <- bonferroni_mc_conf_level(result$spec$mc_conf_level, nrow(ev_new))
-      ev_new <- reclassify_verified_mc(ev_new, result$spec, conf_eff)
-      result$search_meta$mc_conf_level_effective <- conf_eff
-    }
     result$robust$scenario_evaluations <- ev_new
   }
   result$search_meta$topup_rounds <- round_num
   result$search_meta$topup_policy <- topup_policy
+  result$search_meta$sequential_adjustment <- sequential_adjustment
+  result$search_meta$topup_mc_conf_level <- conf_round
+  if (identical(topup_policy, "independent") && identical(sequential_adjustment, "geometric")) {
+    result$search_meta$sequential_topup_adjusted <- TRUE
+  }
   if (identical(topup_policy, "pooled")) {
     result$search_meta$adaptive_pooled <- TRUE
   }
   switch_preference(result, result$prefer)
 }
 
-topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, workers, parallel_backend, verbose) {
+topup_rows <- function(
+  ver, sp, result, nsim_extra, slot_extra, topup_policy, workers, parallel_backend, verbose,
+  conf_level_override = sp$mc_conf_level
+) {
   ind_idx <- which(ver$decision_status == "indeterminate")
   if (!length(ind_idx)) return(ver)
+  sp_eval <- sp
+  sp_eval$mc_conf_level <- conf_level_override
   stride <- result$search_meta$n_grid_stride
 
   surf <- result$surface
@@ -1032,16 +1136,16 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, wo
 
   if (verbose) {
     cli::cli_inform(
-      "Running {nsim_extra} independent top-up replications (policy = {.val {topup_policy}}) on {length(ind_idx)} indeterminate candidate(s)..."
+      "Running {nsim_extra} independent top-up replications (policy = {.val {topup_policy}}, Wilson level = {sprintf('%.2f%%', 100 * conf_level_override)}) on {length(ind_idx)} indeterminate candidate(s)..."
     )
   }
 
   extra_out <- evaluate_grid_batch(
-    spec = sp,
+    spec = sp_eval,
     grid_sub = surf[g_match, , drop = FALSE],
     point_bases = bases,
     nsim = nsim_extra,
-    engine_use = sp$engine,
+    engine_use = sp_eval$engine,
     fast_stage = FALSE,
     workers = workers,
     parallel_backend = parallel_backend,
@@ -1067,7 +1171,7 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, wo
     }
     if (is.list(old_r$replications) && is.list(old_r$replications[[1L]])) {
       summary <- attach_grid_meta(
-        pool_replications(old_r$replications[[1L]], extra_out$raw[[j]], sp, old_r, new_r),
+        pool_replications(old_r$replications[[1L]], extra_out$raw[[j]], sp_eval, old_r, new_r),
         surf
       )
       ver[r_i, names(summary)] <- summary
@@ -1092,22 +1196,22 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, wo
     ver$effective_power[r_i] <- eff_pow
     ver$conditional_power[r_i] <- cond_pow
 
-    denom_mc <- if (sp$failure_policy == "effective") ntot else vtot
-    pow_use <- if (sp$failure_policy == "effective") eff_pow else cond_pow
+    denom_mc <- if (sp_eval$failure_policy == "effective") ntot else vtot
+    pow_use <- if (sp_eval$failure_policy == "effective") eff_pow else cond_pow
     ver$power[r_i] <- pow_use
     ver$power_mcse[r_i] <- if (denom_mc > 0L) sqrt(pow_use * (1 - pow_use) / denom_mc) else NA_real_
-    mc_pow <- wilson_mc_ci(k_sig, denom_mc, conf_level = sp$mc_conf_level)
+    mc_pow <- wilson_mc_ci(k_sig, denom_mc, conf_level = sp_eval$mc_conf_level)
     ver$power_mc_lo[r_i] <- unname(mc_pow["lo"])
     ver$power_mc_hi[r_i] <- unname(mc_pow["hi"])
 
-    if (!is.null(sp$ci_width)) {
+    if (!is.null(sp_eval$ci_width)) {
       k_aipe <- round(old_r$effective_aipe_prob * n1) + round(new_r$effective_aipe_prob * n2)
       eff_aipe <- k_aipe / ntot
       cond_aipe <- if (vtot > 0L) k_aipe / vtot else NA_real_
       ver$effective_aipe_prob[r_i] <- eff_aipe
       ver$conditional_aipe_prob[r_i] <- cond_aipe
-      ver$aipe_prob[r_i] <- if (sp$failure_policy == "effective") eff_aipe else cond_aipe
-      mc_aipe <- wilson_mc_ci(k_aipe, denom_mc, conf_level = sp$mc_conf_level)
+      ver$aipe_prob[r_i] <- if (sp_eval$failure_policy == "effective") eff_aipe else cond_aipe
+      mc_aipe <- wilson_mc_ci(k_aipe, denom_mc, conf_level = sp_eval$mc_conf_level)
       ver$aipe_mc_lo[r_i] <- unname(mc_aipe["lo"])
       ver$aipe_mc_hi[r_i] <- unname(mc_aipe["hi"])
     } else {
@@ -1115,19 +1219,19 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, wo
     }
 
     mc_joint <- c(lo = NA_real_, hi = NA_real_)
-    if ("k_joint" %in% names(ver) && !is.null(sp$ci_width)) {
+    if ("k_joint" %in% names(ver) && !is.null(sp_eval$ci_width)) {
       k_joint <- old_r$k_joint + new_r$k_joint
       ver$k_joint[r_i] <- k_joint
       ver$joint_prob[r_i] <- if (denom_mc > 0) k_joint / denom_mc else NA_real_
-      mc_joint <- wilson_mc_ci(k_joint, denom_mc, sp$mc_conf_level)
+      mc_joint <- wilson_mc_ci(k_joint, denom_mc, sp_eval$mc_conf_level)
       ver$joint_mc_lo[r_i] <- mc_joint["lo"]
       ver$joint_mc_hi[r_i] <- mc_joint["hi"]
     }
     k_rope <- round(old_r$effective_rope_prob * n1) + round(new_r$effective_rope_prob * n2)
     ver$effective_rope_prob[r_i] <- k_rope / ntot
     ver$conditional_rope_prob[r_i] <- if (vtot > 0L) k_rope / vtot else NA_real_
-    ver$rope_excl_prob[r_i] <- if (sp$failure_policy == "effective") (k_rope / ntot) else ver$conditional_rope_prob[r_i]
-    mc_rope <- wilson_mc_ci(k_rope, denom_mc, conf_level = sp$mc_conf_level)
+    ver$rope_excl_prob[r_i] <- if (sp_eval$failure_policy == "effective") (k_rope / ntot) else ver$conditional_rope_prob[r_i]
+    mc_rope <- wilson_mc_ci(k_rope, denom_mc, conf_level = sp_eval$mc_conf_level)
     ver$rope_mc_lo[r_i] <- unname(mc_rope["lo"])
     ver$rope_mc_hi[r_i] <- unname(mc_rope["hi"])
 
@@ -1149,12 +1253,12 @@ topup_rows <- function(ver, sp, result, nsim_extra, slot_extra, topup_policy, wo
                            "type_m_error", "type_s_error", "reduced_power", "reduced_coverage",
                            "reduced_ci_width_mean"), names(ver))) ver[[nm]][r_i] <- NA_real_
 
-    valid_gate_ok <- if (sp$failure_policy == "effective") TRUE else ((vtot / ntot) >= sp$min_valid_rate)
+    valid_gate_ok <- if (sp_eval$failure_policy == "effective") TRUE else ((vtot / ntot) >= sp_eval$min_valid_rate)
     ver$criterion_met[r_i] <- valid_gate_ok && check_criterion_met(
-      sp, ver$power[r_i], ver$aipe_prob[r_i], ver$rope_excl_prob[r_i], ver$joint_prob[r_i]
+      sp_eval, ver$power[r_i], ver$aipe_prob[r_i], ver$rope_excl_prob[r_i], ver$joint_prob[r_i]
     )
     ver$decision_status[r_i] <- compute_decision_status(
-      sp, valid_gate_ok, mc_pow, mc_aipe, mc_rope, mc_joint
+      sp_eval, valid_gate_ok, mc_pow, mc_aipe, mc_rope, mc_joint
     )
   }
 
@@ -1632,7 +1736,7 @@ print.glmmplanr_result <- function(x, ...) {
 
   status_txt <- switch(
     opt$decision_status[1L],
-    pass = "PASS (High-confidence verified attainment; MC lower bound >= target)",
+    pass = "PASS (Target attainment verified: MC lower bound >= target)",
     indeterminate = "INDETERMINATE / BORDERLINE (MC confidence interval straddles target; consider top-up)",
     fail = if (isTRUE(x$feasible)) {
       "FEASIBLE POINT ESTIMATE (Check MC interval)"
@@ -1642,9 +1746,12 @@ print.glmmplanr_result <- function(x, ...) {
   )
 
   role <- if (isTRUE(x$feasible)) "Recommended design" else "Unconfirmed candidate"
+  cov_show <- if (x$spec$scale == "logit") opt$coverage else opt$prob_coverage
+  val_info <- assess_inferential_validity(cov_show, opt$n_valid, x$spec$alpha)
 
   bullets <- c(
-    "Decision status: {.strong {status_txt}}",
+    "Target attainment: {.strong {status_txt}}",
+    "Inferential validity: {val_info$detail}",
     "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected})",
     "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
     "Accuracy diff ({x$spec$prob_estimand}): true = {sprintf('%+.1f pp', opt$prob_diff_true_pp)} | Mean CI width = {.strong {sprintf('%.2f pp', opt$prob_ci_width_mean_pp)}} ({sprintf('%.3f logit', opt$logit_ci_width_mean)})"
@@ -1679,10 +1786,9 @@ print.glmmplanr_result <- function(x, ...) {
     )
     bullets <- c(bullets, "Pareto trade-off frontier: {pf_str}")
   }
-  cov_show <- if (x$spec$scale == "logit") opt$coverage else opt$prob_coverage
   bullets <- c(
     bullets,
-    "Diagnostics: Singular = {sprintf('%.1f%%', opt$singular_rate * 100)} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
+    "Diagnostics: Singular = {sprintf('%.1f%%', opt$singular_rate * 100)} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Stage-2 H1 Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
   )
   if (nzchar(opt$top_error_reason)) {
     bullets <- c(bullets, "Top non-conv/error reason: {.val {opt$top_error_reason}}")
@@ -1707,6 +1813,27 @@ print.glmmplanr_result <- function(x, ...) {
     bullets <- c(
       bullets,
       "Note: Adaptive top-up pooling was used; nominal fixed-sample Wilson coverage is not guaranteed. Confirm the selected design with {.fn validate_design_point}."
+    )
+  }
+  if (isTRUE(x$search_meta$topup_rounds > 0L) &&
+      identical(x$search_meta$topup_policy, "independent") &&
+      !is.null(x$search_meta$topup_mc_conf_level) &&
+      is.finite(x$search_meta$topup_mc_conf_level)) {
+    seq_mode <- if (identical(x$search_meta$sequential_adjustment, "none")) {
+      "unadjusted"
+    } else if (identical(x$search_meta$sequential_adjustment, "geometric")) {
+      "geometric alpha-spending"
+    } else {
+      "two-stage split"
+    }
+    bullets <- c(
+      bullets,
+      sprintf(
+        "Sequential top-up: %d independent round(s) (%s, latest Wilson level = %.2f%%)",
+        as.integer(x$search_meta$topup_rounds),
+        seq_mode,
+        100 * x$search_meta$topup_mc_conf_level
+      )
     )
   }
   if (identical(x$search_meta$mc_adjustment, "bonferroni") &&

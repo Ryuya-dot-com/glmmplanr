@@ -52,6 +52,8 @@ dgps <- list(null = dgp_null, planned = dgp_planned)
 specs <- lapply(dgps, function(g) {
   specify_target(g, effect = "exposure", scale = "logit", engine = "bayes_laplace", on_singular = "flag_only")
 })
+# Strict conditional null (true conditional exposure coefficient = 0 logit)
+specs$conditional_null <- glmmplanr:::null_target_spec(specs$planned)
 
 candidates <- data.frame(cand_id = 1:2, persons = c(72L, 48L), items = c(32L, 48L))
 n_rep <- 192L
@@ -59,8 +61,8 @@ z <- stats::qnorm(0.975)
 
 all_rows <- list()
 idx <- 0L
-for (e_id in seq_along(dgps)) {
-  e_nm <- names(dgps)[e_id]
+for (e_id in seq_along(specs)) {
+  e_nm <- names(specs)[e_id]
   sp <- specs[[e_nm]]
   for (c_i in seq_len(nrow(candidates))) {
     ns <- candidates$persons[c_i]

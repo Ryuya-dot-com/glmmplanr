@@ -128,8 +128,15 @@ run_multi_scenario_analysis <- function(
   scen_evals <- vector("list", length(scenarios))
   names(scen_evals) <- scen_names
 
+  seq_two_stage <- isTRUE(nsim_topup > 0L && identical(topup_policy, "independent"))
+
   verify_scenario <- function(sub_grid, snm, s_i) {
     sp <- scen_specs[[snm]]
+    if (seq_two_stage) {
+      sp$mc_conf_level <- sequential_topup_conf_level(
+        sp$mc_conf_level, round_num = 1L, n_decisions = 1L, mode = "two_stage"
+      )
+    }
     streams <- function(slot) allocate_stage_point_streams(
       seed, stage_slot = slot, grid_ids = sub_grid$orig_grid_id, stride = n_grid_stride)
     verification_offset <- 7L + 3L * length(scenarios)
@@ -177,7 +184,12 @@ run_multi_scenario_analysis <- function(
   rownames(all_scen_df) <- NULL
 
   if (identical(mc_adjustment, "bonferroni")) {
-    conf_eff <- bonferroni_mc_conf_level(base_spec$mc_conf_level, nrow(all_scen_df))
+    conf_eff <- sequential_topup_conf_level(
+      base_spec$mc_conf_level,
+      round_num = 1L,
+      n_decisions = nrow(all_scen_df),
+      mode = if (seq_two_stage) "two_stage" else "none"
+    )
     all_scen_df <- reclassify_verified_mc(all_scen_df, base_spec, conf_eff)
   }
 

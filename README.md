@@ -96,10 +96,11 @@ plot(plan, type = "contour")            # 2D power surface + Pareto frontier
 
 ### How to Read the Result
 
-- **`decision_status`**: Uses a Wilson Monte Carlo confidence interval (default 95%) for attainment.
+- **`decision_status` (Target attainment only)**: Uses a Wilson Monte Carlo confidence interval (default 95%) for attainment of your power, width, or ROPE target.
   - **`pass`**: Even the lower Monte Carlo bound (`power_mc_lo`) reaches your target (e.g., $\ge 80\%$). Only `pass` designs are confirmed recommendations.
-  - **`indeterminate`**: The Monte Carlo interval straddles the target; run more replications (e.g., `nsim_final = 1000` or `topup_verification()`).
+  - **`indeterminate`**: The Monte Carlo interval straddles the target; increase `nsim_final`, use `topup_verification()` (which applies geometric sequential alpha-spending across independent rounds by default), or confirm a chosen design once via `validate_design_point()`.
   - **`fail`**: The upper Monte Carlo bound falls below the target.
+- **Target attainment vs. inferential validity**: A `pass` status confirms only your specified power/precision target—it does **not** guarantee nominal interval coverage or null Type I error, because an estimator that underestimates standard errors can produce narrow intervals and high detection. Console summaries, `as_gt()`, and `report_plan()` report **Inferential validity** separately (flagging low Stage-2 coverage and pointing to `validate_design_point()`).
 - **`power` vs. `conditional_power`**: By default (`failure_policy = "effective"`), non-converged or separated fits count as misses in `power`, while `conditional_power` reports power among valid fits only.
 - **`plan$verified_pareto`**: Lists non-dominated passing `(N_subj, N_item)` trade-offs (reducing participants requires more items, and vice versa). Switch priorities without re-simulating via `switch_preference(plan, prefer = "fewer_subj")` or `"fewer_items"`.
 - **Final confirmation**: Before pre-registration, confirm your chosen design on a fresh seed with a larger `nsim` and your planned final interval method (e.g., `prob_se_method = "bootstrap"`) via `validate_design_point()`, which checks both Type I error under the null and power/coverage under the planned effect.
@@ -275,6 +276,13 @@ report_plan(plan_res)
 - **Extreme Response Pattern Diagnostics (`response_patterns()`)**: Summarizes `all_correct`, `all_incorrect`, and `unobserved` participants/items alongside observation counts (`n_observed`), while unpenalized GLMM engines automatically flag separation when an entire fixed-effect cell has only one outcome.
 
 For detailed coverage checks, 3AFC estimator comparisons (Laplace vs. Stan HMC), and comparisons with `lme4`, `TAM`, `PowRPriori`, `simr`, and `mlpwr`, see [Scope, Statistical Validation, and Related R Packages](inst/validation-guide.md).
+
+---
+
+## Validation Status & Modeling Assumptions
+
+- **Validated vs. exploratory scope**: External cross-validation and pre-specified confirmation benchmarks currently cover complete-presentation canonical logit GLMMs (`lme4`, `simr`, `PowRPriori`), complete-presentation $2 \times 2$ 3AFC conditional-logit models (`rstan`, `bayes_laplace`), and complete-presentation random-item and fixed-bank Rasch models (`TAM`, `lme4`). **Partial presentation (`items_per_subject`), sparse designs with correlated random slopes, testlet local dependence (`design_testlet()`), and higher-order interactions are currently exploratory**—verify coverage and null Type I error at your planned design with `validate_design_point()` (and an external estimator when feasible). See the full [Validation Status Matrix](inst/validation-guide.md#validation-status).
+- **Generating-model assumptions**: Built-in data generation assumes multivariate normal participant/item random effects, a shared lower guessing asymptote (`chance`), and random trial attrition / participant dropout independent of latent ability and responses (MCAR). Multi-scenario planning (`scenario_dgps()`) assesses parameter sensitivity within this model family, not structural misspecification such as ability-dependent dropout or item-specific guessing. See [Generating-Model Assumptions and Limitations](inst/validation-guide.md#modeling-assumptions).
 
 ---
 

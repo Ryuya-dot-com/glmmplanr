@@ -8,6 +8,7 @@ topup_verification(
   result,
   nsim_extra = 1000L,
   topup_policy = c("independent", "pooled"),
+  sequential_adjustment = c("geometric", "none"),
   workers = result$search_meta$workers,
   parallel_backend = "auto",
   verbose = TRUE
@@ -24,10 +25,21 @@ candidates:
 \itemize{
 \item \code{"independent"} (default): Evaluates each \code{"indeterminate"} candidate
 solely on the fresh \code{nsim_extra} batch without pooling prior Stage-2
-draws, preserving nominal fixed-sample Wilson coverage.
+draws.
 \item \code{"pooled"}: Pools prior and new replications (emits a warning and flags
 \code{search_meta$adaptive_pooled = TRUE} because data-adaptive pooling
 invalidates nominal fixed-sample Wilson coverage).
+}}
+
+\item{sequential_adjustment}{Multiplicity adjustment applied across repeated
+independent top-up rounds on \code{"indeterminate"} candidates:
+\itemize{
+\item \code{"geometric"} (default): Applies geometric alpha-spending
+(\eqn{\alpha_r = \alpha / 2^{r+1}}) to round \eqn{r} Wilson intervals so
+repeated re-evaluation does not accumulate unbounded false-pass risk.
+\item \code{"none"}: Uses unadjusted round-wise Wilson intervals (emits a warning
+because repeated independent testing of \code{"indeterminate"} candidates
+inflates the overall false-pass rate).
 }}
 
 \item{workers}{Integer number of parallel workers.}
@@ -45,6 +57,18 @@ Executes \code{nsim_extra} fresh, independent Monte Carlo replications (using a
 new L'Ecuyer-CMRG top-level stage slot) on any \code{"indeterminate"} candidates in
 an existing \code{"glmmplanr_result"} object to narrow simulation uncertainty near
 the target threshold.
+}
+\details{
+Even when each top-up batch is independent of earlier replications, repeatedly
+re-evaluating only \code{"indeterminate"} candidates across multiple rounds inflates
+the overall false-pass probability if unadjusted pointwise intervals are used.
+By default (\code{sequential_adjustment = "geometric"}), each independent top-up
+round \eqn{r = 1, 2, \dots} tightens its Wilson confidence level to
+\eqn{1 - (1 - \text{mc\_conf\_level}) / 2^{r + 1}} (further divided by the
+number of verified Stage-2 decisions when \code{mc_adjustment = "bonferroni"}), so
+the cumulative added false-pass error across all subsequent rounds remains
+bounded. For a single unpenalized final confirmation of a chosen design, use
+\code{\link[=validate_design_point]{validate_design_point()}}.
 }
 \examples{
 # Create the five-replication demonstration plan from the optimizer help.

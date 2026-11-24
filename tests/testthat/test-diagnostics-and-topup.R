@@ -67,3 +67,115 @@ test_that("stan_laplace emits deprecation warning and Bonferroni MC adjustment w
   expect_match(report_plan(res_bonf, print_output = FALSE), "Bonferroni")
   expect_match(report_plan(res_none, print_output = FALSE), "pointwise")
 })
+
+test_that("target attainment and inferential validity are separated and low coverage triggers caution", {
+  des <- design_crossed(list(A = c("a", "b")), allocation = "latin_square")
+  dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
+  sp <- specify_target(dgp, "A", criterion = "power", power_min = 0.80,
+                       engine = "bayes_laplace", analysis_re = "intercept_only",
+                       on_singular = "flag_only")
+  res <- optimize_sample_size(
+    sp, n_subj_range = 16L, n_item_range = 8L,
+    method = "grid", nsim_final = 10L, nsim_sensitivity = 0L,
+    workers = 1L, seed = 778L, verbose = FALSE
+  )
+
+  rep_normal <- report_plan(res, print_output = FALSE)
+  expect_match(rep_normal, "does not verify inferential validity")
+  expect_match(rep_normal, "validate_design_point")
+
+  # Simulate anti-conservative SEs yielding low empirical coverage (60% over 100 valid fits)
+  res_low <- res
+  res_low$optimal$n_valid <- 100L
+  res_low$optimal$coverage <- 0.60
+  res_low$optimal$prob_coverage <- 0.60
+  res_low$verified$n_valid <- 100L
+  res_low$verified$coverage <- 0.60
+  res_low$verified$prob_coverage <- 0.60
+
+  val_low <- glmmplanr:::assess_inferential_validity(0.60, 100L, 0.05)
+  expect_identical(val_low$status, "caution_low_coverage")
+  expect_identical(val_low$short_label, "Caution: Low Cov.")
+
+  rep_low <- report_plan(res_low, print_output = FALSE)
+  expect_match(rep_low, "Caution:")
+  expect_match(rep_low, "underestimated standard errors")
+
+  printed <- paste(testthat::capture_messages(print(res_low)), collapse = "\n")
+  expect_match(printed, "Target attainment:")
+  expect_match(printed, "Inferential validity:")
+  expect_match(printed, "CAUTION")
+
+  gt_tbl <- as_gt(res_low)
+  expect_true("validity_status" %in% names(gt_tbl$`_data`))
+  expect_true(all(gt_tbl$`_data`$validity_status == "Caution: Low Cov."))
+})
+
+test_that("independent top-up applies sequential multiplicity control across rounds", {
+  des <- design_crossed(list(A = c("a", "b")), allocation = "latin_square")
+  dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
+  sp <- specify_target(dgp, "A", criterion = "power", power_min = 0.80,
+                       engine = "bayes_laplace", analysis_re = "intercept_only",
+                       on_singular = "flag_only")
+
+  # Automatic Stage-3 independent top-up uses two-stage split (97.5% Wilson for 95% nominal)
+  res_2stage <- optimize_sample_size(
+    sp, n_subj_range = 12L, n_item_range = 8L,
+    method = "grid", nsim_final = 8L, nsim_topup = 8L,
+    topup_policy = "independent", nsim_sensitivity = 0L,
+    workers = 1L, seed = 779L, verbose = FALSE
+  )
+  expect_true(isTRUE(res_2stage$search_meta$sequential_topup_adjusted))
+  expect_equal(res_2stage$search_meta$mc_conf_level_effective, 0.975)
+
+  # Interactive topup_verification applies geometric alpha-spending and warns from round 2
+  res_base <- optimize_sample_size(
+    sp, n_subj_range = 12L, n_item_range = 8L,
+    method = "grid", nsim_final = 8L, nsim_topup = 0L,
+    nsim_sensitivity = 0L, workers = 1L, seed = 780L, verbose = FALSE
+  )
+  res_base$verified$decision_status <- "indeterminate"
+  r1 <- topup_verification(res_base, nsim_extra = 8L, verbose = FALSE)
+  expect_equal(r1$search_meta$topup_rounds, 1L)
+  expect_equal(r1$search_meta$topup_mc_conf_level, 1 - 0.05 / 4)
+
+  r1$verified$decision_status <- "indeterminate"
+  expect_warning(
+    r2 <- topup_verification(r1, nsim_extra = 8L, verbose = FALSE),
+    "round 2"
+  )
+  expect_equal(r2$search_meta$topup_rounds, 2L)
+  expect_equal(r2$search_meta$topup_mc_conf_level, 1 - 0.05 / 8)
+  expect_match(report_plan(r2, print_output = FALSE), "geometric sequential alpha-spending")
+
+  # Unadjusted repeated top-up explicitly warns
+  expect_warning(
+    topup_verification(res_base, nsim_extra = 8L, sequential_adjustment = "none", verbose = FALSE),
+    "inflates overall false-pass"
+  )
+
+  # Exact binomial check: geometric alpha-spending bounds 10-round cumulative false-pass risk
+  p_true <- 0.799
+  n_batch <- 1000L
+  target <- 0.80
+  k_vals <- 0:n_batch
+  probs <- stats::dbinom(k_vals, n_batch, p_true)
+  round_rates <- function(conf_vec) {
+    surv <- 1.0
+    cum_pass <- 0.0
+    for (cf in conf_vec) {
+      lo <- vapply(k_vals, function(k) glmmplanr:::wilson_mc_ci(k, n_batch, cf)[["lo"]], numeric(1L))
+      hi <- vapply(k_vals, function(k) glmmplanr:::wilson_mc_ci(k, n_batch, cf)[["hi"]], numeric(1L))
+      p_pass <- sum(probs[lo >= target])
+      p_ind <- sum(probs[lo < target & hi >= target])
+      cum_pass <- cum_pass + surv * p_pass
+      surv <- surv * p_ind
+    }
+    cum_pass
+  }
+  unadj_10 <- round_rates(rep(0.95, 10L))
+  geom_confs <- c(0.95, vapply(1:9, function(r) glmmplanr:::sequential_topup_conf_level(0.95, r, 1L, "geometric"), numeric(1L)))
+  geom_10 <- round_rates(geom_confs)
+  expect_gt(unadj_10, 0.14)
+  expect_lt(geom_10, 0.035)
+})

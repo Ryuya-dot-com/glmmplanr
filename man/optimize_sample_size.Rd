@@ -77,13 +77,17 @@ design in Stage 2 final verification (default \code{1000L}).}
 \item{nsim_topup}{Pre-specified number of \strong{independent} additional Monte
 Carlo replications automatically run on Stage-2 candidates whose Monte
 Carlo confidence interval straddles the target (\code{decision_status == "indeterminate"}),
-default \code{0L}.}
+default \code{0L}. When \code{nsim_topup > 0L} and \code{topup_policy = "independent"},
+Stage-2 and Stage-3 Wilson intervals split the Monte Carlo error budget
+equally (\code{1 - (1 - mc_conf_level) / 2}) so the two-stage decision controls
+overall false-pass probability.}
 
 \item{topup_policy}{How top-up replications are evaluated when \code{nsim_topup > 0L}:
 \itemize{
 \item \code{"independent"} (default): Evaluates \code{"indeterminate"} candidates solely
 on the fresh independent top-up batch without pooling with Stage-2
-replications, avoiding optional-stopping bias in the Wilson bounds.
+replications, applying a two-stage Bonferroni split across Stage 2 and
+Stage 3 to control sequential false-pass risk.
 \item \code{"pooled"}: Pools Stage-2 and top-up replications for exploratory precision
 narrowing (emits a warning and flags \code{search_meta$adaptive_pooled = TRUE}
 because data-adaptive pooling invalidates nominal fixed-sample Wilson
