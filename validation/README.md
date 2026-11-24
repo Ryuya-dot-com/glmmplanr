@@ -70,7 +70,7 @@ Pre-specified calibration gates: exact 95% Type I error upper bound $\le 7.5\%$ 
 
 ### 2C. Necessity / Pass-Fail Boundary & Multi-Seed Optimizer Search (`bayes_laplace`)
 
-Adjacent smaller candidates evaluated on `192` fresh datasets each (planned effect `+1.616` logit, width target $\le 1.00$ logit with 80% assurance floor, seeds `7611001–7615192`):
+Six smaller adjacent candidates evaluated on `192` fresh datasets each (planned effect `+1.616` logit, width target $\le 1.00$ logit with 80% assurance floor, seeds `7611001–7616192`):
 
 | Design | Trials | Valid | 95% Coverage (Exact 95% CI) | Width $\le 1.00$ (Exact 95% CI) | Mean Width | Width Status |
 |---|---:|---:|---:|---:|---:|---|
@@ -78,9 +78,10 @@ Adjacent smaller candidates evaluated on `192` fresh datasets each (planned effe
 | `48 x 24` | 1,152 | 192/192 | 186/192 (`96.9% [93.3, 98.8]`) | 25/192 (`13.0% [8.6, 18.6]`) | 1.090 | **below_floor** |
 | `48 x 32` | 1,536 | 192/192 | 188/192 (`97.9% [94.8, 99.4]`) | 163/192 (`84.9% [79.0, 89.6]`) | 0.928 | **indeterminate** |
 | `64 x 24` | 1,536 | 192/192 | 187/192 (`97.4% [94.0, 99.1]`) | 163/192 (`84.9% [79.0, 89.6]`) | 0.930 | **indeterminate** |
+| `72 x 24` | 1,728 | 192/192 | 192/192 (`100.0% [98.1, 100.0]`) | 187/192 (`97.4% [94.0, 99.1]`) | 0.882 | **pass** |
 | `48 x 40` | 1,920 | 192/192 | 185/192 (`96.4% [92.6, 98.5]`) | 191/192 (`99.5% [97.1, 100.0]`) | 0.823 | **pass** |
 
-Across 5 independent search seeds (`optimize_sample_size()`, `method = "surrogate_gp"`, `prefer = "fewer_trials"`, `nsim_final = 96`, lattice `{32,48,64,72} x {24,32,40,48}`, seeds `7650001–7650005`), the optimizer selected `72 x 24` (`1,728` trials, Stage-2 width attainment `92.7%–96.9%`) on **4/5 seeds** and `48 x 32` (`1,536` trials, Stage-2 width attainment `88.5%`) on **1/5 seed**, with **0/5** failing designs selected.
+Across 5 independent search seeds (`optimize_sample_size()`, `method = "surrogate_gp"`, `prefer = "fewer_trials"`, `nsim_final = 96`, lattice `{32,48,64,72} x {24,32,40,48}`, seeds `7650001–7650005`), **5/5 seeds** reached an internal Stage-2 `pass`, selecting `72 x 24` (`1,728` trials, Stage-2 width attainment `92.7%–96.9%`) on **4/5 seeds** and `48 x 32` (`1,536` trials, Stage-2 width attainment `88.5%`) on **1/5 seed**. Cross-checked against the independent 192-rep boundary table above, **4/5** selections (`72 x 24`) confirmed as independent `pass`, **1/5** (`48 x 32`) was `indeterminate` on the boundary, and **0/5** fell `below_floor`.
 
 ---
 

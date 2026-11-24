@@ -140,11 +140,13 @@ summarize_trials <- function(fits, cov_floor = 0.90, wid_floor = 0.80, type1_cei
   res
 }
 
-# --- Part A: Boundary check on 5 smaller adjacent candidates (planned effect, n_rep = 192) ---
+# --- Part A: Boundary check on 6 smaller adjacent candidates (planned effect, n_rep = 192) ---
+# Includes 72x24 (1,728 trials) so every design selected by the Part B optimizer has
+# an independent 192-rep out-of-sample confirmation.
 cand_boundary <- data.frame(
-  cand_id = 1:5,
-  persons = c(32L, 48L, 48L, 64L, 48L),
-  items   = c(32L, 24L, 32L, 24L, 40L)
+  cand_id = 1:6,
+  persons = c(32L, 48L, 48L, 64L, 48L, 72L),
+  items   = c(32L, 24L, 32L, 24L, 40L, 24L)
 )
 fits_boundary <- run_trials(sp_planned, "planned_boundary", cand_boundary, n_rep = 192L, seed_base = 7610000L)
 sum_boundary <- summarize_trials(fits_boundary, cov_floor = 0.90, wid_floor = 0.80)
