@@ -103,15 +103,17 @@ the fewest words. An empty table means the grid has no confirmed pass.
 ### Choosing starting inputs when pilot data are limited
 
 If you do not yet have pilot GLMM variance estimates, avoid committing to a single
-optimistic guess. Instead, bracket plausible values across three scenarios:
+optimistic guess. The numbers below are **illustrative starting values for
+sensitivity bracketing, not universal field-wide recommendations**—replace them
+with domain-specific pilot estimates or accuracy ranges whenever available:
 
-- **Random-intercept SDs (`subj_sd`, `item_sd`)**: On the logit scale, values
-  around `0.4–0.6` reflect modest heterogeneity, `0.6–0.9` moderate
-  heterogeneity, and `1.0–1.2` large heterogeneity. Equivalently, you can supply
-  expected 95% accuracy ranges via `subj_prob_range` and `item_prob_range`.
+- **Random-intercept SDs (`subj_sd`, `item_sd`)**: As a tentative sensitivity
+  grid on the logit scale, you might compare low (`0.4–0.6`), moderate
+  (`0.6–0.9`), and large (`1.0–1.2`) heterogeneity, or supply expected 95%
+  accuracy ranges directly via `subj_prob_range` and `item_prob_range`.
 - **Random slopes (`slope_sd_ratio`)**: When condition varies within
-  participants or items, start with `0.25–0.35` (or `0` only if you plan an
-  intercept-only model and accept the mismatch risk).
+  participants or items, an illustrative starting bracket is `0.25–0.35` (use
+  `0` only if you plan an intercept-only model and accept the mismatch risk).
 - **3-scenario effect-size bracket**: Wrap your baseline `dgp` in
   `scenario_dgps(dgp, effect = "learning", effect_diffs_pp = c(conservative = 6, standard = 10, optimistic = 14))`
   and pass `scenarios = ...` to `optimize_sample_size()` so the plan shows how
@@ -135,18 +137,25 @@ system.time(validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 10L,
 
 # 2. Run pre-specified confirmation (e.g., nsim = 200L-1000L depending on budget)
 val <- validate_design_point(final, n_subj = 48L, n_item = 24L, nsim = 200L, seed = 8201L)
-val[c("condition", "n_valid", "detection", "detection_lo", "detection_hi", "coverage")]
+val[c("condition", "n_valid", "detection", "detection_lo", "detection_hi",
+      "coverage", "coverage_lo", "coverage_hi")]
 ```
 
 **How to decide (Adopt vs. Hold)**:
 
+Pre-specify numerical tolerances and judge them using the Monte Carlo intervals
+rather than point estimates alone:
+
 - **Adopt** when `planned` meets your target lower bound (`detection_lo >= 0.80`),
-  `n_valid / nsim >= 0.90`, `coverage` is close to nominal (`~95%`), and `null`
-  detection (Type I error) stays near `5%`.
+  `n_valid / nsim` meets your validity floor (e.g., `>= 0.90`), `coverage_lo`
+  meets your pre-specified coverage floor (e.g., `>= 0.90` or `>= 0.925`), and
+  `null$detection_hi` stays below your pre-specified Type I error ceiling (e.g.,
+  `<= 0.075` with sufficiently large `nsim`).
 - **Hold / revise** if `planned` is indeterminate (`detection_lo < 0.80` while
-  `detection_hi >= 0.80`: increase `nsim` or sample size), if `coverage` drops
-  markedly below `95%`, or if `null` detection is inflated (check estimator
-  choice or random-slope specification).
+  `detection_hi >= 0.80`: increase `nsim` or sample size), if `coverage_lo`
+  falls below your floor, or if `null$detection_hi` exceeds your Type I error
+  ceiling (increase `nsim` if merely uncertain, or revise the estimator /
+  random-slope specification if truly miscalibrated).
 
 For collected data, keep one row per observed response, with binary `y` and
 the same learner and word identifiers used for assignment. If maximum

@@ -12,5 +12,5 @@
 * Local macOS (aarch64-apple-darwin25.4.0), R 4.6.1
   - `_R_CHECK_FORCE_SUGGESTS_=false R CMD check --as-cran --no-manual`: 0 errors, 0 warnings, 1 note
   - `_R_CHECK_DEPENDS_ONLY_=true R CMD check --no-manual` (optional `Suggests` hidden): 0 errors, 0 warnings
-* GitHub Actions (ubuntu-latest R-release / R-devel, macOS-latest R-release, windows-latest R-release)
-* win-builder (R-devel)
+* GitHub Actions (ubuntu-latest, macOS-latest, windows-latest; R-release)
+* win-builder (R-devel): Pending (scheduled prior to CRAN submission)

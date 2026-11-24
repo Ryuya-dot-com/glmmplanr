@@ -17,7 +17,7 @@ Distinguish two validation tiers below:
 - **Floor-checked**: Pre-specified confirmation ruled out large calibration breakdown (e.g., exact 95% CI lower bound on empirical 95% coverage $\ge 90\%$, width attainment $\ge 80\%$); null Type I error is reported with its 95% CI rather than equivalence-tested tightly around 5% (e.g., at $N = 96\text{–}192$, exact 95% upper bounds on a 4–5% rate remain around 7–11%).
 - **Calibrated (high-$N$ Type I error gate)**: Pre-specified confirmation at $N = 512$ datasets per design with explicit formal gates on both coverage (exact 95% CI lower bound $\ge 92.5\%$) and strict null Type I error (exact 95% CI upper bound $\le 7.5\%$).
 
-All validation scripts, trial-level CSVs, and environment logs are archived in the public repository's [`validation/` directory](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation) (excluded from CRAN source tarballs to keep installs compact; 3AFC confirmation CSVs are also shipped inside `inst/validation/`).
+All validation scripts and trial-level CSVs are archived in the public repository's [`validation/` directory](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation) (excluded from CRAN source tarballs to keep installs compact; 3AFC confirmation CSVs are also shipped inside `inst/validation/`). Re-running any script via `sh validation/run-isolated.sh <script>` writes `environment.txt` and execution logs to an isolated temporary directory.
 
 | Design / Model Regime | Estimators Benchmarked | Validation Status | Empirical Basis & Caveats |
 |---|---|---|---|
