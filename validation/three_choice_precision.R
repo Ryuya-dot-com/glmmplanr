@@ -3,7 +3,8 @@ library(glmmplanr)
 source("tests/testthat/helper-stan.R")
 stopifnot(requireNamespace("posterior", quietly = TRUE), requireNamespace("rstan", quietly = TRUE))
 dgp <- three_choice_reference_dgp()
-spec <- specify_target(dgp, "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+spec <- specify_target(dgp, "exposure", engine = "bayes_laplace",
+                       control = target_control(on_singular = "flag_only"))
 designs <- data.frame(persons = c(32L, 48L, 72L, 48L), items = c(32L, 32L, 32L, 48L))
 schedules <- Map(generate_design_schedule, design = list(dgp$design),
                  n_subj = designs$persons, n_item = designs$items)

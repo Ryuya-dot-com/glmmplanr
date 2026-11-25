@@ -27,13 +27,18 @@ preset:
 \itemize{
 \item \code{"latin_square"} (default): Counterbalanced Latin square across crossed
 within-subject and within-item factors so each subject sees each item at
-most once and list multiplicity is enforced automatically.
-\item \code{"between_subj"}: All factors (unless overridden by \code{between_item}) are
-treated as between-subject groups completing a common set of items.
-\item \code{"between_item"}: All factors (unless overridden by \code{between_subj})
-partition items while subjects see all items.
-\item \code{"crossed"}: Full factorial within-subject and within-item repetition
-(every subject sees every item under every within-unit cell).
+most once and list multiplicity is enforced automatically. For mixed
+designs (some factors between-subject or between-item and others rotated
+across lists), keep \code{allocation = "latin_square"} and name the
+between-unit factors in \code{between_subj} and/or \code{between_item}.
+\item \code{"between_subj"}: Preset treating all factors (unless overridden by
+\code{between_item}) as between-subject groups completing a common item bank.
+\item \code{"between_item"}: Preset partitioning items across all factors (unless
+overridden by \code{between_subj}) while subjects see all items.
+\item \code{"crossed"}: Full factorial within-subject and within-item \strong{repetition}
+(every subject sees the same item repeatedly under every within-pair
+condition; use \code{"latin_square"} instead when each subject sees each item
+only once).
 \item \code{"testlet"}: Same as \code{"latin_square"} with passages/testlets grouping
 multiple items (requires \code{testlet_size >= 2}).
 }}

@@ -7,7 +7,8 @@ compare_allocation <- function(allocation, n_quad = 31L, subj_sd = .7, item_sd =
   design <- design_crossed(list(A = c("control", "treatment")), allocation = allocation)
   p <- c(.60, .68)
   g <- calibrate_dgp(design, p, chance = 0, subj_sd = subj_sd, item_sd = item_sd,
-                     slope_sd_ratio = 0, corr_structure = 0, n_quad = n_quad)
+                     slope_sd_ratio = 0, corr_structure = 0,
+                     control = calibrate_control(n_quad = n_quad))
   d <- generate_design_schedule(design, 32, 16)$trials
   stopifnot(all(table(d$subj_id, d$item_id) == 1L), all(table(d$cell_id) == 256L))
   levels_per_subj <- rowSums(table(d$subj_id, d$A) > 0L)

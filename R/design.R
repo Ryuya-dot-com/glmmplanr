@@ -11,13 +11,18 @@
 #'   preset:
 #'   * `"latin_square"` (default): Counterbalanced Latin square across crossed
 #'     within-subject and within-item factors so each subject sees each item at
-#'     most once and list multiplicity is enforced automatically.
-#'   * `"between_subj"`: All factors (unless overridden by `between_item`) are
-#'     treated as between-subject groups completing a common set of items.
-#'   * `"between_item"`: All factors (unless overridden by `between_subj`)
-#'     partition items while subjects see all items.
-#'   * `"crossed"`: Full factorial within-subject and within-item repetition
-#'     (every subject sees every item under every within-unit cell).
+#'     most once and list multiplicity is enforced automatically. For mixed
+#'     designs (some factors between-subject or between-item and others rotated
+#'     across lists), keep `allocation = "latin_square"` and name the
+#'     between-unit factors in `between_subj` and/or `between_item`.
+#'   * `"between_subj"`: Preset treating all factors (unless overridden by
+#'     `between_item`) as between-subject groups completing a common item bank.
+#'   * `"between_item"`: Preset partitioning items across all factors (unless
+#'     overridden by `between_subj`) while subjects see all items.
+#'   * `"crossed"`: Full factorial within-subject and within-item **repetition**
+#'     (every subject sees the same item repeatedly under every within-pair
+#'     condition; use `"latin_square"` instead when each subject sees each item
+#'     only once).
 #'   * `"testlet"`: Same as `"latin_square"` with passages/testlets grouping
 #'     multiple items (requires `testlet_size >= 2`).
 #' @param between_subj Optional character vector of factor names varied between
@@ -79,16 +84,20 @@ design_crossed <- function(
   if (!is.list(factors) ||
       (length(factors) && (is.null(names(factors)) || anyNA(names(factors)) ||
                           any(!nzchar(names(factors)))))) {
-    cli::cli_abort("{.arg factors} must be a named list of factor levels, or an empty list for an intercept-only design.")
+    cli::cli_abort(c(
+      "{.arg factors} must be a named list of factor levels, or an empty list for an intercept-only design.",
+      "i" = 'Example: {.code design_crossed(list(condition = c("control", "treatment")))}'
+    ))
   }
   factor_names <- as.character(names(factors))
   if (anyDuplicated(factor_names)) {
     cli::cli_abort("Factor names in {.arg factors} must be unique.")
   }
   if (any(factor_names %in% c("subj", "item", "testlet", "list_id", "cell_id", "y"))) {
-    cli::cli_abort(
-      "Factor names cannot use reserved column names ({.val subj}, {.val item}, {.val testlet}, {.val list_id}, {.val cell_id}, {.val y})."
-    )
+    cli::cli_abort(c(
+      "Factor names cannot use reserved column names ({.val subj}, {.val item}, {.val testlet}, {.val list_id}, {.val cell_id}, {.val y}).",
+      "i" = "Choose a descriptive condition name (e.g., {.val condition}, {.val task}, {.val group})."
+    ))
   }
   for (fn in factor_names) {
     lv <- as.character(factors[[fn]])
@@ -428,14 +437,20 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diag
   }
   if (strict) {
     if (n_subj %% design$k_subj != 0L) {
-      cli::cli_abort(
-        "{.arg n_subj} ({n_subj}) must be a multiple of list count {.val {design$k_subj}}."
-      )
+      lo_s <- max(design$k_subj, as.integer(floor(n_subj / design$k_subj)) * design$k_subj)
+      hi_s <- as.integer(ceiling(n_subj / design$k_subj)) * design$k_subj
+      cli::cli_abort(c(
+        "{.arg n_subj} ({n_subj}) must be a multiple of list count {.val {design$k_subj}}.",
+        "i" = "Nearest balanced values: {lo_s} or {hi_s}."
+      ))
     }
     if (n_item %% design$k_item != 0L) {
-      cli::cli_abort(
-        "{.arg n_item} ({n_item}) must be a multiple of item-list balance factor {.val {design$k_item}}."
-      )
+      lo_i <- max(design$k_item, as.integer(floor(n_item / design$k_item)) * design$k_item)
+      hi_i <- as.integer(ceiling(n_item / design$k_item)) * design$k_item
+      cli::cli_abort(c(
+        "{.arg n_item} ({n_item}) must be a multiple of item-list balance factor {.val {design$k_item}}.",
+        "i" = "Nearest balanced values: {lo_i} or {hi_i}."
+      ))
     }
   } else {
     n_subj <- as.integer(round(n_subj / design$k_subj) * design$k_subj)
@@ -678,10 +693,24 @@ print.glmmplanr_design <- function(x, ...) {
                          if (fn %in% x$between_item) "between" else "within"),
     character(1L)
   )
+  alloc_note <- if (length(x$factor_names) == 0L) {
+    "single cell; intercept-only"
+  } else if (x$trials_per_pair > 1L) {
+    sprintf("each participant sees each item repeatedly (%d times)", x$trials_per_pair)
+  } else if (length(x$ls_factors) > 0L) {
+    sprintf("each participant sees each item once; %d lists rotate within-pair conditions", x$n_ls_lists)
+  } else if (length(x$between_subj) > 0L && length(x$between_item) == 0L) {
+    "participants partitioned into groups; common item bank"
+  } else if (length(x$between_item) > 0L && length(x$between_subj) == 0L) {
+    "items partitioned into groups; participants see all items"
+  } else {
+    "participants and items partitioned by between-unit factors"
+  }
   cli::cli_ul(c(
     if (length(fac_desc)) "Factors ({length(x$factor_names)}): {paste(fac_desc, collapse = ' x ')}" else "Intercept-only design",
-    "Allocation: {.val {x$allocation}} ({x$n_cells} condition cells)",
-    "List-balance multiples: N_subj = {x$k_subj}k, N_item = {x$k_item}m",
+    "Allocation: {.val {x$allocation}} ({x$n_cells} cells; {alloc_note})",
+    "Cell names for {.arg cell_probs}: {.val {x$cells$cell_name}}",
+    "Balanced sample-size multiples: n_subj = {x$k_subj}k, n_item = {x$k_item}m",
     if (!is.null(x$items_per_subject)) "Items drawn per participant: {x$items_per_subject} (allocation seed {x$item_seed})",
     if (x$has_testlet) "Testlet nesting: {x$testlet_size} items per passage/testlet",
     "Factor coding: {.val {x$contrast}} | Trial missingness: {round(x$attrition * 100, 1)}% | Participant dropout: {round(dropout_rate(x) * 100, 1)}%",

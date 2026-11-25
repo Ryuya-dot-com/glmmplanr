@@ -1736,7 +1736,9 @@ Rcpp::List cpp_fit_crossed_glmm(
     Rcpp::Named("u_item") = return_ranef ? Rcpp::wrap(res.u_item) : R_NilValue,
     Rcpp::Named("u_testlet") = (return_ranef && ws.has_testlet) ? Rcpp::wrap(res.u_testlet) : R_NilValue,
     Rcpp::Named("logLik") = res.log_lik_laplace,
-    Rcpp::Named("singular") = res.singular,
+    Rcpp::Named("singular") = (regularized || fix_cov)
+      ? Rcpp::LogicalVector::create(NA_LOGICAL)
+      : Rcpp::LogicalVector::create(res.singular),
     Rcpp::Named("converged") = res.strictly_converged,
     Rcpp::Named("status") = res.status,
     Rcpp::Named("iterations") = res.outer_used,

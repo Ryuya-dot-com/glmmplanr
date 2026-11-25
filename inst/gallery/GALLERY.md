@@ -62,7 +62,6 @@ spec1 <- specify_target(
   dgp1,
   effect         = "exposure",
   scale          = "pp",
-  prob_estimand  = "marginal",
   criterion      = "both",
   power_min      = 0.80,
   ci_width       = 12.0,
@@ -78,9 +77,9 @@ res1 <- optimize_sample_size(
   prefer       = "balanced",
   method       = "grid",
   nsim_final   = 180,
-  nsim_topup   = 80,
   workers      = 4,
-  seed         = 810101
+  seed         = 810101,
+  control      = optimize_control(nsim_topup = 80L)
 )
 
 plot(res1, type = "contour", metric = "power")
@@ -132,7 +131,7 @@ check_dgp(dgp2, plot = FALSE)$cell_diagnostics
 
 # 3. Pre-registration validation under paired H0 (0 pp) and H1 (+12 pp)
 spec2 <- specify_target(
-  dgp2, effect = "arm", scale = "pp", prob_estimand = "marginal",
+  dgp2, effect = "arm", scale = "pp",
   criterion = "power", power_min = 0.80, prob_se_method = "joint_delta",
   engine = "bayes_laplace"
 )
@@ -169,14 +168,16 @@ des3 <- design_testlet(
 probs3 <- cell_probs_from_diffs(des3, baseline_prob = 0.66, effects_pp = c(glossing = 8))
 dgp3 <- calibrate_dgp(
   des3,
-  cell_probs             = probs3,
-  chance                 = 0.25,
-  subj_sd                = 0.75,
-  item_sd                = 0.50,
-  testlet_sd             = 0.45,
-  participant_testlet_sd = 0.30, # Reader-by-passage local dependence stress test
-  slope_sd_ratio         = 0.20,
-  corr_structure         = 0.10
+  cell_probs     = probs3,
+  chance         = 0.25,
+  subj_sd        = 0.75,
+  item_sd        = 0.50,
+  slope_sd_ratio = 0.20,
+  corr_structure = 0.10,
+  control        = calibrate_control(
+    testlet_sd             = 0.45,
+    participant_testlet_sd = 0.30 # Reader-by-passage local dependence stress test
+  )
 )
 
 # 2. Multi-scenario robustness across +6 pp, +8 pp (standard), and +10 pp
@@ -197,9 +198,9 @@ res3 <- optimize_sample_size(
   standard_scenario = "standard_8pp",
   method            = "grid",
   nsim_final        = 150,
-  nsim_topup        = 60,
   workers           = 4,
-  seed              = 830303
+  seed              = 830303,
+  control           = optimize_control(nsim_topup = 60L)
 )
 
 report_plan(res3)

@@ -14,8 +14,17 @@
 #'   (one per design cell), strictly inside `(chance, 1)`. Strongly recommended
 #'   to pass a named vector whose names match factor level combinations joined
 #'   by `"_"` or `":"` (e.g., `c(incidental_massed = 0.50, ...)`).
-#' @param chance Guessing probability (lower asymptote \eqn{g \in [0, 1)}, e.g.,
-#'   `0` for recall/production, `1/3` for 3AFC, `0.25` for 4AFC).
+#' @param chance Guessing probability (lower asymptote \eqn{g \in [0, 1)},
+#'   default `0`). Use `0` for an ordinary binary logit model -- including
+#'   recall, production, yes/no or old/new judgments (even though there are two
+#'   response options), and multiple-choice tasks analyzed with standard
+#'   `lme4::glmer(..., family = binomial())`. Set `chance = 1/m` (e.g., `1/3`
+#'   for 3AFC, `0.25` for 4AFC) only when you intend to model and analyze a
+#'   fixed lower guessing asymptote \eqn{g + (1 - g)\,\mathrm{logit}^{-1}(\eta)}.
+#' @param subj_sd Optional numeric scalar (intercept SD) or vector (intercept +
+#'   slope SDs) on the conditional logit scale for subjects.
+#' @param item_sd Optional numeric scalar (intercept SD) or vector (intercept +
+#'   slope SDs) on the conditional logit scale for items.
 #' @param subj_prob_range Optional numeric vector `c(low, high)` giving the 95%
 #'   subject accuracy range used to specify the intercept SD via its width on
 #'   the adjusted logit scale. Calibration sets the location from `cell_probs`,
@@ -23,37 +32,18 @@
 #' @param item_prob_range Optional numeric vector `c(low, high)` giving the 95%
 #'   item accuracy range used in the same way. Ignored if `item_sd` is
 #'   supplied directly.
-#' @param testlet_prob_range Optional numeric vector `c(low, high)` for passage
-#'   / testlet 95% accuracy range when `design$has_testlet` is `TRUE`.
-#' @param subj_sd Optional numeric scalar (intercept SD) or vector (intercept +
-#'   slope SDs) on the conditional logit scale for subjects.
-#' @param item_sd Optional numeric scalar (intercept SD) or vector (intercept +
-#'   slope SDs) on the conditional logit scale for items.
-#' @param participant_testlet_sd Conditional logit SD of an independent participant-by-
-#'   passage intercept in the generating model. Use positive values to stress-test
-#'   the planned passage-only analysis against residual local dependence. Default 0.
-#' @param testlet_sd Optional numeric scalar or vector of conditional logit SDs
-#'   for passages/testlets when `design$has_testlet` is `TRUE` (defaults to
-#'   `0.5 * item_intercept_sd` if neither `testlet_sd` nor `testlet_prob_range`
-#'   is supplied).
 #' @param slope_sd_ratio Numeric scalar or vector specifying the ratio of random
-#'   slope SDs to the corresponding random intercept SD (default `0.35`).
+#'   slope SDs to the corresponding random intercept SD (default `0`, i.e.,
+#'   random intercepts only unless you explicitly specify a positive ratio such
+#'   as `0.35` or pass full SD vectors in `subj_sd` / `item_sd`).
 #' @param corr_structure Correlation specification for random effects: a single
 #'   equicorrelation scalar \eqn{\rho} (default `0.20`), `"zero"` (uncorrelated
 #'   random effects), a correlation matrix, or a named list
 #'   `list(subj = ..., item = ...)`.
-#' @param n_quad Integer number of 1D Gauss-Hermite quadrature nodes (initially
-#'   `21L`). Because independent normal participant, item, and testlet random
-#'   effects sum to a single normal random variable in each cell, 1D quadrature
-#'   over the total cell SD is mathematically exact. The rule is refined up to
-#'   `256L` nodes when quadrature differs from adaptive normal integration by
-#'   more than `1e-10` (and aborts if the discrepancy still exceeds `1e-7` at
-#'   `256L` nodes). The result stores the effective `n_quad` and the
-#'   discrepancy in `solver_info`.
-#' @param check_nsim Integer number of Monte Carlo draws per cell used to build
-#'   the prior-predictive sanity-check summary (default `4000L`).
-#' @param seed Integer seed for the prior-predictive check. Use `NULL` to draw
-#'   a master seed from the caller's random stream.
+#' @param control Control list created by [calibrate_control()] holding optional
+#'   testlet variance arguments (`testlet_sd`, `testlet_prob_range`,
+#'   `participant_testlet_sd`) and numerical settings (`n_quad`, `check_nsim`,
+#'   `seed`).
 #'
 #' @return An S3 object of class `"glmmplanr_dgp"` containing the calibrated
 #'   conditional parameter vector `beta`, naive uncalibrated benchmarks,
@@ -89,29 +79,32 @@ calibrate_dgp <- function(
   design,
   cell_probs,
   chance = 0,
-  subj_prob_range = NULL,
-  item_prob_range = NULL,
-  testlet_prob_range = NULL,
   subj_sd = NULL,
   item_sd = NULL,
-  testlet_sd = NULL,
-  slope_sd_ratio = 0.35,
+  subj_prob_range = NULL,
+  item_prob_range = NULL,
+  slope_sd_ratio = 0,
   corr_structure = 0.20,
-  n_quad = 21L,
-  check_nsim = 4000L,
-  seed = 1L,
-  participant_testlet_sd = 0
+  control = calibrate_control()
 ) {
+  if (!inherits(control, "glmmplanr_calibrate_control")) {
+    cli::cli_abort("{.arg control} must be created by {.fn calibrate_control}.")
+  }
   if (uses_box_muller()) {
-    if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
+    if (is.null(control$seed)) control$seed <- sample.int(.Machine$integer.max, 1L)
     return(isolated_seeded_call("calibrate_dgp", environment(), match.call()))
   }
+  testlet_sd <- control$testlet_sd
+  testlet_prob_range <- control$testlet_prob_range
+  participant_testlet_sd <- control$participant_testlet_sd
+  n_quad <- control$n_quad
+  check_nsim <- control$check_nsim
+  seed <- control$seed
+
   if (!inherits(design, "glmmplanr_design")) {
     cli::cli_abort("{.arg design} must be a {.cls glmmplanr_design} object.")
   }
-  if (!is.numeric(participant_testlet_sd) || length(participant_testlet_sd) != 1L ||
-      !is.finite(participant_testlet_sd) || participant_testlet_sd < 0 ||
-      (participant_testlet_sd > 0 && !design$has_testlet)) {
+  if (participant_testlet_sd > 0 && !design$has_testlet) {
     cli::cli_abort("{.arg participant_testlet_sd} must be nonnegative and requires a testlet design when positive.")
   }
   validate_chance(chance)
@@ -338,9 +331,19 @@ align_cell_probs <- function(design, cell_probs, chance) {
     )
   }
   if (any(cell_probs <= chance) || any(cell_probs >= 1)) {
-    cli::cli_abort(
+    hints <- c(
       "All {.arg cell_probs} must strictly exceed {.arg chance} ({round(chance, 4)}) and be < 1."
     )
+    if (any(cell_probs > 1)) {
+      hints <- c(hints, "i" = "Enter probabilities on the 0-1 scale (e.g., {.code 0.60} for 60%), not percentages.")
+    }
+    if (chance > 0 && any(cell_probs <= chance)) {
+      hints <- c(
+        hints,
+        "i" = "With {.arg chance} = {round(chance, 4)}, every expected cell probability must exceed the guessing floor. For yes/no judgments or multiple-choice tasks analyzed with standard {.code lme4::glmer(..., family = binomial())}, set {.code chance = 0}."
+      )
+    }
+    cli::cli_abort(hints)
   }
 
   canonical <- design$cells$cell_name
@@ -779,7 +782,8 @@ draw_dgp_trials <- function(dgp, schedule, keep_person_item_effects = FALSE) {
 #' @return A named list of `"glmmplanr_dgp"` objects.
 #' @examples
 #' des <- design_crossed(list(condition = c("a", "b")))
-#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4,
+#'                      slope_sd_ratio = 0.35)
 #' models <- sensitivity_dgps(dgp)
 #' vapply(models, function(x) unname(x$tau_subj[2L]), numeric(1))
 #' @export
@@ -808,11 +812,13 @@ sensitivity_dgps <- function(
       chance = dgp$chance,
       subj_sd = s_sd,
       item_sd = i_sd,
-      testlet_sd = t_sd,
-      participant_testlet_sd = testlet_interaction_sd(dgp),
       corr_structure = dgp$corr_structure,
-      n_quad = dgp$n_quad,
-      check_nsim = 1000L
+      control = calibrate_control(
+        testlet_sd = t_sd,
+        participant_testlet_sd = testlet_interaction_sd(dgp),
+        n_quad = dgp$n_quad,
+        check_nsim = 1000L
+      )
     )
   })
 }
@@ -821,10 +827,29 @@ sensitivity_dgps <- function(
 #' @export
 print.glmmplanr_dgp <- function(x, ...) {
   cli::cli_h2("glmmplanr Calibrated Data-Generating Process (DGP)")
+  link_line <- if (x$chance == 0) {
+    "Response link: ordinary binary logit (chance = 0)"
+  } else {
+    sprintf("Response link: guessing-adjusted logit (chance = %s)", round(x$chance, 4))
+  }
+  mu_mid <- mean(x$mu_cells)
+  s_span <- sd_to_prob_range(x$tau_subj[1L], intercept = mu_mid, chance = x$chance)
+  i_span <- sd_to_prob_range(x$tau_item[1L], intercept = mu_mid, chance = x$chance)
+  has_within_factors <- length(x$design$factor_names) > 0L &&
+    (ncol(x$design$Z_subj_cells) > 1L || ncol(x$design$Z_item_cells) > 1L)
+  no_slopes <- (length(x$tau_subj) <= 1L || all(abs(x$tau_subj[-1L]) < 1e-12)) &&
+    (length(x$tau_item) <= 1L || all(abs(x$tau_item[-1L]) < 1e-12))
   cli::cli_ul(c(
-    "Chance asymptote (m-AFC): g = {round(x$chance, 4)}",
+    link_line,
     "Subject RE SDs: {paste(sprintf('%s=%.3f', names(x$tau_subj), x$tau_subj), collapse = ', ')}",
     "Item RE SDs: {paste(sprintf('%s=%.3f', names(x$tau_item), x$tau_item), collapse = ', ')}",
+    sprintf(
+      "Implied 95%% accuracy spans (at mean cell): participants = [%.0f%%, %.0f%%], items = [%.0f%%, %.0f%%]",
+      100 * s_span[1L], 100 * s_span[2L], 100 * i_span[1L], 100 * i_span[2L]
+    ),
+    if (has_within_factors && no_slopes) {
+      "Random-slope assumption: 0 (assumes identical condition effects across all participants and items; set slope_sd_ratio = 0.25-0.35 to allow heterogeneity)"
+    },
     if (x$design$has_testlet) {
       "Testlet RE SDs: {paste(sprintf('%s=%.3f', names(x$tau_testlet), x$tau_testlet), collapse = ', ')}"
     },

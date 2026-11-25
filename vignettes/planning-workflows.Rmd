@@ -152,28 +152,49 @@ design <- design_crossed(
   allocation = "latin_square",
   contrast = "sum"
 )
-design$cells[c("cell_name", "study_method")]
+design
 ```
 
-`study_method` is the factor name; `restudy` and `retrieval` are its levels,
-with the reference condition first. The printed `cell_name` column gives the
-exact names to use in `cell_probs`. With two factors, supply all four cell
-probabilities (shown in the `2 x 2` interaction example below).
+Printing `design` immediately verifies four things before you simulate: which
+factors are within- vs. between-unit, how items are presented, the exact
+`cell_probs` names (`"restudy"`, `"retrieval"`), and the balanced sample-size
+multiples (`n_subj = 2k, n_item = 2m`).
 
-Choose `allocation` from the actual presentation schedule of your planned study:
+If you are adapting `design_crossed()` to your own study, answer three quick
+questions:
 
-| Planned presentation | `allocation` |
+1. **How are conditions assigned (`allocation`, `between_subj`, `between_item`)?**
+
+| Planned presentation | Arguments to use |
 |---|---|
-| Each participant sees both conditions, but each participant-item pair occurs once; lists rotate conditions across items | `"latin_square"` |
-| Each participant belongs to one condition; groups receive a common item bank | `"between_subj"` |
-| Items belong to different conditions; participants see items from each condition | `"between_item"` |
-| Each participant sees each item repeatedly under every condition | `"crossed"` |
+| Each participant sees both conditions, but each participant-item pair occurs **once**; lists rotate conditions across items | `allocation = "latin_square"` (default) |
+| Each participant belongs to one group; all groups see a common item bank | `allocation = "between_subj"` |
+| Each item belongs to one condition; participants see items from every condition | `allocation = "between_item"` |
+| Each participant sees the **same item repeatedly** under every condition | `allocation = "crossed"` |
+| **Mixed design** (e.g., `rounds` between learners, `study_method` rotated within learners and words) | Keep `allocation = "latin_square"` and pass `between_subj = "rounds"` (and/or `between_item = ...`) |
 
-For mixed designs -- such as Huang et al.'s (2025) full `study_method x rounds`
-experiment where `rounds` varies between learners while `study_method` rotates
-within learners and items -- specify `between_subj` and/or `between_item`
-explicitly. A crossed GLMM formula alone does not tell you which allocation was
-used.
+Watch out for a common naming trap: **`allocation = "crossed"` means repeated
+presentation of the same item to the same participant across conditions.** If
+participants and items are crossed random effects but each participant sees
+each word only once, use `"latin_square"`, not `"crossed"`.
+
+2. **Which `contrast` should I pick?** Use the default `contrast = "sum"`
+(`-0.5, +0.5`) when planning a new experiment from condition means so main
+effects represent averages across levels. Switch to `contrast = "treatment"`
+only when reproducing a published `lme4::glmer()` table that used `0 / 1`
+coding (see [Route B](#from-coefficients)).
+
+3. **How should `factors` be formatted?** Pass a **named list** with the
+reference condition first (avoiding reserved names `subj`, `item`, `testlet`,
+and `y`). Designs are not limited to `2 x 2`: you can pass `list()` (single
+cell / Rasch), one factor with 3+ levels (`1 x 3`), `2 x 3`, or `2 x 2 x 2`
+(note that `specify_target()` evaluates one 1-df contrast column at a time,
+and complex higher-order designs remain exploratory). Counterbalancing via
+`"latin_square"` rotates conditions across lists assuming zero list/order
+effects; for multiple stimulus sets, use `between_item` (fixed item-group
+factors), `design_testlet()` (passage nesting), or `items_per_subject`
+(random subset presentation). A crossed GLMM formula alone does not determine
+`allocation`.
 
 ### 2. Enter the means and random-effect SD assumptions
 
@@ -183,8 +204,7 @@ model <- calibrate_dgp(
   cell_probs = c(restudy = .42, retrieval = .50),  # Huang et al. (2025), Table 3 (3-round RSC/RTC)
   chance = 0,          # cued recall has no multiple-choice guessing floor
   subj_sd = .8,        # assumed participant random-intercept SD (logits), NOT 0.26
-  item_sd = .6,        # assumed item random-intercept SD (logits)
-  slope_sd_ratio = 0   # match the paper's intercept-only random structure initially
+  item_sd = .6         # assumed item random-intercept SD (logits); default slope_sd_ratio = 0
 )
 check_dgp(model, plot = FALSE)$cell_diagnostics[c("cell", "target_prob", "quad_prob")]
 ```
@@ -197,11 +217,31 @@ GLMM coefficients live in `coef(model)`. The `study_method` coefficient accounts
 for averaging over the assumed random effects; it generally differs from the
 naive contrast `qlogis(0.50) - qlogis(0.42)`.
 
-Because Huang et al. (2025) used **cued recall**, we set `chance = 0` (an
-ordinary binary-logit model). If your follow-up study switches to a
-three-choice vocabulary recognition test and you wish to model a lower guessing
-asymptote, set `chance = 1 / 3` instead; every `cell_probs` entry must then lie
-strictly between `chance` and `1`.
+Because Huang et al. (2025) used **cued recall**, we set `chance = 0`. Use the
+table below to choose `chance` for your own task -- the key rule is to **match
+the link function you will use in your final analysis**:
+
+| Task and planned analysis | `chance` | Why |
+|---|---|---|
+| Cued recall, production, or dictation (`1 = correct`, `0 = incorrect`) | `0` | No fixed multiple-choice guessing floor. |
+| Yes/No, Old/New recognition, or grammaticality judgment (2 buttons) | `0` (**not** `0.5`) | Response bias can push accuracy or endorsement below `0.5`; a `0.5` lower asymptote is invalid. |
+| 3-choice or 4-choice test analyzed with standard `lme4::glmer(..., family = binomial())` | `0` | Standard logistic regression has no guessing asymptote; keep `chance = 0` so planning matches the analysis. |
+| 3-choice or 4-choice test modeled and analyzed with a guessing lower asymptote (`family(target)`) | `1 / 3` or `0.25` | Models $P = g + (1 - g)\,\mathrm{logit}^{-1}(\eta)$; enter `1/m` (not `m`), and ensure every `cell_probs` and `*_prob_range` value strictly exceeds `chance`. |
+
+For example, if you adapted this two-condition design to a **three-choice
+vocabulary recognition test** expecting `60%` vs. `70%` correct and planned to
+fit the guessing-adjusted link `family(target_3afc)`, only `cell_probs` and
+`chance` change:
+
+```{r three-choice-example}
+model_3afc <- calibrate_dgp(
+  design = design,
+  cell_probs = c(restudy = .60, retrieval = .70),
+  chance = 1 / 3,
+  subj_sd = .8, item_sd = .6, slope_sd_ratio = 0
+)
+check_dgp(model_3afc, plot = FALSE)$cell_diagnostics[c("cell", "target_prob", "quad_prob")]
+```
 
 ### 3. Name the effect and choose the planning goal
 
@@ -215,24 +255,27 @@ target <- specify_target(
   effect = "study_method",          # factor name, not 8 or a logit coefficient
   scale = "pp",                     # percentage-point difference
   criterion = "power", power_min = .80, alpha = .05,
-  engine = "bayes_laplace",
-  analysis_re = "intercept_only",   # fitted model, matching Huang et al.'s structure
-  prob_se_method = "joint_delta"
+  prob_se_method = "joint_delta"    # default engine = "bayes_laplace", analysis_re = "match_dgp"
 )
 ```
 
 We set `scale = "pp"` explicitly because the default scale is a conditional
 logit coefficient (`"logit"`). `scale` selects the estimand whose detection or
 interval width is evaluated; **it does not change the format of `cell_probs`**.
-For a precision (AIPE) goal instead, use `criterion = "ci_width", ci_width = 10,
-ci_assurance = .80` on the `"pp"` scale: a full 95% interval no wider than 10
-percentage points in at least 80% of simulated studies. `alpha = .05` controls
-the 95% interval; `power_min = .80` controls power.
+For a precision (AIPE) goal instead, use `criterion = "ci_width", ci_width = 10`
+(and optionally `control = target_control(ci_assurance = .80)`) on the `"pp"`
+scale: a full 95% interval no wider than 10 percentage points in at least 80%
+of simulated studies. `alpha = .05` controls the 95% interval; `power_min = .80`
+controls power.
 
-The engine also matters. `bayes_laplace` regularizes coefficients and
-random-effect SDs; if your
-final analysis will use unpenalized `lme4::glmer()`, plan or confirm with
-`engine = "lme4"` so planning and analysis estimators match exactly.
+The default `engine = "bayes_laplace"` is built in (always available for both
+`chance = 0` and `chance > 0`), and `analysis_re = "match_dgp"` automatically
+matches `model`'s random-effects structure (`"intercept_only"` here). If your
+final analysis will use unpenalized `lme4::glmer()` or `glmmTMB`, specify
+`engine = "lme4"` or `engine = "glmmTMB"` explicitly (optional engines abort
+rather than silently falling back if unavailable or incompatible with
+`chance > 0`). Advanced settings for all three stages live in
+`calibrate_control()`, `target_control()`, and `optimize_control()`.
 
 ### If your sample size is already fixed (e.g., 54 learners x 30 words)
 
@@ -267,16 +310,18 @@ learners per list; `n_item_range` contains distinct words in the stimulus bank
 the number of simulated studies per candidate, not the number of participants.
 
 ```{r plan}
-plan <- optimize_sample_size(target,
-                             n_subj_range = c(24, 40, 54), n_item_range = c(16, 30, 44),
-                             method = "grid", nsim_init = 16L, nsim_final = 16L,
-                             nsim_topup = 0L, nsim_sensitivity = 0L,
-                             workers = 1L, seed = 417L, verbose = FALSE)
+plan <- optimize_sample_size(
+  target,
+  n_subj_range = c(24, 40, 54), n_item_range = c(16, 30, 44),
+  method = "grid", nsim_final = 16L,
+  workers = 1L, seed = 417L, verbose = FALSE,
+  control = optimize_control(nsim_init = 16L, nsim_topup = 0L, nsim_sensitivity = 0L)
+)
 as.data.frame(plan)[c("n_subj", "n_item", "nsim", "n_valid", "power",
                       "power_mc_lo", "power_mc_hi", "decision_status")]
 ```
 
-Under the default failure policy (`failure_policy = "effective"`), non-converged
+Under the default failure policy (`target_control(failure_policy = "effective")`), non-converged
 or separated fits count as missed detections:
 
 - `pass`: the lower Monte Carlo bound (`power_mc_lo`) reaches `.80`.
@@ -604,9 +649,9 @@ formula(va_target)
 va_plan <- optimize_sample_size(
   va_target,
   n_subj_range = c(24, 48, 72), n_item_range = c(16, 24, 48),
-  method = "grid", nsim_init = 16L, nsim_final = 16L,
-  nsim_topup = 0L, nsim_sensitivity = 0L,
-  workers = 1L, seed = 9101L, verbose = FALSE
+  method = "grid", nsim_final = 16L,
+  workers = 1L, seed = 9101L, verbose = FALSE,
+  control = optimize_control(nsim_init = 16L, nsim_topup = 0L, nsim_sensitivity = 0L)
 )
 as.data.frame(va_plan)[c("n_subj", "n_item", "nsim", "n_valid", "power",
                          "power_mc_lo", "power_mc_hi", "decision_status")]
@@ -681,11 +726,11 @@ formula(slope_target)
 
 The returned formula includes `(study_method | subj)` and
 `(study_method | item)`. Supplying full SD vectors overrides `slope_sd_ratio`.
-If you give only scalar SDs and omit `slope_sd_ratio`, the default generates
-eligible slope SDs at **0.35 times the intercept SD**; omitting
-`slope_sd_ratio` does **not** mean intercepts only. With multiple factors,
-inspect `Z_subj_cells` and `Z_item_cells` again because interaction slopes may
-also be eligible.
+By default `slope_sd_ratio = 0`, so passing scalar SDs generates **random
+intercepts only** unless you explicitly set a positive `slope_sd_ratio` (such
+as `0.35`) or supply full SD vectors. With multiple factors, inspect
+`Z_subj_cells` and `Z_item_cells` again because interaction slopes may also be
+eligible.
 
 Keep two separate choices aligned:
 
@@ -693,9 +738,10 @@ Keep two separate choices aligned:
   `slope_sd_ratio`, and `corr_structure` define the variation assumed to exist
   in the population.
 - **Analysis (`specify_target`)**: `analysis_re` selects what each simulated
-  study fits -- `"intercept_only"`, `"maximal"` (all eligible within-unit
-  slopes with correlations), or `"uncorrelated"` (eligible slopes with zero
-  correlations). Setting `analysis_re = "intercept_only"` alone does not remove
+  study fits -- `"match_dgp"` (default; fits `"intercept_only"` when the DGP
+  has no random slopes, `"uncorrelated"` when slope correlations are zero, and
+  `"maximal"` otherwise), or explicitly `"intercept_only"`, `"uncorrelated"`,
+  or `"maximal"`. Setting `analysis_re = "intercept_only"` alone does not remove
   random slopes from the data-generating model.
 
 `glmmplanr` determines eligible slopes automatically from `allocation` (for

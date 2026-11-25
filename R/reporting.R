@@ -22,7 +22,7 @@ as_gt <- function(x, ...) {
   UseMethod("as_gt")
 }
 
-assess_inferential_validity <- function(cov, n_valid, alpha) {
+assess_inferential_validity <- function(cov, n_valid, alpha, has_null = TRUE) {
   nominal <- 1.0 - alpha
   if (is.null(cov) || is.null(n_valid) || length(cov) == 0L || length(n_valid) == 0L ||
       !is.finite(cov[1L]) || !is.finite(n_valid[1L]) || n_valid[1L] < 1L) {
@@ -44,19 +44,21 @@ assess_inferential_validity <- function(cov, n_valid, alpha) {
       status = "caution_low_coverage",
       short_label = "Caution: Low Cov.",
       detail = sprintf(
-        "CAUTION (Stage-2 H1 coverage %.1f%% [%.1f%%, %.1f%%] is below nominal %.0f%%; SEs may be anti-conservative; verify with validate_design_point())",
+        "CAUTION (Stage-2 coverage %.1f%% [%.1f%%, %.1f%%] is below nominal %.0f%%; SEs may be anti-conservative; verify with validate_design_point())",
         100 * cov1, 100 * cov_lo, 100 * cov_hi, 100 * nominal
       ),
       cov = cov1, cov_lo = cov_lo, cov_hi = cov_hi, nominal = nominal
     ))
   }
+  null_note <- if (isTRUE(has_null)) {
+    "Stage-2 H1 coverage = %.1f%% [%.1f%%, %.1f%%]; null Type I error not checked; confirm with validate_design_point()"
+  } else {
+    "Stage-2 coverage = %.1f%% [%.1f%%, %.1f%%]; confirm planned-condition coverage and width attainment on a fresh seed with validate_design_point()"
+  }
   list(
     status = "unverified",
     short_label = "Unverified",
-    detail = sprintf(
-      "UNVERIFIED (Stage-2 H1 coverage = %.1f%% [%.1f%%, %.1f%%]; null Type I error not checked; confirm with validate_design_point())",
-      100 * cov1, 100 * cov_lo, 100 * cov_hi
-    ),
+    detail = sprintf(paste0("UNVERIFIED (", null_note, ")"), 100 * cov1, 100 * cov_lo, 100 * cov_hi),
     cov = cov1, cov_lo = cov_lo, cov_hi = cov_hi, nominal = nominal
   )
 }
@@ -65,6 +67,117 @@ inferential_validity_labels <- function(cov_vec, n_valid_vec, alpha) {
   vapply(seq_along(cov_vec), function(i) {
     assess_inferential_validity(cov_vec[i], n_valid_vec[i], alpha)$short_label
   }, character(1L))
+}
+
+detect_exploratory_regimes <- function(spec) {
+  dgp <- spec$dgp
+  des <- dgp$design
+  reasons <- character()
+  has_slopes <- (!identical(spec$analysis_re, "intercept_only")) ||
+    (length(dgp$tau_subj) > 1L && any(abs(dgp$tau_subj[-1L]) > 1e-12)) ||
+    (length(dgp$tau_item) > 1L && any(abs(dgp$tau_item[-1L]) > 1e-12))
+  if (!is.null(des$items_per_subject)) {
+    if (has_slopes) {
+      reasons <- c(
+        reasons,
+        sprintf("partial item presentation (items_per_subject = %d) with random slopes", des$items_per_subject)
+      )
+    } else {
+      reasons <- c(
+        reasons,
+        sprintf("partial item presentation (items_per_subject = %d)", des$items_per_subject)
+      )
+    }
+  }
+  if (isTRUE(des$has_testlet)) {
+    pt_sd <- testlet_interaction_sd(dgp)
+    if (pt_sd > 0) {
+      reasons <- c(
+        reasons,
+        sprintf("testlet nesting with participant-by-passage local dependence (SD = %.2f; can inflate Type I error)", pt_sd)
+      )
+    } else {
+      reasons <- c(
+        reasons,
+        "passage/testlet nesting (design_testlet; small passage counts can inflate asymptotic Wald Type I error)"
+      )
+    }
+  }
+  n_colons <- lengths(regmatches(spec$effect_col, gregexpr(":", spec$effect_col, fixed = TRUE)))
+  if (isTRUE(n_colons >= 2L)) {
+    reasons <- c(reasons, sprintf("higher-order interaction (%s)", spec$effect_input))
+  }
+  reasons
+}
+
+assess_boundary_sensitivity <- function(x) {
+  if (!isTRUE(x$feasible) || is.null(x$optimal) || nrow(x$optimal) == 0L) {
+    return(NULL)
+  }
+  opt <- x$optimal[1L, , drop = FALSE]
+  if (!identical(opt$decision_status, "pass")) return(NULL)
+  sp <- x$spec
+  if (!is.null(x$robust$specs) && !is.null(opt$scenario) &&
+      (opt$scenario %in% names(x$robust$specs))) {
+    sp <- x$robust$specs[[opt$scenario]]
+  }
+  margin_of_row <- function(r) {
+    switch(
+      sp$criterion,
+      power = r$power_mc_lo - sp$power_min,
+      ci_width = r$aipe_mc_lo - sp$ci_assurance,
+      both = pmin(r$power_mc_lo - sp$power_min, r$aipe_mc_lo - sp$ci_assurance),
+      joint = r$joint_mc_lo - sp$power_min,
+      rope = r$rope_mc_lo - sp$power_min
+    )
+  }
+  opt_margin <- margin_of_row(opt)
+  if (!is.finite(opt_margin)) return(NULL)
+
+  ver <- x$verified
+  indet_comp <- if (!is.null(ver) && nrow(ver) > 0L) {
+    ver[
+      ver$decision_status == "indeterminate" &
+        ver$n_trials_scheduled >= 0.75 * opt$n_trials_scheduled &
+        ver$n_trials_scheduled <= 1.50 * opt$n_trials_scheduled,
+      ,
+      drop = FALSE
+    ]
+  } else {
+    NULL
+  }
+  n_indet <- if (is.null(indet_comp)) 0L else nrow(indet_comp)
+
+  near_boundary <- (opt_margin < 0.05) ||
+    (!is.null(ver) && any(ver$decision_status == "indeterminate" &
+                          ver$n_trials_scheduled >= opt$n_trials_scheduled))
+  if (!near_boundary) return(NULL)
+
+  buffer_row <- NULL
+  if (!is.null(ver) && nrow(ver) > 0L) {
+    pass_more <- ver[
+      ver$decision_status == "pass" &
+        ver$n_trials_scheduled > opt$n_trials_scheduled,
+      ,
+      drop = FALSE
+    ]
+    if (nrow(pass_more) > 0L) {
+      m_more <- margin_of_row(pass_more)
+      better <- which(is.finite(m_more) & m_more > opt_margin + 0.01)
+      if (length(better) > 0L) {
+        sub_b <- pass_more[better, , drop = FALSE]
+        ord <- order(sub_b$n_trials_scheduled, sub_b$preference_score)
+        buffer_row <- sub_b[ord[1L], , drop = FALSE]
+        buffer_row$mc_margin <- margin_of_row(buffer_row)
+      }
+    }
+  }
+
+  list(
+    opt_margin = opt_margin,
+    n_indeterminate_nearby = n_indet,
+    buffer = buffer_row
+  )
 }
 
 #' @rdname as_gt
@@ -275,11 +388,27 @@ as_gt.glmmplanr_result <- function(
       )
   }
 
+  sing_note <- if (any(is.na(tbl_df$singular_rate))) {
+    " Boundary singularity ('Singular') is not applicable ('-') under regularized/Bayesian estimation."
+  } else {
+    ""
+  }
+  exp_regimes <- detect_exploratory_regimes(x$spec)
+  exp_note <- if (length(exp_regimes) > 0L) {
+    sprintf(
+      " Exploratory regime (%s): nominal coverage and null Type I error are not pre-benchmarked across schedules; confirm at the chosen design via validate_design_point().",
+      paste(exp_regimes, collapse = "; ")
+    )
+  } else {
+    ""
+  }
   gt_obj |>
     gt::tab_source_note(
       source_note = sprintf(
-        "Target Status uses %.0f%% Wilson intervals (Morris et al., 2019) for power/width/ROPE targets only: PASS (MC lower >= target), INDETERMINATE (straddles target), FAIL (MC upper < target). Target PASS does not confirm interval coverage or null Type I error; verify inferential validity with validate_design_point(). Seed = %d.",
+        "Target Status uses %.0f%% Wilson intervals (Morris et al., 2019) for power/width/ROPE targets only: PASS (MC lower >= target), INDETERMINATE (straddles target), FAIL (MC upper < target). Target PASS does not confirm interval coverage or null Type I error; verify inferential validity with validate_design_point().%s%s Seed = %d.",
         x$spec$mc_conf_level * 100,
+        sing_note,
+        exp_note,
         x$search_meta$seed
       )
     )
@@ -357,6 +486,28 @@ plot.glmmplanr_result <- function(
   plot_pareto_curve(x)
 }
 
+axis_tile_bounds <- function(vals) {
+  u <- sort(unique(vals))
+  n <- length(u)
+  if (n == 1L) {
+    lo <- u - 0.5
+    hi <- u + 0.5
+  } else {
+    mids <- 0.5 * (u[-n] + u[-1L])
+    lo <- c(u[1L] - 0.5 * (u[2L] - u[1L]), mids)
+    hi <- c(mids, u[n] + 0.5 * (u[n] - u[n - 1L]))
+  }
+  idx <- match(vals, u)
+  list(lo = lo[idx], hi = hi[idx], breaks = u, range = c(lo[1L], hi[n]))
+}
+
+is_regular_grid_axis <- function(vals) {
+  u <- sort(unique(vals))
+  if (length(u) <= 2L) return(TRUE)
+  d <- diff(u)
+  max(abs(d - d[1L])) <= 1e-8 * max(1.0, abs(d[1L]))
+}
+
 plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
   surf <- x$surface
   opt <- x$optimal
@@ -376,11 +527,51 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
     prob_ci_width_pp = "CI\n(pp)"
   )
 
-  p <- ggplot2::ggplot(
-    surf,
-    ggplot2::aes(x = .data$n_subj, y = .data$n_item)
-  ) +
-    ggplot2::geom_raster(ggplot2::aes(fill = .data[[fill_col]]), interpolate = TRUE, alpha = 0.88)
+  ux <- sort(unique(surf$n_subj))
+  uy <- sort(unique(surf$n_item))
+  regular_xy <- is_regular_grid_axis(surf$n_subj) && is_regular_grid_axis(surf$n_item)
+  use_tiles <- (!regular_xy) || (length(ux) * length(uy) <= 36L)
+
+  if (use_tiles) {
+    bx <- axis_tile_bounds(surf$n_subj)
+    by <- axis_tile_bounds(surf$n_item)
+    surf$xmin <- bx$lo
+    surf$xmax <- bx$hi
+    surf$ymin <- by$lo
+    surf$ymax <- by$hi
+    p <- ggplot2::ggplot(
+      surf,
+      ggplot2::aes(x = .data$n_subj, y = .data$n_item)
+    ) +
+      ggplot2::geom_rect(
+        ggplot2::aes(
+          xmin = .data$xmin,
+          xmax = .data$xmax,
+          ymin = .data$ymin,
+          ymax = .data$ymax,
+          fill = .data[[fill_col]]
+        ),
+        color = "white",
+        linewidth = 0.35,
+        alpha = 0.88
+      )
+    x_lim <- bx$range
+    y_lim <- by$range
+    coord_expand <- FALSE
+  } else {
+    p <- ggplot2::ggplot(
+      surf,
+      ggplot2::aes(x = .data$n_subj, y = .data$n_item)
+    ) +
+      ggplot2::geom_raster(
+        ggplot2::aes(fill = .data[[fill_col]]),
+        interpolate = TRUE,
+        alpha = 0.88
+      )
+    x_lim <- range(surf$n_subj)
+    y_lim <- range(surf$n_item)
+    coord_expand <- TRUE
+  }
 
   if (metric == "power") {
     p <- p + ggplot2::scale_fill_viridis_c(
@@ -491,9 +682,9 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
       color = "white"
     ) +
     ggplot2::coord_cartesian(
-      xlim = range(surf$n_subj),
-      ylim = range(surf$n_item),
-      expand = TRUE,
+      xlim = x_lim,
+      ylim = y_lim,
+      expand = coord_expand,
       clip = "off"
     ) +
     ggplot2::labs(
@@ -524,6 +715,13 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
       plot.title = ggplot2::element_text(face = "bold"),
       plot.caption = ggplot2::element_text(hjust = 0, size = 8.5, color = "#4b5563")
     )
+
+  if (length(ux) <= 10L) {
+    p <- p + ggplot2::scale_x_continuous(breaks = ux)
+  }
+  if (length(uy) <= 10L) {
+    p <- p + ggplot2::scale_y_continuous(breaks = uy)
+  }
 
   p
 }
@@ -779,12 +977,14 @@ report_plan <- function(x, print_output = TRUE) {
       100 * x$search_meta$topup_mc_conf_level
     ))
   }
+  has_null <- can_define_null_target(sp)
   cov_val <- if (sp$scale == "logit") opt$coverage else opt$prob_coverage
-  val_info <- assess_inferential_validity(cov_val, opt$n_valid, sp$alpha)
+  val_info <- assess_inferential_validity(cov_val, opt$n_valid, sp$alpha, has_null = has_null)
   if (identical(val_info$status, "caution_low_coverage")) {
     details <- c(details, sprintf(
-      "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity. Caution: Stage-2 empirical H1 coverage was %.1f%% (95%% Wilson CI %.1f%% to %.1f%%), below the nominal %.0f%% level; narrow intervals or high detection may reflect underestimated standard errors. Confirm interval coverage and null Type I error in independent simulations with validate_design_point() or an external estimator.",
-      100 * val_info$cov, 100 * val_info$cov_lo, 100 * val_info$cov_hi, 100 * val_info$nominal
+      "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity. Caution: Stage-2 empirical coverage was %.1f%% (95%% Wilson CI %.1f%% to %.1f%%), below the nominal %.0f%% level; narrow intervals or high detection may reflect underestimated standard errors. Confirm interval coverage%s in independent simulations with validate_design_point() or an external estimator.",
+      100 * val_info$cov, 100 * val_info$cov_lo, 100 * val_info$cov_hi, 100 * val_info$nominal,
+      if (has_null) " and null Type I error" else ""
     ))
   } else {
     cov_summary <- if (is.finite(val_info$cov)) {
@@ -792,10 +992,17 @@ report_plan <- function(x, print_output = TRUE) {
     } else {
       "NA"
     }
-    details <- c(details, sprintf(
-      "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity (Stage-2 H1 coverage was %s; null Type I error was not evaluated). Confirm interval coverage and Type I error in independent simulations at the selected design with validate_design_point().",
-      cov_summary
-    ))
+    if (has_null) {
+      details <- c(details, sprintf(
+        "Target attainment status reflects only the specified power/precision targets and does not verify inferential validity (Stage-2 H1 coverage was %s; null Type I error was not evaluated). Confirm interval coverage and Type I error in independent simulations at the selected design with validate_design_point().",
+        cov_summary
+      ))
+    } else {
+      details <- c(details, sprintf(
+        "Target attainment status reflects only the specified precision target and does not verify inferential validity (Stage-2 coverage was %s; no zero-difference null applies to an absolute probability target). Confirm interval coverage and width attainment in independent simulations at the selected design with validate_design_point().",
+        cov_summary
+      ))
+    }
   }
   if (!is.null(des$items_per_subject)) {
     details <- c(details, sprintf(
@@ -811,6 +1018,36 @@ report_plan <- function(x, print_output = TRUE) {
     details <- c(details, sprintf(
       "%d passages with %d items each. The generating participant-by-passage SD is %.2f logit; the analysis uses a shared passage effect.",
       opt$n_item %/% des$testlet_size, des$testlet_size, testlet_interaction_sd(dgp)))
+  }
+  exp_regimes <- detect_exploratory_regimes(sp)
+  if (length(exp_regimes) > 0L) {
+    details <- c(details, sprintf(
+      "Scope note: This plan uses an exploratory design regime (%s) outside the package's pre-benchmarked complete-presentation regimes; confirm empirical interval coverage%s at the planned sample size via validate_design_point() (and an external estimator when feasible) before pre-registration.",
+      paste(exp_regimes, collapse = "; "),
+      if (has_null) " and null Type I error" else ""
+    ))
+  }
+  bnd_info <- assess_boundary_sensitivity(x)
+  if (!is.null(bnd_info)) {
+    ind_clause <- if (bnd_info$n_indeterminate_nearby > 0L) {
+      sprintf(" and %d nearby candidate(s) remained indeterminate", bnd_info$n_indeterminate_nearby)
+    } else {
+      ""
+    }
+    buf_clause <- if (!is.null(bnd_info$buffer)) {
+      sprintf(
+        "; a higher-margin verified alternative was %d participants x %d items (%s scheduled trials, MC lower margin %+.1f percentage points)",
+        bnd_info$buffer$n_subj, bnd_info$buffer$n_item,
+        format(bnd_info$buffer$n_trials_scheduled, big.mark = ","),
+        100 * bnd_info$buffer$mc_margin
+      )
+    } else {
+      ""
+    }
+    details <- c(details, sprintf(
+      "Boundary sensitivity: Because the selected candidate's Monte Carlo lower bound cleared the target threshold by %+.1f percentage points%s, the smallest passing (N_subj, N_item) pair can vary across search seeds%s. Report the candidate range alongside the selected design or confirm it on a fresh high-replication seed via validate_design_point().",
+      100 * bnd_info$opt_margin, ind_clause, buf_clause
+    ))
   }
 
   fmt_re_sds <- function(tau_vec) {
@@ -956,12 +1193,17 @@ report_plan <- function(x, print_output = TRUE) {
     )
   )
 
+  sing_clause <- if (is.na(opt$singular_rate)) {
+    "boundary singularity check not applicable under regularized estimation"
+  } else {
+    sprintf("singular-fit rate = %.1f%%", opt$singular_rate * 100)
+  }
   mc_clause <- sprintf(
-    "Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (valid-fit conditional power = %s across %.1f%% strictly converged replications; singular-fit rate = %.1f%%).",
+    "Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (valid-fit conditional power = %s across %.1f%% strictly converged replications; %s).",
     sp$mc_conf_level * 100, toupper(opt$decision_status),
     crit_att,
     fmt_pct_or_na(opt$conditional_power),
-    opt$valid_rate * 100, opt$singular_rate * 100
+    opt$valid_rate * 100, sing_clause
   )
 
   txt <- paste0(

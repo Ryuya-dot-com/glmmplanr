@@ -25,7 +25,8 @@ invariant across sensitivity levels.
 }
 \examples{
 des <- design_crossed(list(condition = c("a", "b")))
-dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4,
+                     slope_sd_ratio = 0.35)
 models <- sensitivity_dgps(dgp)
 vapply(models, function(x) unname(x$tau_subj[2L]), numeric(1))
 }

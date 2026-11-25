@@ -27,7 +27,8 @@ results <- lapply(seq_len(nrow(cases)), function(i) {
   case <- cases[i, ]
   dgp <- if (case$design == "baseline") baseline_dgp else mixed_dgp
   spec <- specify_target(dgp, case$effect, scale = "pp", criterion = "joint",
-                         power_min = .80, ci_width = 12, engine = "bayes_laplace", prob_boot = 19)
+                         power_min = .80, ci_width = 12, engine = "bayes_laplace",
+                         control = target_control(prob_boot = 19))
   stopifnot(abs(spec$true_effect_target - 8) < 1e-5)
   row <- validate_design_point(spec, n_subj = 32, n_item = case$n_item, nsim = 16, seed = case$seed)
   stopifnot(abs(row$true_target[row$condition == "null"]) < 1e-6)

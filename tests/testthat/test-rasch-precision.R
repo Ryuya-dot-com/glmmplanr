@@ -92,7 +92,7 @@ test_that("Rasch search validates its inputs and retains only non-dominated pass
   for (invalid in list(calibrate_dgp(design_crossed(list(A = c("a", "b"))),
                                     c(0.5, 0.6), subj_sd = 0.8, item_sd = 0.6),
                        calibrate_dgp(design_testlet(list()), 0.6, subj_sd = 0.8,
-                                     item_sd = 0.6, testlet_sd = 0.3),
+                                     item_sd = 0.6, control = calibrate_control(testlet_sd = 0.3)),
                        calibrate_dgp(design_crossed(list()), 0.65, chance = 1/3,
                                      subj_sd = 0.8, item_sd = 0.6))) {
     expect_error(plan_rasch_precision(invalid, sizes, c(ability = 1)), "Rasch")

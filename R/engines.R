@@ -256,6 +256,10 @@ summarize_probability_fit <- function(
   })
 }
 
+engine_supports_singularity <- function(engine) {
+  !(engine %in% c("bayes_laplace", "stan_hmc", "stan_laplace"))
+}
+
 make_failed_fit <- function(status = "engine_error", reason = "", singular = FALSE) {
   list(
     est = NA_real_,
@@ -267,7 +271,7 @@ make_failed_fit <- function(status = "engine_error", reason = "", singular = FAL
     Sigma_subj = NULL,
     Sigma_item = NULL,
     Sigma_testlet = NULL,
-    singular = isTRUE(singular),
+    singular = if (is.na(singular)) NA else isTRUE(singular),
     converged = FALSE,
     status = status,
     error_reason = trimws(as.character(reason))
@@ -351,7 +355,7 @@ run_cpp_glmm_core <- function(
 
   if (is.null(fit)) {
     status <- if (startsWith(err_msg, "non_pd_hessian")) "non_pd_hessian" else "engine_error"
-    return(make_failed_fit(status, err_msg))
+    return(make_failed_fit(status, err_msg, singular = if (regularized) NA else FALSE))
   }
 
   st <- as.character(fit$status)
@@ -378,7 +382,7 @@ run_cpp_glmm_core <- function(
     var_log_tau_item = as.numeric(fit$var_log_tau_item),
     var_log_tau_testlet = if (!is.null(fit$var_log_tau_testlet)) as.numeric(fit$var_log_tau_testlet) else NULL,
     J_beta_theta = as.matrix(fit$J_beta_theta),
-    singular = isTRUE(fit$singular),
+    singular = if (regularized || is.na(fit$singular)) NA else isTRUE(fit$singular),
     converged = conv,
     status = st,
     error_reason = reason_txt
@@ -622,14 +626,15 @@ execute_single_replication <- function(
       sim_dat, cpp_cache, spec = spec,
       regularized = reg_prim, re_structure = re_primary, fast_stage = fast_stage
     )
-    sing_init <- isTRUE(primary$singular)
+    is_sing <- isTRUE(primary$singular)
+    sing_init <- if (engine_supports_singularity(engine_use)) is_sing else NA
 
-    if (sing_init && spec$on_singular == "reduce_corr" && re_primary == "maximal") {
+    if (is_sing && spec$on_singular == "reduce_corr" && re_primary == "maximal") {
       primary <- fit_via_cpp_cached(
         sim_dat, cpp_cache, spec = spec,
         regularized = reg_prim, re_structure = "uncorrelated", fast_stage = fast_stage
       )
-    } else if (sing_init && spec$on_singular == "switch_bayes") {
+    } else if (is_sing && spec$on_singular == "switch_bayes") {
       primary <- fit_via_cpp_cached(
         sim_dat, cpp_cache, spec = spec,
         regularized = TRUE, re_structure = re_primary, fast_stage = fast_stage
@@ -637,7 +642,7 @@ execute_single_replication <- function(
     }
 
     reduced <- if (do_compare) {
-      if (sing_init || !isTRUE(primary$converged)) {
+      if (is_sing || !isTRUE(primary$converged)) {
         fit_via_cpp_cached(
           sim_dat, cpp_cache, spec = spec,
           regularized = reg_prim, re_structure = "uncorrelated", fast_stage = fast_stage
@@ -670,14 +675,15 @@ execute_single_replication <- function(
     df_b, spec = spec, engine_use = engine_use,
     re_structure = re_primary, fast_stage = fast_stage
   )
-  sing_init <- isTRUE(primary$singular)
+  is_sing <- isTRUE(primary$singular)
+  sing_init <- if (engine_supports_singularity(engine_use)) is_sing else NA
 
-  if (sing_init && spec$on_singular == "reduce_corr" && re_primary == "maximal") {
+  if (is_sing && spec$on_singular == "reduce_corr" && re_primary == "maximal") {
     primary <- fit_single_dataset(
       df_b, spec = spec, engine_use = engine_use,
       re_structure = "uncorrelated", fast_stage = fast_stage
     )
-  } else if (sing_init && spec$on_singular == "switch_bayes") {
+  } else if (is_sing && spec$on_singular == "switch_bayes") {
     primary <- fit_single_dataset(
       df_b, spec = spec, engine_use = "bayes_laplace",
       re_structure = re_primary, fast_stage = fast_stage
@@ -685,7 +691,7 @@ execute_single_replication <- function(
   }
 
   reduced <- if (do_compare) {
-    if (sing_init || !isTRUE(primary$converged)) {
+    if (is_sing || !isTRUE(primary$converged)) {
       fit_single_dataset(
         df_b, spec = spec, engine_use = engine_use,
         re_structure = "uncorrelated", fast_stage = fast_stage
@@ -784,7 +790,7 @@ evaluate_design_point <- function(
   se_vec <- rep(NA_real_, nsim)
   pest_vec <- rep(NA_real_, nsim)
   pse_vec <- rep(NA_real_, nsim)
-  sing_vec <- rep(FALSE, nsim)
+  sing_vec <- rep(NA, nsim)
   conv_vec <- rep(FALSE, nsim)
   status_vec <- rep("engine_error", nsim)
   err_vec <- rep("", nsim)
@@ -936,7 +942,7 @@ summarize_mc_metrics <- function(
   failure_rate <- 1.0 - valid_rate
   max_iter_rate <- mean(status == "max_iter_finite")
   error_rate <- mean(status == "engine_error")
-  singular_rate <- mean(singular)
+  singular_rate <- if (all(is.na(singular))) NA_real_ else mean(singular, na.rm = TRUE)
 
   n_sched <- compute_scheduled_trials(des, n_subj, n_item)
   n_subj_expected <- n_subj * (1 - dropout_rate(des)) * (1 - des$attrition^(n_sched / n_subj))
@@ -1124,14 +1130,20 @@ summarize_mc_metrics <- function(
   bias <- mean(est_target_v - true_target)
   rmse <- sqrt(mean((est_target_v - true_target)^2))
 
-  nonsing_valid <- valid & (!singular)
-  if (any(nonsing_valid)) {
-    ns <- !singular[valid]
-    power_nonsing <- mean(sig_v[ns])
-    cov_ns <- mean(target_lo[ns] <= true_target & true_target <= target_hi[ns])
-  } else {
+  if (all(is.na(singular))) {
     power_nonsing <- NA_real_
     cov_ns <- NA_real_
+  } else {
+    not_sing <- is.na(singular) | (!singular)
+    nonsing_valid <- valid & not_sing
+    if (any(nonsing_valid)) {
+      ns <- not_sing[valid]
+      power_nonsing <- mean(sig_v[ns])
+      cov_ns <- mean(target_lo[ns] <= true_target & true_target <= target_hi[ns])
+    } else {
+      power_nonsing <- NA_real_
+      cov_ns <- NA_real_
+    }
   }
 
   if (any(sig_v) && abs(true_target) > 1e-8) {
@@ -1252,6 +1264,12 @@ compute_decision_status <- function(spec, valid_gate_ok, mc_pow, mc_aipe, mc_rop
   )
 }
 
+can_define_null_target <- function(spec) {
+  if (identical(spec$scale, "logit")) return(TRUE)
+  w <- spec$contrast_weights
+  all(is.finite(w)) && any(w > 0) && any(w < 0)
+}
+
 null_target_spec <- function(spec) {
   dgp <- spec$dgp
   X <- dgp$design$X_cells
@@ -1260,7 +1278,10 @@ null_target_spec <- function(spec) {
   } else {
     w <- spec$contrast_weights
     if (!all(is.finite(w)) || !any(w > 0) || !any(w < 0)) {
-      cli::cli_abort("A probability-scale null requires finite contrast weights of both signs.")
+      cli::cli_abort(c(
+        "A probability-scale null requires finite contrast weights of both signs (a difference between conditions).",
+        "i" = "For a single-condition or absolute probability precision target, validate interval coverage and width attainment under the planned condition via {.fn validate_design_point} or {.fn evaluate_design_point}."
+      ))
     }
     lower <- sum(w[w < 0]) + dgp$chance * sum(w[w > 0])
     upper <- sum(w[w > 0]) + dgp$chance * sum(w[w < 0])
@@ -1305,7 +1326,10 @@ null_target_spec <- function(spec) {
 #' structure fixed. On the logit scale it sets the focal coefficient to zero.
 #' @inheritParams evaluate_design_point
 #' @param seed Integer seed for this independent fixed-size validation.
-#' @return A data frame with two rows (null and planned), including the true target, detection and
+#' @return A data frame with two rows (`"null"` and `"planned"`) for contrasts
+#'   or logit targets, or one `"planned"` row when `spec` targets an absolute
+#'   probability (e.g., a single-condition design on `scale = "pp"` or `"prob"`
+#'   where no zero-difference null exists), including the true target, detection and
 #'   its Wilson interval under the chosen failure policy, valid-fit coverage
 #'   and its Wilson interval, and the valid-fit count. Null detection is the
 #'   Type I error. Response-pattern counts follow [evaluate_design_point()].
@@ -1327,8 +1351,18 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
   }
   if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) ||
       nsim < 1 || nsim != floor(nsim)) cli::cli_abort("{.arg nsim} must be a positive integer.")
-  specs <- list(null = null_target_spec(spec), planned = spec)
-  bases <- allocate_stage_point_streams(seed, stage_slot = 1L, grid_ids = 1:2, stride = 2L)
+  bases_pair <- allocate_stage_point_streams(seed, stage_slot = 1L, grid_ids = 1:2, stride = 2L)
+  if (can_define_null_target(spec)) {
+    specs <- list(null = null_target_spec(spec), planned = spec)
+    bases <- bases_pair
+  } else {
+    cli::cli_inform(c(
+      "i" = "Target {.val {spec$effect_input}} on the {.val {spec$scale}} scale estimates an absolute probability rather than a between-condition difference.",
+      "i" = "No zero-difference null applies; validating interval coverage and width attainment under the {.val planned} condition only."
+    ))
+    specs <- list(planned = spec)
+    bases <- bases_pair[2L]
+  }
   rows <- lapply(seq_along(specs), function(i) {
     sp <- specs[[i]]
     if (isTRUE(verbose)) {
@@ -1404,8 +1438,8 @@ stress_test_models <- function(
       criterion = "power",
       alpha = alpha,
       engine = cand$engine,
-      on_singular = "flag_only",
-      analysis_re = cand$re
+      analysis_re = cand$re,
+      control = target_control(on_singular = "flag_only")
     )
     alt_res <- evaluate_design_point(
       sp, n_subj = n_subj, n_item = n_item, nsim = nsim,

@@ -17,7 +17,7 @@ test_that("joint attainment counts the intersection and pools replication counts
   sp$ci_width <- 100
   sp$power_min <- .5
   res <- optimize_sample_size(sp, 16, 8, method = "grid", nsim_final = 4L,
-    nsim_sensitivity = 0L, workers = 1L, verbose = FALSE)
+    workers = 1L, verbose = FALSE, control = optimize_control(nsim_sensitivity = 0L))
   res$spec$power_min <- mean(c(res$verified$joint_mc_lo, res$verified$joint_mc_hi))
   res$verified$decision_status <- "indeterminate"
   indep_res <- topup_verification(res, 3L, verbose = FALSE)
@@ -44,19 +44,21 @@ test_that("joint attainment counts the intersection and pools replication counts
 
 test_that("the null matches the actual estimand and preserves variance assumptions", {
   d <- design_crossed(list(A = c("a", "b"), B = c("c", "d")))
-  g <- calibrate_dgp(d, c(.36, .46, .57, .83), chance = 1/3, subj_sd = .45, item_sd = .3)
+  g <- calibrate_dgp(d, c(.36, .46, .57, .83), chance = 1/3, subj_sd = .45, item_sd = .3,
+                     slope_sd_ratio = 0.35)
   for (scale in c("pp", "prob", "logit")) {
     for (estimand in c("marginal", "conditional")) {
-      sp <- specify_target(g, "A:B", scale = scale, prob_estimand = estimand,
-                           engine = "bayes_laplace")
+      sp <- specify_target(g, "A:B", scale = scale, engine = "bayes_laplace",
+                           control = target_control(prob_estimand = estimand))
       null <- null_target_spec(sp)
       expect_lt(abs(null$true_effect_target), 1e-8)
       expect_identical(null$dgp$Sigma_subj, g$Sigma_subj)
       if (scale == "pp") expect_gt(abs(null$true_beta), .01)
     }
   }
-  sp <- specify_target(g, "A", scale = "pp", contrast_weights = c(-1, 0, 0, 1),
-                       engine = "bayes_laplace", analysis_re = "intercept_only", prob_boot = 3)
+  sp <- specify_target(g, "A", scale = "pp", engine = "bayes_laplace",
+                       analysis_re = "intercept_only",
+                       control = target_control(contrast_weights = c(-1, 0, 0, 1), prob_boot = 3))
   out <- validate_design_point(sp, 16, 8, nsim = 3, seed = 48)
   expect_equal(out$true_target, c(0, 47), tolerance = 1e-6)
   expect_equal(out$condition, c("null", "planned"))
@@ -68,7 +70,8 @@ test_that("missing clusters, empty datasets and passage interactions agree acros
                               between_item = "A"), "both between")
   d <- design_testlet(list(A = c("a", "b")), testlet_size = 2,
                       attrition = .4, participant_dropout = .5)
-  g <- calibrate_dgp(d, c(.5,.7), subj_sd = .35, item_sd = .4, participant_testlet_sd = .8)
+  g <- calibrate_dgp(d, c(.5,.7), subj_sd = .35, item_sd = .4, slope_sd_ratio = 0.35,
+                     control = calibrate_control(participant_testlet_sd = .8))
   sp <- specify_target(g, "A", scale = "pp", engine = "bayes_laplace")
   sched <- generate_design_schedule(d, 4, 4)
   expect_equal(sched$n_trials_expected, round(16 * .6 * .5))

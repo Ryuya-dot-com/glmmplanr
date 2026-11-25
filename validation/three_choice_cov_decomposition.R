@@ -8,7 +8,8 @@ stopifnot(requireNamespace("posterior", quietly = TRUE),
           requireNamespace("digest", quietly = TRUE))
 
 dgp <- three_choice_reference_dgp()
-spec <- specify_target(dgp, "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+spec <- specify_target(dgp, "exposure", engine = "bayes_laplace",
+                       control = target_control(on_singular = "flag_only"))
 schedule <- generate_design_schedule(dgp$design, n_subj = 48L, n_item = 32L)
 eff_idx <- match(spec$effect_col, colnames(dgp$design$X_cells))
 

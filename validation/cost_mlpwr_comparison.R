@@ -22,11 +22,13 @@ select_min_cost <- function(pool, cost_fn) {
 des <- design_crossed(list(group = c("A", "B")), allocation = "latin_square", contrast = "treatment")
 dgp <- calibrate_dgp(
   des, cell_probs = c(A = 0.68, B = 0.80), chance = 0,
-  subj_sd = 0.8, item_sd = 0.6, slope_sd_ratio = 0, corr_structure = 0, seed = 8601L
+  subj_sd = 0.8, item_sd = 0.6, slope_sd_ratio = 0, corr_structure = 0,
+  control = calibrate_control(seed = 8601L)
 )
 sp <- specify_target(
   dgp, effect = "group", scale = "logit", criterion = "power", power_min = 0.80,
-  engine = "bayes_laplace", analysis_re = "intercept_only", on_singular = "flag_only"
+  engine = "bayes_laplace", analysis_re = "intercept_only",
+  control = target_control(on_singular = "flag_only")
 )
 
 # Shared 5 x 5 = 25-point discrete candidate lattice for ALL solvers
@@ -43,15 +45,17 @@ regimes <- list(
 # 1. Exhaustive high-precision reference grid (nsim = 400 per point, 10,000 sims total)
 ref_plan <- optimize_sample_size(
   sp, n_subj_range = subj_grid, n_item_range = item_grid,
-  method = "grid", nsim_final = 400L, nsim_topup = 0L, nsim_sensitivity = 0L,
-  workers = if (.Platform$OS.type == "windows") 1L else 4L, seed = 861000L, verbose = FALSE
+  method = "grid", nsim_final = 400L,
+  workers = if (.Platform$OS.type == "windows") 1L else 4L, seed = 861000L, verbose = FALSE,
+  control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
 )
 
 # 2. Separate independent out-of-sample evaluation grid (nsim = 400 per point, fresh seed 869000)
 eval_plan <- optimize_sample_size(
   sp, n_subj_range = subj_grid, n_item_range = item_grid,
-  method = "grid", nsim_final = 400L, nsim_topup = 0L, nsim_sensitivity = 0L,
-  workers = if (.Platform$OS.type == "windows") 1L else 4L, seed = 869000L, verbose = FALSE
+  method = "grid", nsim_final = 400L,
+  workers = if (.Platform$OS.type == "windows") 1L else 4L, seed = 869000L, verbose = FALSE,
+  control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
 )
 eval_tbl <- eval_plan$verified
 
@@ -117,9 +121,12 @@ for (r_idx in seq_along(regimes)) {
     gp_res <- optimize_sample_size(
       sp, n_subj_range = subj_grid, n_item_range = item_grid,
       prefer = pref_rule, method = "surrogate_gp",
-      n_eval_init = 6L, n_eval_adapt = 4L, nsim_init = 40L,
-      nsim_final = 200L, n_verify = 4L, nsim_topup = 0L, nsim_sensitivity = 0L,
-      workers = 1L, seed = 862000L + 100L * r_idx + s_id, verbose = FALSE
+      nsim_final = 200L,
+      workers = 1L, seed = 862000L + 100L * r_idx + s_id, verbose = FALSE,
+      control = optimize_control(
+        n_eval_init = 6L, n_eval_adapt = 4L, nsim_init = 40L,
+        n_verify = 4L, nsim_topup = 0L, nsim_sensitivity = 0L
+      )
     )
     gp_pt_pool <- gp_res$verified[gp_res$verified$power >= 0.80, , drop = FALSE]
     gp_pt_opt <- if (nrow(gp_pt_pool) > 0L) {

@@ -8,18 +8,13 @@ calibrate_dgp(
   design,
   cell_probs,
   chance = 0,
-  subj_prob_range = NULL,
-  item_prob_range = NULL,
-  testlet_prob_range = NULL,
   subj_sd = NULL,
   item_sd = NULL,
-  testlet_sd = NULL,
-  slope_sd_ratio = 0.35,
+  subj_prob_range = NULL,
+  item_prob_range = NULL,
+  slope_sd_ratio = 0,
   corr_structure = 0.2,
-  n_quad = 21L,
-  check_nsim = 4000L,
-  seed = 1L,
-  participant_testlet_sd = 0
+  control = calibrate_control()
 )
 }
 \arguments{
@@ -31,8 +26,19 @@ calibrate_dgp(
 to pass a named vector whose names match factor level combinations joined
 by \code{"_"} or \code{":"} (e.g., \code{c(incidental_massed = 0.50, ...)}).}
 
-\item{chance}{Guessing probability (lower asymptote \eqn{g \in [0, 1)}, e.g.,
-\code{0} for recall/production, \code{1/3} for 3AFC, \code{0.25} for 4AFC).}
+\item{chance}{Guessing probability (lower asymptote \eqn{g \in [0, 1)},
+default \code{0}). Use \code{0} for an ordinary binary logit model -- including
+recall, production, yes/no or old/new judgments (even though there are two
+response options), and multiple-choice tasks analyzed with standard
+\code{lme4::glmer(..., family = binomial())}. Set \code{chance = 1/m} (e.g., \code{1/3}
+for 3AFC, \code{0.25} for 4AFC) only when you intend to model and analyze a
+fixed lower guessing asymptote \eqn{g + (1 - g)\,\mathrm{logit}^{-1}(\eta)}.}
+
+\item{subj_sd}{Optional numeric scalar (intercept SD) or vector (intercept +
+slope SDs) on the conditional logit scale for subjects.}
+
+\item{item_sd}{Optional numeric scalar (intercept SD) or vector (intercept +
+slope SDs) on the conditional logit scale for items.}
 
 \item{subj_prob_range}{Optional numeric vector \code{c(low, high)} giving the 95\%
 subject accuracy range used to specify the intercept SD via its width on
@@ -43,46 +49,20 @@ so the fitted endpoints can shift. Ignored when \code{subj_sd} is supplied.}
 item accuracy range used in the same way. Ignored if \code{item_sd} is
 supplied directly.}
 
-\item{testlet_prob_range}{Optional numeric vector \code{c(low, high)} for passage
-/ testlet 95\% accuracy range when \code{design$has_testlet} is \code{TRUE}.}
-
-\item{subj_sd}{Optional numeric scalar (intercept SD) or vector (intercept +
-slope SDs) on the conditional logit scale for subjects.}
-
-\item{item_sd}{Optional numeric scalar (intercept SD) or vector (intercept +
-slope SDs) on the conditional logit scale for items.}
-
-\item{testlet_sd}{Optional numeric scalar or vector of conditional logit SDs
-for passages/testlets when \code{design$has_testlet} is \code{TRUE} (defaults to
-\code{0.5 * item_intercept_sd} if neither \code{testlet_sd} nor \code{testlet_prob_range}
-is supplied).}
-
 \item{slope_sd_ratio}{Numeric scalar or vector specifying the ratio of random
-slope SDs to the corresponding random intercept SD (default \code{0.35}).}
+slope SDs to the corresponding random intercept SD (default \code{0}, i.e.,
+random intercepts only unless you explicitly specify a positive ratio such
+as \code{0.35} or pass full SD vectors in \code{subj_sd} / \code{item_sd}).}
 
 \item{corr_structure}{Correlation specification for random effects: a single
 equicorrelation scalar \eqn{\rho} (default \code{0.20}), \code{"zero"} (uncorrelated
 random effects), a correlation matrix, or a named list
 \code{list(subj = ..., item = ...)}.}
 
-\item{n_quad}{Integer number of 1D Gauss-Hermite quadrature nodes (initially
-\code{21L}). Because independent normal participant, item, and testlet random
-effects sum to a single normal random variable in each cell, 1D quadrature
-over the total cell SD is mathematically exact. The rule is refined up to
-\code{256L} nodes when quadrature differs from adaptive normal integration by
-more than \code{1e-10} (and aborts if the discrepancy still exceeds \code{1e-7} at
-\code{256L} nodes). The result stores the effective \code{n_quad} and the
-discrepancy in \code{solver_info}.}
-
-\item{check_nsim}{Integer number of Monte Carlo draws per cell used to build
-the prior-predictive sanity-check summary (default \code{4000L}).}
-
-\item{seed}{Integer seed for the prior-predictive check. Use \code{NULL} to draw
-a master seed from the caller's random stream.}
-
-\item{participant_testlet_sd}{Conditional logit SD of an independent participant-by-
-passage intercept in the generating model. Use positive values to stress-test
-the planned passage-only analysis against residual local dependence. Default 0.}
+\item{control}{Control list created by \code{\link[=calibrate_control]{calibrate_control()}} holding optional
+testlet variance arguments (\code{testlet_sd}, \code{testlet_prob_range},
+\code{participant_testlet_sd}) and numerical settings (\code{n_quad}, \code{check_nsim},
+\code{seed}).}
 }
 \value{
 An S3 object of class \code{"glmmplanr_dgp"} containing the calibrated

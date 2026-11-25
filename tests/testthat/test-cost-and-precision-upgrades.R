@@ -36,7 +36,8 @@ test_that("switch_preference re-ranks verified Pareto designs instantaneously wi
   )
   spec <- specify_target(
     dgp, effect = "exposure", criterion = "power", power_min = 0.55,
-    engine = "bayes_laplace", analysis_re = "intercept_only", on_singular = "flag_only"
+    engine = "bayes_laplace", analysis_re = "intercept_only",
+    control = target_control(on_singular = "flag_only")
   )
 
   # Length-3 vectors specify exact candidate levels (avoiding length-2 range expansion).
@@ -49,10 +50,9 @@ test_that("switch_preference re-ranks verified Pareto designs instantaneously wi
     prefer = "fewer_items",
     method = "grid",
     nsim_final = 16L,
-    nsim_topup = 0L,
-    nsim_sensitivity = 0L,
     seed = 404L,
-    verbose = FALSE
+    verbose = FALSE,
+    control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
   )
   expect_true(isTRUE(res_bal$feasible))
   expect_gte(nrow(res_bal$verified_pareto), 2L)
@@ -84,11 +84,12 @@ test_that("Marginal joint_delta SE and C++ batch bootstrap SE agree and preserve
 
   sp_jd <- specify_target(
     dgp, effect = "exposure", scale = "pp", engine = "bayes_laplace",
-    prob_se_method = "joint_delta", on_singular = "flag_only"
+    prob_se_method = "joint_delta", control = target_control(on_singular = "flag_only")
   )
   sp_bt <- specify_target(
     dgp, effect = "exposure", scale = "pp", engine = "bayes_laplace",
-    prob_se_method = "bootstrap", prob_boot = n_bt, on_singular = "flag_only"
+    prob_se_method = "bootstrap",
+    control = target_control(prob_boot = n_bt, on_singular = "flag_only")
   )
 
   ev_jd <- evaluate_design_point(sp_jd, n_subj = ns_pt, n_item = ni_pt, nsim = n_rep, stream_seeds = 901L)
@@ -102,13 +103,13 @@ test_that("Marginal joint_delta SE and C++ batch bootstrap SE agree and preserve
 
 test_that("3AFC joint Laplace VCOV widens fixed-Sigma Schur SE and converges on extreme zero_item data", {
   dgp <- three_choice_reference_dgp()
-  # Default engine omits warning and resolves cleanly to cpp_laplace when chance > 0
+  # Default engine is built-in bayes_laplace; glmmTMB aborts explicitly under chance > 0 (no silent fallback)
   expect_no_warning(sp_def <- specify_target(dgp, effect = "exposure"))
-  expect_identical(sp_def$engine, "cpp_laplace")
-  expect_message(sp_tmb <- specify_target(dgp, effect = "exposure", engine = "glmmTMB"), "glmmTMB")
-  expect_identical(sp_tmb$engine, "cpp_laplace")
+  expect_identical(sp_def$engine, "bayes_laplace")
+  expect_error(specify_target(dgp, effect = "exposure", engine = "glmmTMB"), "guessing-adjusted")
 
-  sp_by <- specify_target(dgp, effect = "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+  sp_by <- specify_target(dgp, effect = "exposure", engine = "bayes_laplace",
+                          control = target_control(on_singular = "flag_only"))
   sched <- generate_design_schedule(dgp$design, n_subj = 48L, n_item = 32L)
   set.seed(7312001L, kind = "L'Ecuyer-CMRG", normal.kind = "Inversion", sample.kind = "Rejection")
   dat <- simulate_dgp_data(dgp, schedule = sched)
@@ -145,14 +146,16 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
   on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   sp_w <- specify_target(
     dgp, effect = "A:B", scale = "logit", criterion = "ci_width",
-    ci_width = 2.00, ci_assurance = 0.70, engine = "cpp_laplace", on_singular = "flag_only"
+    ci_width = 2.00, engine = "cpp_laplace",
+    control = target_control(ci_assurance = 0.70, on_singular = "flag_only")
   )
   res_w <- optimize_sample_size(
     sp_w,
     n_subj_range = if (on_cran) 48L else c(32L, 40L, 48L),
     n_item_range = if (on_cran) 32L else c(24L, 28L, 32L),
-    method = "grid", nsim_final = if (on_cran) 10L else 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
-    seed = 515L, verbose = FALSE
+    method = "grid", nsim_final = if (on_cran) 10L else 16L,
+    seed = 515L, verbose = FALSE,
+    control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
   )
   rep_w <- report_plan(res_w, print_output = FALSE)
   expect_match(rep_w, "AIPE width-attainment probability")
@@ -161,14 +164,16 @@ test_that("report_plan accurately reports ci_width, rope, logit coverage, and he
 
   sp_r <- specify_target(
     dgp, effect = "A:B", scale = "logit", criterion = "rope",
-    rope = c(-0.10, 0.10), power_min = 0.60, engine = "cpp_laplace", on_singular = "flag_only"
+    power_min = 0.60, engine = "cpp_laplace",
+    control = target_control(rope = c(-0.10, 0.10), on_singular = "flag_only")
   )
   res_r <- optimize_sample_size(
     sp_r,
     n_subj_range = if (on_cran) 48L else c(32L, 40L, 48L),
     n_item_range = if (on_cran) 32L else c(24L, 28L, 32L),
-    method = "grid", nsim_final = if (on_cran) 10L else 16L, nsim_topup = 0L, nsim_sensitivity = 0L,
-    seed = 516L, verbose = FALSE
+    method = "grid", nsim_final = if (on_cran) 10L else 16L,
+    seed = 516L, verbose = FALSE,
+    control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
   )
   rep_r <- report_plan(res_r, print_output = FALSE)
   expect_match(rep_r, "ROPE")

@@ -18,7 +18,7 @@ test_that("Non-converged/failed fits never inflate power to 100% and log error r
 
   sp_eff <- specify_target(
     dgp, effect = "exposure", criterion = "power", power_min = 0.80,
-    failure_policy = "effective"
+    control = target_control(failure_policy = "effective")
   )
 
   # Failure-accounting check: 10 reps, 8 failed, 2 converged & significant
@@ -48,7 +48,7 @@ test_that("Non-converged/failed fits never inflate power to 100% and log error r
   # Even under conditional policy, min_valid_rate (0.90) blocks 2/10 valid fits from passing
   sp_cond <- specify_target(
     dgp, effect = "exposure", criterion = "power", power_min = 0.80,
-    failure_policy = "conditional", min_valid_rate = 0.90
+    control = target_control(failure_policy = "conditional", min_valid_rate = 0.90)
   )
   row_cond <- glmmplanr:::summarize_mc_metrics(
     est = est, se = se, prob_est = pest, prob_se = pse,
@@ -162,8 +162,10 @@ test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
   expect_equal(f_cap$status, "max_iter_finite")
 
   # 4b. Canonical logit agreement with lme4::glmer(..., nAGQ = 1)
-  sp0_cpp <- specify_target(dgp0, effect = "exposure", engine = "cpp_laplace", on_singular = "flag_only")
-  sp0_lme <- specify_target(dgp0, effect = "exposure", engine = "lme4", on_singular = "flag_only")
+  sp0_cpp <- specify_target(dgp0, effect = "exposure", engine = "cpp_laplace",
+                            control = target_control(on_singular = "flag_only"))
+  sp0_lme <- specify_target(dgp0, effect = "exposure", engine = "lme4",
+                            control = target_control(on_singular = "flag_only"))
   fit_cpp <- glmmplanr:::fit_single_dataset(df0, sp0_cpp, engine_use = "cpp_laplace")
   fit_lme <- glmmplanr:::fit_single_dataset(df0, sp0_lme, engine_use = "lme4")
 
@@ -176,7 +178,8 @@ test_that("C++ Laplace separates max_iter_finite and agrees with lme4", {
 test_that("3AFC calibration and coverage meet the small regression fixture", {
   on_cran <- !identical(Sys.getenv("NOT_CRAN"), "true")
   dgp3 <- three_choice_reference_dgp()
-  sp3 <- specify_target(dgp3, effect = "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+  sp3 <- specify_target(dgp3, effect = "exposure", engine = "bayes_laplace",
+                        control = target_control(on_singular = "flag_only"))
   ev3 <- evaluate_design_point(
     sp3,
     n_subj = if (on_cran) 48 else 56,
@@ -222,13 +225,11 @@ test_that("Percentage-point precision, indeterminate top-up, and multi-scenario 
     dgp_base,
     effect = "method",
     scale = "pp",
-    prob_estimand = "marginal",
     criterion = "both",
     power_min = 0.80,
     ci_width = 14.0,
-    prob_boot = 9L,
     engine = "bayes_laplace",
-    on_singular = "flag_only"
+    control = target_control(prob_estimand = "marginal", prob_boot = 9L, on_singular = "flag_only")
   )
   expect_equal(spec_pp$true_prob_diff_pp, 10.0, tolerance = 1e-6)
 
@@ -249,16 +250,18 @@ test_that("Percentage-point precision, indeterminate top-up, and multi-scenario 
     scenarios = scens,
     standard_scenario = "diff_10pp",
     method = "surrogate_gp",
-    n_eval_init = 6L,
-    n_eval_adapt = 2L,
-    nsim_init = 12L,
     nsim_final = 20L,
-    nsim_topup = 15L,
-    n_verify = 3L,
-    nsim_sensitivity = 12L,
     workers = 2L,
     seed = 20261119L,
-    verbose = FALSE
+    verbose = FALSE,
+    control = optimize_control(
+      n_eval_init = 6L,
+      n_eval_adapt = 2L,
+      nsim_init = 12L,
+      nsim_topup = 15L,
+      n_verify = 3L,
+      nsim_sensitivity = 12L
+    )
   )
 
   expect_s3_class(res_rob, "glmmplanr_result")
@@ -322,8 +325,7 @@ test_that("cached and data-frame fits agree and futility stopping preserves the 
     criterion = "power",
     power_min = 0.85,
     engine = "bayes_laplace",
-    stage1_re = "uncorrelated",
-    on_singular = "flag_and_compare"
+    control = target_control(stage1_re = "uncorrelated", on_singular = "flag_and_compare")
   )
 
   # Compare the two fits on the same response stream.
@@ -368,11 +370,10 @@ test_that("cached and data-frame fits agree and futility stopping preserves the 
     n_item_range = c(12, 20, 44),
     method = "grid",
     nsim_final = 200L,
-    early_stop = TRUE,
-    nsim_sensitivity = 0L,
     workers = 2L,
     seed = 20261119L,
-    verbose = FALSE
+    verbose = FALSE,
+    control = optimize_control(early_stop = TRUE, nsim_sensitivity = 0L)
   )
   res_es_off <- optimize_sample_size(
     spec,
@@ -380,11 +381,10 @@ test_that("cached and data-frame fits agree and futility stopping preserves the 
     n_item_range = c(12, 20, 44),
     method = "grid",
     nsim_final = 200L,
-    early_stop = FALSE,
-    nsim_sensitivity = 0L,
     workers = 1L,
     seed = 20261119L,
-    verbose = FALSE
+    verbose = FALSE,
+    control = optimize_control(early_stop = FALSE, nsim_sensitivity = 0L)
   )
   expect_true(any(res_es_on$verified$curtailed))
   expect_false(res_es_on$optimal$curtailed)

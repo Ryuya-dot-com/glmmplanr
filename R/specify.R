@@ -23,8 +23,11 @@
 #'   accepted. For a design with no experimental factors, use `"(Intercept)"`.
 #'   On the logit scale its null is a zero conditional intercept (probability
 #'   0.5 for an ordinary logit at zero random effects). On the probability
-#'   scale the one cell gives an absolute probability. Use `ci_width` for its
-#'   precision. Variance components and individual scores require a separate analysis.
+#'   scale the one cell gives an absolute probability: use `criterion = "ci_width"`
+#'   for its precision, and confirm planned-condition coverage and width
+#'   attainment via [validate_design_point()] or [evaluate_design_point()]
+#'   (no zero-difference null applies). Variance components and individual
+#'   scores require a separate analysis.
 #' @param scale Scale on which detection, precision (`ci_width`) and equivalence (`rope`)
 #'   targets are expressed and evaluated:
 #'   * `"logit"` (default): Conditional log-odds scale.
@@ -33,22 +36,11 @@
 #'     at most 10 percentage points, such as `+5.0 pp [0.0, 10.0]`).
 #'   * `"prob"`: Response accuracy difference on `[0, 1]` probability scale
 #'     (e.g., `ci_width = 0.10` for 10 percentage points).
-#' @param prob_estimand Estimand used for probability-difference (`"pp"` /
-#'   `"prob"`) calculations (and always reported diagnostically even when
-#'   `scale = "logit"`):
-#'   * `"marginal"` (default): Population-standardized (G-computation) accuracy
-#'     difference averaging over participant and item random-effect variances via
-#'     Gauss-Hermite quadrature.
-#'   * `"conditional"`: Accuracy difference for an average participant and
-#'     average item (\eqn{u_S = 0, u_I = 0}).
-#' @param contrast_weights Optional custom numeric vector of cell contrast
-#'   weights of length `dgp$design$n_cells` (defaults to
-#'   [cell_contrast_weights()]).
 #' @param criterion Evaluation objective:
 #'   * `"power"`: Statistical power \eqn{\ge} `power_min`.
 #'   * `"ci_width"`: Precision / AIPE criterion requiring the `(1 - alpha)`
 #'     interval width to be \eqn{\le} `ci_width` with probability \eqn{\ge}
-#'     `ci_assurance`.
+#'     `ci_assurance` (set in [target_control()]).
 #'   * `"both"`: Requires both statistical power \eqn{\ge} `power_min` and
 #'     interval width criterion (`ci_width`), assessed separately.
 #'   * `"joint"`: Probability of detecting the effect and meeting the width bound
@@ -61,78 +53,38 @@
 #'   width \eqn{w_{\max}} in units matching `scale` (`logit` when
 #'   `scale = "logit"`, percentage points `0..100` when `scale = "pp"`, or
 #'   probability `0..1` when `scale = "prob"`).
-#' @param ci_assurance Target probability \eqn{\Pr(W \le w_{\max})} for AIPE
-#'   interval width assurance (default `0.80`).
-#' @param rope Numeric vector `c(low, high)` defining the Region of Practical
-#'   Equivalence in units matching `scale` (defaults to `c(-0.18, 0.18)` on
-#'   `"logit"`, `c(-3, 3)` on `"pp"`, or `c(-0.03, 0.03)` on `"prob"`).
 #' @param alpha Two-sided significance level / `1 - conf_level` (default `0.05`).
-#' @param failure_policy How non-converged or failed replications enter sample
-#'   size pass/fail decisions:
-#'   * `"effective"` (default): Conservative unconditional probability of
-#'     obtaining a valid converged fit that also meets the criterion (failed
-#'     replications count as `0` / non-attainment), while still reporting
-#'     `conditional_power` alongside.
-#'   * `"conditional"`: Evaluates `conditional_power` among valid fits while
-#'     requiring `valid_rate >= min_valid_rate`.
-#' @param min_valid_rate Minimum acceptable proportion of valid converged fits
-#'   when `failure_policy = "conditional"` (default `0.90`).
-#' @param mc_conf_level Confidence level for Wilson Monte Carlo uncertainty
-#'   intervals used to classify borderline candidates as `"pass"`,
-#'   `"indeterminate"`, or `"fail"` (default `0.95`; Morris et al., 2019).
-#' @param engine Primary estimation backend: `"glmmTMB"`, `"lme4_fast"`,
-#'   `"lme4"`, `"stan_hmc"`, `"bayes_laplace"`, `"cpp_laplace"`, or legacy alias
-#'   `"stan_laplace"` (deprecated; executes full HMC/NUTS via `"stan_hmc"`
-#'   rather than Laplace approximation). Unpenalized engines flag separation if
-#'   all observed responses in any fixed-effect design cell are 0 or all are 1.
-#'   Each cell has its own linear predictor in the factorial model. The primary
-#'   fit is then invalid, and a bootstrap refit with this pattern is also
-#'   invalid. Regularized engines can return finite estimates in these cases.
-#'   For `"cpp_laplace"` and `"bayes_laplace"`, analytical fixed-effect SEs
-#'   combine the Tierney-Kadane Laplace Hessian with a diagonal log-SD variance
-#'   propagation term; off-diagonal covariances among SD estimates and
-#'   uncertainty in random-slope correlation parameters are not propagated, so
-#'   correlated-slope designs (especially under $m$-AFC or sparsity) should be
-#'   cross-checked against `"stan_hmc"` or parametric bootstrap SEs.
-#'   Check sensitivity to the fixed-effect prior. An individual participant or
-#'   item with a constant response pattern can contribute to either fit.
-#' @param stage1_engine Fast estimation backend used during Stage-1 surrogate
-#'   exploration before Stage-2 verification.
-#' @param stage1_re Random-effect covariance structure used during fast Stage-1
-#'   surrogate exploration before Stage-2 verification: `"match"` (default; uses
-#'   `analysis_re`) or `"uncorrelated"` (uses fast diagonal random slopes in
-#'   Stage 1 while still verifying the full `analysis_re` model in Stage 2).
-#' @param on_singular Policy when maximum-likelihood fits hit a singular
-#'   random-effects boundary: `"flag_and_compare"` (default), `"flag_only"`,
-#'   `"reduce_corr"`, or `"switch_bayes"`.
+#' @param engine Primary estimation backend: `"bayes_laplace"` (default,
+#'   built-in regularized C++ Laplace engine supporting both ordinary binary
+#'   logit and `chance > 0` links), `"cpp_laplace"`, `"lme4"`, `"lme4_fast"`,
+#'   `"glmmTMB"`, `"stan_hmc"`, or legacy alias `"stan_laplace"` (deprecated;
+#'   executes full HMC/NUTS via `"stan_hmc"`). Optional external backends
+#'   (`"glmmTMB"`, `"stan_hmc"`) abort rather than silently falling back if
+#'   unavailable or incompatible with `chance > 0`, ensuring numerical
+#'   consistency. Unpenalized engines flag separation if all observed responses
+#'   in any fixed-effect design cell are 0 or all are 1. For `"cpp_laplace"`
+#'   and `"bayes_laplace"`, analytical fixed-effect SEs combine the
+#'   Tierney-Kadane Laplace Hessian with a diagonal log-SD variance propagation
+#'   term; correlated-slope designs (especially under $m$-AFC or sparsity)
+#'   should be cross-checked against `"stan_hmc"` or parametric bootstrap SEs.
 #' @param analysis_re Random-effect structure of the fitted analysis model:
-#'   `"maximal"` (default), `"uncorrelated"`, or `"intercept_only"`.
-#' @param analysis_link Link function used in the analysis model: `"match_dgp"`
-#'   (default) or `"logit"`.
-#' @param lkj_eta Shape parameter \eqn{\eta} for the LKJ correlation prior in
-#'   Stan (default `2.0`); in `"bayes_laplace"`, controls unit-diagonal
-#'   correlation shrinkage \eqn{n / (n + 2\max(\eta - 1, 0))} toward the
-#'   identity matrix.
-#' @param prior_beta_sd Weakly informative Normal prior SD on non-intercept
-#'   fixed effects in Bayesian engines (default `2.5`).
-#' @param prior_tau_sd Scale parameter for the Half-Student-t(\eqn{\nu = 3})
-#'   prior on random-effect SDs in both Stan (`"stan_hmc"`) and the built-in
-#'   regularized Laplace engine (`"bayes_laplace"`), default `1.5`. Whereas
-#'   Stan performs full joint HMC/NUTS over \eqn{(\beta, \tau, L, z)},
-#'   `"bayes_laplace"` uses an EM-Laplace approximation with exact
-#'   \eqn{\log \tau}-space Half-Student-t(3) MAP variance updates and
-#'   LKJ-scaled correlation shrinkage, so finite-sample intervals can still
-#'   differ between the two engines.
-#' @param prob_boot Number of parametric bootstrap refits per final marginal
-#'   probability-scale replication when `prob_se_method = "bootstrap"`
-#'   (default `99`). At least 90% of refits must succeed.
+#'   `"match_dgp"` (default; automatically fits `"intercept_only"` if `dgp` has
+#'   no non-zero random slopes, `"uncorrelated"` if slopes have zero
+#'   correlations, or `"maximal"` otherwise), `"maximal"`, `"uncorrelated"`, or
+#'   `"intercept_only"`.
 #' @param prob_se_method Standard-error method for marginal probability-scale
 #'   contrasts in Stage-2 final verification:
-#'   * `"bootstrap"` (default): Parametric bootstrap refits (`prob_boot` draws)
-#'     executed via a pre-allocated C++ batch kernel for built-in engines.
+#'   * `"bootstrap"` (default): Parametric bootstrap refits (`prob_boot` draws
+#'     in [target_control()]) executed via a pre-allocated C++ batch kernel for
+#'     built-in engines.
 #'   * `"joint_delta"`: Analytical Gauss-Hermite delta method propagating joint
 #'     uncertainty in fixed effects \eqn{\beta} and random-effect log-SDs
 #'     \eqn{\theta = \log \tau} (also used automatically in Stage-1 screening).
+#' @param control Control list created by [target_control()] holding advanced
+#'   settings (`prob_estimand`, `contrast_weights`, `ci_assurance`, `rope`,
+#'   `failure_policy`, `min_valid_rate`, `mc_conf_level`, `stage1_engine`,
+#'   `stage1_re`, `on_singular`, `analysis_link`, `lkj_eta`, `prior_beta_sd`,
+#'   `prior_tau_sd`, `prob_boot`).
 #' @return An S3 object of class `"glmmplanr_spec"`.
 #' @examples
 #' des <- design_crossed(list(condition = c("a", "b")))
@@ -144,59 +96,48 @@ specify_target <- function(
   dgp,
   effect,
   scale = c("logit", "pp", "percentage_point", "prob"),
-  prob_estimand = c("marginal", "conditional"),
-  contrast_weights = NULL,
   criterion = c("power", "ci_width", "both", "rope", "joint"),
   power_min = 0.80,
   ci_width = NULL,
-  ci_assurance = 0.80,
-  rope = NULL,
   alpha = 0.05,
-  failure_policy = c("effective", "conditional"),
-  min_valid_rate = 0.90,
-  mc_conf_level = 0.95,
-  engine = c("glmmTMB", "lme4_fast", "lme4", "stan_laplace", "stan_hmc", "bayes_laplace", "cpp_laplace"),
-  stage1_engine = NULL,
-  stage1_re = c("match", "uncorrelated"),
-  on_singular = c("flag_and_compare", "flag_only", "reduce_corr", "switch_bayes"),
-  analysis_re = c("maximal", "uncorrelated", "intercept_only"),
-  analysis_link = c("match_dgp", "logit"),
-  lkj_eta = 2.0,
-  prior_beta_sd = 2.5,
-  prior_tau_sd = 1.5,
-  prob_boot = 99L,
-  prob_se_method = c("bootstrap", "joint_delta")
+  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc", "stan_laplace"),
+  analysis_re = c("match_dgp", "maximal", "uncorrelated", "intercept_only"),
+  prob_se_method = c("bootstrap", "joint_delta"),
+  control = target_control()
 ) {
   if (!inherits(dgp, "glmmplanr_dgp")) {
     cli::cli_abort("{.arg dgp} must be a {.cls glmmplanr_dgp} object.")
   }
-  if (!is.numeric(prob_boot) || length(prob_boot) != 1L || !is.finite(prob_boot) ||
-      prob_boot < 2 || prob_boot > .Machine$integer.max || prob_boot != floor(prob_boot)) {
-    cli::cli_abort("{.arg prob_boot} must be an integer of at least 2.")
+  if (!inherits(control, "glmmplanr_target_control")) {
+    cli::cli_abort("{.arg control} must be created by {.fn target_control}.")
   }
-  for (scale_name in c("lkj_eta", "prior_beta_sd", "prior_tau_sd")) {
-    value <- get(scale_name, inherits = FALSE)
-    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) || value <= 0) {
-      cli::cli_abort("{.arg {scale_name}} must be a finite positive scalar.")
-    }
-  }
+
   engine_was_missing <- missing(engine)
   scale <- match.arg(scale)
   if (scale == "percentage_point") scale <- "pp"
-  prob_estimand <- match.arg(prob_estimand)
   criterion <- match.arg(criterion)
-  failure_policy <- match.arg(failure_policy)
   engine <- match.arg(engine)
-  stage1_re <- match.arg(stage1_re)
-  on_singular <- match.arg(on_singular)
-  analysis_re <- match.arg(analysis_re)
-  analysis_link <- match.arg(analysis_link)
+  requested_analysis_re <- match.arg(analysis_re)
+  analysis_re <- resolve_analysis_re(dgp, requested_analysis_re)
   prob_se_method <- match.arg(prob_se_method)
 
+  prob_estimand <- control$prob_estimand
+  contrast_weights <- control$contrast_weights
+  ci_assurance <- control$ci_assurance
+  rope <- control$rope
+  failure_policy <- control$failure_policy
+  min_valid_rate <- control$min_valid_rate
+  mc_conf_level <- control$mc_conf_level
+  stage1_engine <- control$stage1_engine
+  stage1_re <- control$stage1_re
+  on_singular <- control$on_singular
+  analysis_link <- control$analysis_link
+  lkj_eta <- control$lkj_eta
+  prior_beta_sd <- control$prior_beta_sd
+  prior_tau_sd <- control$prior_tau_sd
+  prob_boot <- control$prob_boot
+
   chance_use <- if (analysis_link == "match_dgp") dgp$chance else 0.0
-  if (engine_was_missing && chance_use > 0.0) {
-    engine <- "cpp_laplace"
-  }
 
   resolved_stage1_re <- if (stage1_re == "uncorrelated" && analysis_re == "maximal") {
     "uncorrelated"
@@ -314,6 +255,7 @@ specify_target <- function(
       stage1_engine = stage1_engine,
       stage1_re = resolved_stage1_re,
       on_singular = on_singular,
+      requested_analysis_re = requested_analysis_re,
       analysis_re = analysis_re,
       analysis_link = analysis_link,
       lkj_eta = lkj_eta,
@@ -364,38 +306,56 @@ has_cmdstan_backend <- function() {
   )
 }
 
+resolve_analysis_re <- function(dgp, requested_re) {
+  if (!identical(requested_re, "match_dgp")) {
+    return(requested_re)
+  }
+  has_slopes <- (length(dgp$tau_subj) > 1L && any(dgp$tau_subj[-1L] > 0)) ||
+    (length(dgp$tau_item) > 1L && any(dgp$tau_item[-1L] > 0)) ||
+    (isTRUE(dgp$design$has_testlet) && length(dgp$tau_testlet) > 1L && any(dgp$tau_testlet[-1L] > 0))
+  if (!has_slopes) {
+    return("intercept_only")
+  }
+  has_corr <- function(R, tau) {
+    if (is.null(R) || length(tau) <= 1L) return(FALSE)
+    pos <- which(tau > 0)
+    if (length(pos) <= 1L) return(FALSE)
+    sub <- R[pos, pos, drop = FALSE]
+    any(abs(sub[row(sub) != col(sub)]) > 1e-10)
+  }
+  if (has_corr(dgp$R_subj, dgp$tau_subj) ||
+      has_corr(dgp$R_item, dgp$tau_item) ||
+      (isTRUE(dgp$design$has_testlet) && has_corr(dgp$R_testlet, dgp$tau_testlet))) {
+    "maximal"
+  } else {
+    "uncorrelated"
+  }
+}
+
 resolve_available_engine <- function(engine, chance = 0.0, notify = TRUE) {
   if (engine == "glmmTMB") {
     if (chance > 0.0) {
-      if (notify) {
-        cli::cli_inform(c(
-          "i" = "{.pkg glmmTMB} only supports built-in C++ binomial links and rejects custom m-AFC lower-asymptote links ({.code chance = {round(chance, 4)} > 0}); delegating to {.val cpp_laplace}.",
-          "i" = "Use {.code engine = 'cpp_laplace'}, {.code 'bayes_laplace'}, {.code 'lme4'}, or {.code 'stan_hmc'} directly, or set {.code analysis_link = 'logit'} to test canonical logit mismatch."
-        ))
-      }
-      return("cpp_laplace")
-    }
-    if (requireNamespace("glmmTMB", quietly = TRUE)) {
-      return("glmmTMB")
-    }
-    if (notify) {
-      cli::cli_inform(c(
-        "i" = "{.pkg glmmTMB} is not installed; delegating {.val glmmTMB} to glmmplanr's compiled C++ Laplace engine ({.val cpp_laplace})."
+      cli::cli_abort(c(
+        "{.pkg glmmTMB} does not support custom guessing-adjusted links ({.code chance = {round(chance, 4)} > 0}).",
+        "i" = "Choose {.code engine = 'bayes_laplace'}, {.code 'cpp_laplace'}, {.code 'lme4'}, or {.code 'stan_hmc'} for guessing links, or set {.code control = target_control(analysis_link = 'logit')} to test a canonical logit analysis."
       ))
     }
-    return("cpp_laplace")
+    if (!requireNamespace("glmmTMB", quietly = TRUE)) {
+      cli::cli_abort(c(
+        "{.code engine = 'glmmTMB'} requires the optional {.pkg glmmTMB} package (no silent fallback is performed so results stay numerically consistent).",
+        "i" = "Install it with {.code install.packages('glmmTMB')} or select a built-in engine ({.code 'bayes_laplace'}, {.code 'cpp_laplace'}, or {.code 'lme4'})."
+      ))
+    }
+    return("glmmTMB")
   }
   if (engine %in% c("stan_laplace", "stan_hmc")) {
     if (has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE)) {
       return(engine)
     }
-    if (notify) {
-      cli::cli_warn(c(
-        "No Stan backend ({.pkg cmdstanr}/{.pkg rstan}) is installed; falling back from {.val {engine}} to {.val bayes_laplace}.",
-        "i" = "{.val bayes_laplace} uses EM-Laplace approximation rather than HMC/NUTS; finite-sample interval widths can differ from Stan."
-      ))
-    }
-    return("bayes_laplace")
+    cli::cli_abort(c(
+      "{.code engine = '{engine}'} requires a Stan backend ({.pkg cmdstanr} or {.pkg rstan}); no silent fallback to Laplace approximation is performed.",
+      "i" = "Install {.pkg rstan} or {.pkg cmdstanr}, or explicitly select {.code engine = 'bayes_laplace'}."
+    ))
   }
   engine
 }
@@ -419,11 +379,16 @@ print.glmmplanr_spec <- function(x, ...) {
       x$rope[1L], x$rope[2L], unit_lbl, x$power_min
     )
   )
+  re_lbl <- if (identical(x$requested_analysis_re, "match_dgp")) {
+    sprintf("%s (matched to DGP)", x$analysis_re)
+  } else {
+    x$analysis_re
+  }
   cli::cli_ul(c(
     "Focal effect: {.val {x$effect_input}} (true beta = {round(x$true_beta, 4)} logit | {x$prob_estimand} diff = {sprintf('%+.2f pp', x$true_prob_diff_pp)})",
     "Target scale: {.val {x$scale}} | Criterion ({.val {x$criterion}}): {crit_desc}",
     "Failure accounting: {.val {x$failure_policy}} | MC confidence level: {round(x$mc_conf_level * 100, 1)}%",
-    "Engine: Stage 1 = {.val {x$stage1_engine}} -> Final = {.val {x$engine}} (requested: {.val {x$requested_engine}})"
+    "Engine: Stage 1 = {.val {x$stage1_engine}} -> Final = {.val {x$engine}} | Analysis RE: {.val {re_lbl}}"
   ))
   cli::cli_text("{analysis_description(x)}")
   cli::cli_text("Model: {.code {deparse1(stats::formula(x))}}")

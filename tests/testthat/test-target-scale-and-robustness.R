@@ -14,7 +14,8 @@ test_that("detection, coverage and sign errors use the requested contrast", {
     expect_equal(out$effective_logit_power, 1)
   }
   sp <- specify_target(dgp, "A:B", scale = "pp", engine = "bayes_laplace",
-                       analysis_re = "intercept_only", on_singular = "flag_only", prob_boot = 9L)
+                       analysis_re = "intercept_only",
+                       control = target_control(on_singular = "flag_only", prob_boot = 9L))
   ev <- evaluate_design_point(sp, 64, 32, nsim = 4, stream_seeds = 1357)
   expect_equal(ev$n_valid, 4L)
   expect_equal(ev$effective_power, 1 - ev$prob_coverage)
@@ -25,7 +26,8 @@ test_that("detection, coverage and sign errors use the requested contrast", {
 test_that("joint refits vary the marginal contrast even when beta stays fixed", {
   des <- design_crossed(list(A = c("a", "b")))
   dgp <- calibrate_dgp(des, c(.4, .7), subj_sd = .4, item_sd = .3)
-  spec <- specify_target(dgp, "A", scale = "pp", engine = "bayes_laplace", prob_boot = 6)
+  spec <- specify_target(dgp, "A", scale = "pp", engine = "bayes_laplace",
+                         control = target_control(prob_boot = 6))
   n <- 12
   x <- des$X_cells[rep(1:2, 6), ]
   counter <- 0L
@@ -95,8 +97,8 @@ test_that("otherwise identical dropout scenarios are simulated separately", {
   expect_false(dgp_is_equivalent(full, half))
   sp <- specify_target(full, "A", engine = "bayes_laplace", analysis_re = "intercept_only")
   result <- optimize_sample_size(sp, 12, 8, scenarios = list(base = full, half = half),
-    standard_scenario = "base", method = "grid", nsim_final = 3, nsim_sensitivity = 0,
-    workers = 1, verbose = FALSE)
+    standard_scenario = "base", method = "grid", nsim_final = 3,
+    workers = 1, verbose = FALSE, control = optimize_control(nsim_sensitivity = 0))
   ev <- result$robust$scenario_evaluations
   expect_equal(ev$n_trials_expected[ev$scenario == "half"], 48L)
   expect_lt(ev$n_trials_obs_mean[ev$scenario == "half"], 96)

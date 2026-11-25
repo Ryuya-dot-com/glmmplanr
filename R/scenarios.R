@@ -82,6 +82,9 @@ run_multi_scenario_analysis <- function(
     sp_s$contrast_weights <- base_spec$contrast_weights[dgp_s$design$cells$cell_name]
     sp_s$engine <- resolve_available_engine(base_spec$requested_engine,
       chance = if (base_spec$analysis_link == "match_dgp") dgp_s$chance else 0, notify = FALSE)
+    if (!is.null(base_spec$requested_analysis_re)) {
+      sp_s$analysis_re <- resolve_analysis_re(dgp_s, base_spec$requested_analysis_re)
+    }
     sp_s$true_beta <- unname(dgp_s$beta[[sp_s$effect_col]])
     sp_s$true_prob_diff <- true_prob_effect(
       dgp_s, weights = sp_s$contrast_weights, estimand = base_spec$prob_estimand

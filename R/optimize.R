@@ -34,55 +34,17 @@
 #' @param standard_scenario Optional character name selecting the reference
 #'   `"standard"` scenario inside `scenarios`.
 #' @param method Search strategy: `"surrogate_gp"` (default) or `"grid"`.
-#' @param n_eval_init Number of space-filling initial lattice points evaluated
-#'   in Stage 1 when `method = "surrogate_gp"` (default `16L`).
-#' @param n_eval_adapt Number of adaptive contour-focused GP evaluations added
-#'   after `n_eval_init` in Stage 1 (default `8L`).
-#' @param nsim_init Number of Monte Carlo simulations per exploratory point in
-#'   Stage 1 (default `80L`).
 #' @param nsim_final Number of Monte Carlo simulations per candidate Pareto
 #'   design in Stage 2 final verification (default `1000L`).
-#' @param nsim_topup Pre-specified number of **independent** additional Monte
-#'   Carlo replications automatically run on Stage-2 candidates whose Monte
-#'   Carlo confidence interval straddles the target (`decision_status == "indeterminate"`),
-#'   default `0L`. When `nsim_topup > 0L` and `topup_policy = "independent"`,
-#'   Stage-2 and Stage-3 Wilson intervals split the Monte Carlo error budget
-#'   equally (`1 - (1 - mc_conf_level) / 2`) so the two-stage decision controls
-#'   overall false-pass probability.
-#' @param topup_policy How top-up replications are evaluated when `nsim_topup > 0L`:
-#'   * `"independent"` (default): Evaluates `"indeterminate"` candidates solely
-#'     on the fresh independent top-up batch without pooling with Stage-2
-#'     replications, applying a two-stage Bonferroni split across Stage 2 and
-#'     Stage 3 to control sequential false-pass risk.
-#'   * `"pooled"`: Pools Stage-2 and top-up replications for exploratory precision
-#'     narrowing (emits a warning and flags `search_meta$adaptive_pooled = TRUE`
-#'     because data-adaptive pooling invalidates nominal fixed-sample Wilson
-#'     coverage).
-#' @param mc_adjustment Multiplicity adjustment applied to Stage-2 Wilson Monte
-#'   Carlo intervals across verified candidates (and scenarios):
-#'   * `"none"` (default): Pointwise `spec$mc_conf_level` Wilson intervals.
-#'   * `"bonferroni"`: Simultaneous Bonferroni-adjusted Wilson confidence level
-#'     `1 - (1 - spec$mc_conf_level) / m` across the `m` verified Stage-2
-#'     candidate (or candidate-by-scenario) decisions.
-#' @param n_verify Number of Pareto-frontier candidate designs verified at
-#'   `nsim_final` replications in Stage 2 (default `4L`).
-#' @param early_stop Logical; when `TRUE` (default) and `nsim_final >= 200L`,
-#'   applies group-sequential futility curtailment during Stage-2 and
-#'   multi-scenario verification: after an interim batch of
-#'   `max(100L, min(250L, nsim_final %/% 4L))` replications, any candidate whose
-#'   `99.9%` Wilson Monte Carlo confidence interval upper bound already lies
-#'   strictly below the target can stop early. Pointwise Monte Carlo intervals
-#'   do not provide simultaneous or sequential coverage guarantees.
-#' @param nsim_sensitivity Number of Monte Carlo simulations per level used to
-#'   build the 3-level random-slope sensitivity table (`optimistic`, `standard`,
-#'   `conservative`) at the recommended `(N_subj, N_item)` (default `200L`; set
-#'   to `0L` to skip).
 #' @param workers Integer number of parallel workers (default `1L`).
-#' @param parallel_backend Parallel execution engine: `"auto"` (default),
-#'   `"mirai"`, `"multicore"`, or `"sequential"`.
 #' @param seed Integer master RNG seed driving strictly disjoint `(stage, point, rep)`
 #'   L'Ecuyer-CMRG streams/substreams (default `20261119L`).
 #' @param verbose Logical; print concise stage progress updates (default `TRUE`).
+#' @param control Control list created by [optimize_control()] holding Stage-1
+#'   screening, top-up, multiplicity, early-stopping, sensitivity, and parallel
+#'   backend settings (`n_eval_init`, `n_eval_adapt`, `nsim_init`, `nsim_topup`,
+#'   `topup_policy`, `mc_adjustment`, `n_verify`, `early_stop`,
+#'   `nsim_sensitivity`, `parallel_backend`).
 #'
 #' @return An S3 object of class `"glmmplanr_result"`. A confirmed recommendation
 #'   requires `decision_status == "pass"` in every requested scenario.
@@ -94,12 +56,13 @@
 #' @examples
 #' des <- design_crossed(list(condition = c("a", "b")))
 #' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
-#' spec <- specify_target(dgp, "condition", criterion = "power",
-#'                        engine = "bayes_laplace", analysis_re = "intercept_only")
+#' spec <- specify_target(dgp, "condition", criterion = "power")
 #' # Five replications demonstrate the output. Use more to make a design decision.
-#' plan <- optimize_sample_size(spec, c(16, 18), 8, method = "grid",
-#'   nsim_init = 5L, nsim_final = 5L, n_verify = 2L, nsim_sensitivity = 0L,
-#'   workers = 1L, verbose = FALSE)
+#' plan <- optimize_sample_size(
+#'   spec, c(16, 18), 8, method = "grid", nsim_final = 5L,
+#'   workers = 1L, verbose = FALSE,
+#'   control = optimize_control(nsim_init = 5L, n_verify = 2L, nsim_sensitivity = 0L)
+#' )
 #' plan$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 #' @export
 optimize_sample_size <- function(
@@ -110,21 +73,15 @@ optimize_sample_size <- function(
   scenarios = NULL,
   standard_scenario = NULL,
   method = c("surrogate_gp", "grid"),
-  n_eval_init = 16L,
-  n_eval_adapt = 8L,
-  nsim_init = 80L,
   nsim_final = 1000L,
-  nsim_topup = 0L,
-  topup_policy = c("independent", "pooled"),
-  mc_adjustment = c("none", "bonferroni"),
-  n_verify = 4L,
-  early_stop = TRUE,
-  nsim_sensitivity = 200L,
   workers = 1L,
-  parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   seed = 20261119L,
-  verbose = TRUE
+  verbose = TRUE,
+  control = optimize_control()
 ) {
+  if (!inherits(control, "glmmplanr_optimize_control")) {
+    cli::cli_abort("{.arg control} must be created by {.fn optimize_control}.")
+  }
   if (uses_box_muller()) {
     return(isolated_seeded_call("optimize_sample_size", environment(), match.call()))
   }
@@ -133,13 +90,18 @@ optimize_sample_size <- function(
   }
   prefer <- match.arg(prefer)
   method <- match.arg(method)
-  topup_policy <- match.arg(topup_policy)
-  mc_adjustment <- match.arg(mc_adjustment)
-  parallel_backend <- match.arg(parallel_backend)
+  n_eval_init <- control$n_eval_init
+  n_eval_adapt <- control$n_eval_adapt
+  nsim_init <- control$nsim_init
+  nsim_topup <- control$nsim_topup
+  topup_policy <- control$topup_policy
+  mc_adjustment <- control$mc_adjustment
+  n_verify <- control$n_verify
+  early_stop <- control$early_stop
+  nsim_sensitivity <- control$nsim_sensitivity
+  parallel_backend <- control$parallel_backend
   workers <- max(1L, as.integer(workers))
   seed <- as.integer(seed)
-  nsim_topup <- max(0L, as.integer(nsim_topup))
-  early_stop <- isTRUE(early_stop)
   if (nsim_topup > 0L && identical(topup_policy, "pooled")) {
     cli::cli_warn(c(
       "Using {.code topup_policy = 'pooled'} combines Stage-2 and adaptive top-up replications.",
@@ -1330,7 +1292,7 @@ evaluate_grid_batch <- function(
     se <- rep(NA_real_, nb)
     pest <- rep(NA_real_, nb)
     pse <- rep(NA_real_, nb)
-    sing <- rep(FALSE, nb)
+    sing <- rep(NA, nb)
     conv <- rep(FALSE, nb)
     status <- rep("engine_error", nb)
     err <- rep("", nb)
@@ -1390,7 +1352,7 @@ evaluate_grid_batch <- function(
   se_mat <- matrix(NA_real_, nrow = n_pts, ncol = nsim)
   pest_mat <- matrix(NA_real_, nrow = n_pts, ncol = nsim)
   pse_mat <- matrix(NA_real_, nrow = n_pts, ncol = nsim)
-  sing_mat <- matrix(FALSE, nrow = n_pts, ncol = nsim)
+  sing_mat <- matrix(NA, nrow = n_pts, ncol = nsim)
   conv_mat <- matrix(FALSE, nrow = n_pts, ncol = nsim)
   status_mat <- matrix("engine_error", nrow = n_pts, ncol = nsim)
   err_mat <- matrix("", nrow = n_pts, ncol = nsim)
@@ -1747,15 +1709,54 @@ print.glmmplanr_result <- function(x, ...) {
 
   role <- if (isTRUE(x$feasible)) "Recommended design" else "Unconfirmed candidate"
   cov_show <- if (x$spec$scale == "logit") opt$coverage else opt$prob_coverage
-  val_info <- assess_inferential_validity(cov_show, opt$n_valid, x$spec$alpha)
+  has_null <- can_define_null_target(x$spec)
+  val_info <- assess_inferential_validity(cov_show, opt$n_valid, x$spec$alpha, has_null = has_null)
+  one_cell <- isTRUE(x$spec$dgp$design$n_cells == 1L)
+  acc_line <- if (one_cell) {
+    sprintf(
+      "Target accuracy (%s): true = %.1f%% | Mean CI width = {.strong %.2f pp} (%.3f logit)",
+      x$spec$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
+    )
+  } else {
+    sprintf(
+      "Accuracy diff (%s): true = %+.1f pp | Mean CI width = {.strong %.2f pp} (%.3f logit)",
+      x$spec$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
+    )
+  }
 
   bullets <- c(
     "Target attainment: {.strong {status_txt}}",
     "Inferential validity: {val_info$detail}",
     "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected})",
     "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
-    "Accuracy diff ({x$spec$prob_estimand}): true = {sprintf('%+.1f pp', opt$prob_diff_true_pp)} | Mean CI width = {.strong {sprintf('%.2f pp', opt$prob_ci_width_mean_pp)}} ({sprintf('%.3f logit', opt$logit_ci_width_mean)})"
+    acc_line
   )
+  exp_regimes <- detect_exploratory_regimes(x$spec)
+  if (length(exp_regimes) > 0L) {
+    exp_str <- paste(exp_regimes, collapse = "; ")
+    bullets <- c(
+      bullets,
+      "Validation scope: {.strong EXPLORATORY REGIME} ({exp_str}). Coverage and null Type I error are not pre-benchmarked across schedules; confirm via {.fn validate_design_point}."
+    )
+  }
+  bnd_info <- assess_boundary_sensitivity(x)
+  if (!is.null(bnd_info)) {
+    buf_str <- if (!is.null(bnd_info$buffer)) {
+      sprintf(
+        " Higher-margin verified PASS: (%d subj x %d items, margin %+.1f pp).",
+        bnd_info$buffer$n_subj, bnd_info$buffer$n_item, 100 * bnd_info$buffer$mc_margin
+      )
+    } else {
+      ""
+    }
+    bullets <- c(
+      bullets,
+      sprintf(
+        "Boundary sensitivity: Selected PASS is near the threshold (MC lower-bound margin = %+.1f pp); minimum passing (N_subj, N_item) can shift across search seeds.%s Report candidate range or confirm via {.fn validate_design_point}.",
+        100 * bnd_info$opt_margin, buf_str
+      )
+    )
+  }
   if (!is.null(opt$joint_prob) && !is.na(opt$joint_prob)) {
     cli::cli_inform(sprintf("Detection and width attainment in the same replication = %.1f%% [%.1f%%, %.1f%%]",
       100 * opt$joint_prob, 100 * opt$joint_mc_lo, 100 * opt$joint_mc_hi))
@@ -1786,9 +1787,14 @@ print.glmmplanr_result <- function(x, ...) {
     )
     bullets <- c(bullets, "Pareto trade-off frontier: {pf_str}")
   }
+  sing_str <- if (is.na(opt$singular_rate)) {
+    "not applicable (regularized)"
+  } else {
+    sprintf("%.1f%%", opt$singular_rate * 100)
+  }
   bullets <- c(
     bullets,
-    "Diagnostics: Singular = {sprintf('%.1f%%', opt$singular_rate * 100)} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Stage-2 H1 Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
+    "Diagnostics: Singular = {sing_str} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Stage-2 H1 Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
   )
   if (nzchar(opt$top_error_reason)) {
     bullets <- c(bullets, "Top non-conv/error reason: {.val {opt$top_error_reason}}")

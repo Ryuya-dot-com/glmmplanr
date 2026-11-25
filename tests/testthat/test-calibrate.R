@@ -31,8 +31,7 @@ test_that("2D Gauss-Hermite marginal inversion recovers m-AFC cell probabilities
     item_prob_range = c(0.45, 0.88),
     slope_sd_ratio  = 0.35,
     corr_structure  = 0.20,
-    check_nsim      = 8000L,
-    seed            = 123L
+    control         = calibrate_control(check_nsim = 8000L, seed = 123L)
   )
 
   expect_s3_class(dgp, "glmmplanr_dgp")
@@ -66,14 +65,16 @@ test_that("calibration preserves a fresh and a Box-Muller caller, including the 
     else library(glmmplanr)
     d <- design_crossed(list())
     if (exists(".Random.seed", .GlobalEnv, inherits = FALSE)) rm(".Random.seed", envir = .GlobalEnv)
-    model <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3, check_nsim = 20L)
+    model <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3,
+                           control = calibrate_control(check_nsim = 20L))
     empty <- !exists(".Random.seed", .GlobalEnv, inherits = FALSE)
     set.seed(18, normal.kind = "Box-Muller")
     expected <- rnorm(2)
     set.seed(18, normal.kind = "Box-Muller")
     first <- rnorm(1)
     before <- .Random.seed
-    copy <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3, check_nsim = 20L)
+    copy <- calibrate_dgp(d, .6, subj_sd = .4, item_sd = .3,
+                          control = calibrate_control(check_nsim = 20L))
     preserved <- identical(.Random.seed, before) && identical(c(first, rnorm(1)), expected)
     set.seed(18, normal.kind = "Inversion")
     sample.int(.Machine$integer.max, 1L)
@@ -99,3 +100,58 @@ test_that("wide normal effects recover the independently integrated probabilitie
   expect_lt(abs(true_prob_effect(g, c(-1, 1)) - diff(ref)), 2e-7)
   expect_gt(g$n_quad, g$solver_info$requested_nodes)
 })
+
+test_that("chance and probability validation messages guide common beginner inputs", {
+  des <- design_crossed(list(cond = c("a", "b")))
+
+  expect_error(
+    calibrate_dgp(des, c(a = 0.6, b = 0.7), chance = 3, subj_sd = 0.8, item_sd = 0.6),
+    "1/m"
+  )
+  expect_error(
+    calibrate_dgp(des, c(a = 60, b = 70), chance = 0, subj_sd = 0.8, item_sd = 0.6),
+    "0-1 scale"
+  )
+  expect_error(
+    calibrate_dgp(des, c(a = 0.20, b = 0.60), chance = 0.25, subj_sd = 0.8, item_sd = 0.6),
+    "chance = 0"
+  )
+  expect_error(
+    prob_range_to_sd(c(0.20, 0.80), chance = 0.25),
+    "guessing floor"
+  )
+  expect_error(
+    prob_range_to_sd(c(40, 85), chance = 0),
+    "0-1 scale"
+  )
+
+  dgp0 <- calibrate_dgp(des, c(a = 0.5, b = 0.6), chance = 0,
+                        subj_sd = 0.5, item_sd = 0.5,
+                        control = calibrate_control(check_nsim = 50L))
+  # Default slope_sd_ratio = 0 yields intercept-only DGP and match_dgp analysis_re
+  expect_equal(unname(dgp0$tau_subj), c(0.5, 0))
+  expect_equal(unname(dgp0$tau_item), c(0.5, 0))
+  sp0 <- specify_target(dgp0, "cond")
+  expect_identical(sp0$analysis_re, "intercept_only")
+  expect_identical(sp0$engine, "bayes_laplace")
+  out0 <- paste(testthat::capture_messages(capture.output(print(dgp0))), collapse = "\n")
+  expect_match(out0, "ordinary binary logit", fixed = TRUE)
+
+  dgp3 <- calibrate_dgp(des, c(a = 0.6, b = 0.7), chance = 1 / 3,
+                        subj_sd = 0.5, item_sd = 0.5, slope_sd_ratio = 0.35,
+                        corr_structure = "zero",
+                        control = calibrate_control(check_nsim = 50L))
+  expect_identical(specify_target(dgp3, "cond")$analysis_re, "uncorrelated")
+  dgp3_corr <- calibrate_dgp(des, c(a = 0.6, b = 0.7), chance = 1 / 3,
+                             subj_sd = 0.5, item_sd = 0.5, slope_sd_ratio = 0.35,
+                             corr_structure = 0.25,
+                             control = calibrate_control(check_nsim = 50L))
+  expect_identical(specify_target(dgp3_corr, "cond")$analysis_re, "maximal")
+  out3 <- paste(testthat::capture_messages(capture.output(print(dgp3))), collapse = "\n")
+  expect_match(out3, "guessing-adjusted logit", fixed = TRUE)
+
+  expect_error(calibrate_dgp(des, c(a = 0.5, b = 0.6), subj_sd = 0.5, item_sd = 0.5, control = list()), "calibrate_control")
+  expect_error(specify_target(dgp0, "cond", control = list()), "target_control")
+  expect_error(optimize_sample_size(sp0, 12, 8, control = list()), "optimize_control")
+})
+

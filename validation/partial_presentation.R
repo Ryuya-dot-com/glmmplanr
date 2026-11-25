@@ -57,8 +57,9 @@ reference_fit <- function(d, refits = n_boot) {
 specs <- lapply(c(null = .60, planned = .55), function(p) lapply(designs, function(des) {
   dgp <- calibrate_dgp(des, c(.60, p), chance = 0, subj_sd = .5, item_sd = .3,
                        slope_sd_ratio = 0, corr_structure = 0)
-  specify_target(dgp, "group", scale = "pp", prob_estimand = "marginal", engine = "bayes_laplace",
-                 analysis_re = "intercept_only", on_singular = "flag_only", prob_boot = n_boot)
+  specify_target(dgp, "group", scale = "pp", engine = "bayes_laplace",
+                 analysis_re = "intercept_only",
+                 control = target_control(prob_estimand = "marginal", on_singular = "flag_only", prob_boot = n_boot))
 }))
 
 run_rep <- function(rep_id, conditions = names(specs), layouts = names(designs), refits = n_boot) {
@@ -113,7 +114,7 @@ summarize_presentation <- function(raw) {
       valid, detected = hits, detection = hits/n, detection_lo = di[1], detection_hi = di[2],
       covered = cover, coverage = cover/valid, coverage_lo = ci[1], coverage_hi = ci[2],
       estimate_pp = mean(d$estimate_pp[ok]), width_pp = mean(d$width_pp[ok]),
-      singular_valid = sum(d$singular[ok]),
+      singular_valid = if (all(is.na(d$singular[ok]))) NA_integer_ else sum(d$singular[ok], na.rm = TRUE),
       R_version = as.character(getRversion()), lme4_version = as.character(packageVersion("lme4")))
   }))
 }

@@ -109,7 +109,6 @@ spec1 <- specify_target(
   dgp1,
   effect         = "exposure",
   scale          = "pp",
-  prob_estimand  = "marginal",
   criterion      = "both",
   power_min      = 0.80,
   ci_width       = 12.0,
@@ -122,12 +121,11 @@ res1 <- optimize_sample_size(
   n_item_range = c(16, 48),
   prefer       = "balanced",
   method       = "grid",
-  nsim_init    = 60,
   nsim_final   = 180,
-  nsim_topup   = 80,
   workers      = workers_n,
   seed         = 810101,
-  verbose      = FALSE
+  verbose      = FALSE,
+  control      = optimize_control(nsim_init = 60L, nsim_topup = 80L)
 )
 
 p1_left <- plot(res1, type = "contour", metric = "power") +
@@ -198,7 +196,6 @@ spec2 <- specify_target(
   dgp2,
   effect         = "arm",
   scale          = "pp",
-  prob_estimand  = "marginal",
   criterion      = "power",
   power_min      = 0.80,
   prob_se_method = "joint_delta",
@@ -298,20 +295,21 @@ des3 <- design_testlet(
 probs3 <- cell_probs_from_diffs(des3, baseline_prob = 0.66, effects_pp = c(glossing = 8))
 dgp3 <- calibrate_dgp(
   des3,
-  cell_probs             = probs3,
-  chance                 = 0.25,
-  subj_sd                = 0.75,
-  item_sd                = 0.50,
-  testlet_sd             = 0.45,
-  participant_testlet_sd = 0.30,
-  slope_sd_ratio         = 0.20,
-  corr_structure         = 0.10
+  cell_probs     = probs3,
+  chance         = 0.25,
+  subj_sd        = 0.75,
+  item_sd        = 0.50,
+  slope_sd_ratio = 0.20,
+  corr_structure = 0.10,
+  control        = calibrate_control(
+    testlet_sd             = 0.45,
+    participant_testlet_sd = 0.30
+  )
 )
 spec3 <- specify_target(
   dgp3,
   effect         = "glossing",
   scale          = "pp",
-  prob_estimand  = "marginal",
   criterion      = "power",
   power_min      = 0.80,
   prob_se_method = "joint_delta",
@@ -330,12 +328,11 @@ res3 <- optimize_sample_size(
   scenarios         = scens3,
   standard_scenario = "standard_8pp",
   method            = "grid",
-  nsim_init         = 50,
   nsim_final        = 150,
-  nsim_topup        = 60,
   workers           = workers_n,
   seed              = 830303,
-  verbose           = FALSE
+  verbose           = FALSE,
+  control           = optimize_control(nsim_init = 50L, nsim_topup = 60L)
 )
 
 se3 <- res3$robust$scenario_evaluations

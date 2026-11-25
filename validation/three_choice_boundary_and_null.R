@@ -29,8 +29,9 @@ dgp_planned <- calibrate_dgp(
 )
 sp_planned <- specify_target(
   dgp_planned, effect = "exposure", scale = "logit",
-  criterion = "ci_width", ci_width = 1.00, ci_assurance = 0.80,
-  engine = "bayes_laplace", on_singular = "flag_only"
+  criterion = "ci_width", ci_width = 1.00,
+  engine = "bayes_laplace",
+  control = target_control(ci_assurance = 0.80, on_singular = "flag_only")
 )
 sp_strict_null <- glmmplanr:::null_target_spec(sp_planned)
 stopifnot(abs(sp_strict_null$true_beta) < 1e-12)
@@ -168,16 +169,18 @@ opt_rows <- lapply(1:5, function(s_id) {
     n_item_range = item_lat,
     prefer = "fewer_trials",
     method = "surrogate_gp",
-    n_eval_init = 8L,
-    n_eval_adapt = 4L,
-    nsim_init = 24L,
     nsim_final = 96L,
-    n_verify = 4L,
-    nsim_topup = 0L,
-    nsim_sensitivity = 0L,
     workers = mc_cores,
     seed = 7650000L + s_id,
-    verbose = FALSE
+    verbose = FALSE,
+    control = optimize_control(
+      n_eval_init = 8L,
+      n_eval_adapt = 4L,
+      nsim_init = 24L,
+      n_verify = 4L,
+      nsim_topup = 0L,
+      nsim_sensitivity = 0L
+    )
   )
   opt <- plan$optimal
   data.frame(

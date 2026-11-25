@@ -119,7 +119,7 @@ test_that("search and validation use admissible bank sizes and per-person worklo
   dgp <- calibrate_dgp(des, c(.6,.55), subj_sd = .5, item_sd = .3, slope_sd_ratio = 0)
   sp <- specify_target(dgp, "group", engine = "bayes_laplace", analysis_re = "intercept_only")
   plan <- optimize_sample_size(sp, 16, c(4, 6), method = "grid", nsim_final = 2,
-                               nsim_sensitivity = 0, verbose = FALSE)
+                               verbose = FALSE, control = optimize_control(nsim_sensitivity = 0))
   expect_equal(sort(unique(plan$verified$n_item)), 5:6)
   expect_true(all(plan$verified$n_trials_scheduled == 80))
   expect_match(report_plan(plan, print_output = FALSE), "5 distinct items")
@@ -167,4 +167,30 @@ test_that("an empty factor list generates a one-cell crossed random-item Rasch m
   expect_equal(validation$true_target, c(0, beta))
   expect_equal(validation$n_valid, c(2L, 2L))
 })
+
+test_that("design_crossed print and error messages guide allocation and balanced multiples", {
+  des <- design_crossed(
+    factors = list(study = c("restudy", "retrieval"), rounds = c("three", "four")),
+    between_subj = "rounds"
+  )
+  combined <- paste(testthat::capture_messages(print(des)), collapse = "\n")
+  expect_match(combined, "cell_probs", fixed = TRUE)
+  expect_match(combined, "restudy_three", fixed = TRUE)
+  expect_match(combined, "n_subj = 4k, n_item = 2m", fixed = TRUE)
+  expect_match(combined, "each participant sees each item once", fixed = TRUE)
+
+  expect_error(
+    generate_design_schedule(des, n_subj = 10L, n_item = 10L),
+    "Nearest balanced values: 8 or 12"
+  )
+  expect_error(
+    generate_design_schedule(des, n_subj = 12L, n_item = 9L),
+    "Nearest balanced values: 8 or 10"
+  )
+  expect_error(
+    design_crossed(list(item = c("a", "b"))),
+    "reserved column names"
+  )
+})
+
 

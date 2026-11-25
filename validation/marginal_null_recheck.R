@@ -12,19 +12,22 @@ run_layout <- function(layout_nm, base_id) {
   des <- design_crossed(list(condition = c("A", "B")), allocation = layout_nm, contrast = "treatment")
   dgp <- calibrate_dgp(
     des, cell_probs = c(A = 0.60, B = 0.60), chance = 0,
-    subj_sd = 0.5, item_sd = 0.3, slope_sd_ratio = 0, corr_structure = 0, seed = 417L
+    subj_sd = 0.5, item_sd = 0.3, slope_sd_ratio = 0, corr_structure = 0,
+    control = calibrate_control(seed = 417L)
   )
   sched <- generate_design_schedule(des, n_subj = 64L, n_item = 20L)
 
   sp_boot <- specify_target(
-    dgp, effect = "condition", scale = "pp", prob_estimand = "marginal",
+    dgp, effect = "condition", scale = "pp",
     engine = "bayes_laplace", analysis_re = "intercept_only",
-    prob_se_method = "bootstrap", prob_boot = 99L, on_singular = "flag_only"
+    prob_se_method = "bootstrap",
+    control = target_control(prob_estimand = "marginal", prob_boot = 99L, on_singular = "flag_only")
   )
   sp_jd <- specify_target(
-    dgp, effect = "condition", scale = "pp", prob_estimand = "marginal",
+    dgp, effect = "condition", scale = "pp",
     engine = "bayes_laplace", analysis_re = "intercept_only",
-    prob_se_method = "joint_delta", on_singular = "flag_only"
+    prob_se_method = "joint_delta",
+    control = target_control(prob_estimand = "marginal", on_singular = "flag_only")
   )
 
   rows <- lapply(seq_len(n_rep), function(r) {

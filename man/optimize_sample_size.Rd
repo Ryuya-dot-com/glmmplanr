@@ -12,20 +12,11 @@ optimize_sample_size(
   scenarios = NULL,
   standard_scenario = NULL,
   method = c("surrogate_gp", "grid"),
-  n_eval_init = 16L,
-  n_eval_adapt = 8L,
-  nsim_init = 80L,
   nsim_final = 1000L,
-  nsim_topup = 0L,
-  topup_policy = c("independent", "pooled"),
-  mc_adjustment = c("none", "bonferroni"),
-  n_verify = 4L,
-  early_stop = TRUE,
-  nsim_sensitivity = 200L,
   workers = 1L,
-  parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   seed = 20261119L,
-  verbose = TRUE
+  verbose = TRUE,
+  control = optimize_control()
 )
 }
 \arguments{
@@ -62,72 +53,21 @@ the all-scenario robust design along with the sample-size increments
 
 \item{method}{Search strategy: \code{"surrogate_gp"} (default) or \code{"grid"}.}
 
-\item{n_eval_init}{Number of space-filling initial lattice points evaluated
-in Stage 1 when \code{method = "surrogate_gp"} (default \code{16L}).}
-
-\item{n_eval_adapt}{Number of adaptive contour-focused GP evaluations added
-after \code{n_eval_init} in Stage 1 (default \code{8L}).}
-
-\item{nsim_init}{Number of Monte Carlo simulations per exploratory point in
-Stage 1 (default \code{80L}).}
-
 \item{nsim_final}{Number of Monte Carlo simulations per candidate Pareto
 design in Stage 2 final verification (default \code{1000L}).}
 
-\item{nsim_topup}{Pre-specified number of \strong{independent} additional Monte
-Carlo replications automatically run on Stage-2 candidates whose Monte
-Carlo confidence interval straddles the target (\code{decision_status == "indeterminate"}),
-default \code{0L}. When \code{nsim_topup > 0L} and \code{topup_policy = "independent"},
-Stage-2 and Stage-3 Wilson intervals split the Monte Carlo error budget
-equally (\code{1 - (1 - mc_conf_level) / 2}) so the two-stage decision controls
-overall false-pass probability.}
-
-\item{topup_policy}{How top-up replications are evaluated when \code{nsim_topup > 0L}:
-\itemize{
-\item \code{"independent"} (default): Evaluates \code{"indeterminate"} candidates solely
-on the fresh independent top-up batch without pooling with Stage-2
-replications, applying a two-stage Bonferroni split across Stage 2 and
-Stage 3 to control sequential false-pass risk.
-\item \code{"pooled"}: Pools Stage-2 and top-up replications for exploratory precision
-narrowing (emits a warning and flags \code{search_meta$adaptive_pooled = TRUE}
-because data-adaptive pooling invalidates nominal fixed-sample Wilson
-coverage).
-}}
-
-\item{mc_adjustment}{Multiplicity adjustment applied to Stage-2 Wilson Monte
-Carlo intervals across verified candidates (and scenarios):
-\itemize{
-\item \code{"none"} (default): Pointwise \code{spec$mc_conf_level} Wilson intervals.
-\item \code{"bonferroni"}: Simultaneous Bonferroni-adjusted Wilson confidence level
-\code{1 - (1 - spec$mc_conf_level) / m} across the \code{m} verified Stage-2
-candidate (or candidate-by-scenario) decisions.
-}}
-
-\item{n_verify}{Number of Pareto-frontier candidate designs verified at
-\code{nsim_final} replications in Stage 2 (default \code{4L}).}
-
-\item{early_stop}{Logical; when \code{TRUE} (default) and \code{nsim_final >= 200L},
-applies group-sequential futility curtailment during Stage-2 and
-multi-scenario verification: after an interim batch of
-\code{max(100L, min(250L, nsim_final \%/\% 4L))} replications, any candidate whose
-\verb{99.9\%} Wilson Monte Carlo confidence interval upper bound already lies
-strictly below the target can stop early. Pointwise Monte Carlo intervals
-do not provide simultaneous or sequential coverage guarantees.}
-
-\item{nsim_sensitivity}{Number of Monte Carlo simulations per level used to
-build the 3-level random-slope sensitivity table (\code{optimistic}, \code{standard},
-\code{conservative}) at the recommended \verb{(N_subj, N_item)} (default \code{200L}; set
-to \code{0L} to skip).}
-
 \item{workers}{Integer number of parallel workers (default \code{1L}).}
-
-\item{parallel_backend}{Parallel execution engine: \code{"auto"} (default),
-\code{"mirai"}, \code{"multicore"}, or \code{"sequential"}.}
 
 \item{seed}{Integer master RNG seed driving strictly disjoint \verb{(stage, point, rep)}
 L'Ecuyer-CMRG streams/substreams (default \code{20261119L}).}
 
 \item{verbose}{Logical; print concise stage progress updates (default \code{TRUE}).}
+
+\item{control}{Control list created by \code{\link[=optimize_control]{optimize_control()}} holding Stage-1
+screening, top-up, multiplicity, early-stopping, sensitivity, and parallel
+backend settings (\code{n_eval_init}, \code{n_eval_adapt}, \code{nsim_init}, \code{nsim_topup},
+\code{topup_policy}, \code{mc_adjustment}, \code{n_verify}, \code{early_stop},
+\code{nsim_sensitivity}, \code{parallel_backend}).}
 }
 \value{
 An S3 object of class \code{"glmmplanr_result"}. A confirmed recommendation
@@ -152,11 +92,12 @@ in a random-item Rasch model, use \code{\link[=plan_rasch_precision]{plan_rasch_
 \examples{
 des <- design_crossed(list(condition = c("a", "b")))
 dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
-spec <- specify_target(dgp, "condition", criterion = "power",
-                       engine = "bayes_laplace", analysis_re = "intercept_only")
+spec <- specify_target(dgp, "condition", criterion = "power")
 # Five replications demonstrate the output. Use more to make a design decision.
-plan <- optimize_sample_size(spec, c(16, 18), 8, method = "grid",
-  nsim_init = 5L, nsim_final = 5L, n_verify = 2L, nsim_sensitivity = 0L,
-  workers = 1L, verbose = FALSE)
+plan <- optimize_sample_size(
+  spec, c(16, 18), 8, method = "grid", nsim_final = 5L,
+  workers = 1L, verbose = FALSE,
+  control = optimize_control(nsim_init = 5L, n_verify = 2L, nsim_sensitivity = 0L)
+)
 plan$verified[c("n_subj", "n_item", "nsim", "decision_status")]
 }

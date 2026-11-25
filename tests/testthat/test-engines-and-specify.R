@@ -40,14 +40,16 @@ test_that("C++ Laplace, Regularized Bayes Laplace, and lme4 engines run and prod
   expect_equal(ev_ml$n_valid + as.integer(round(ev_ml$max_iter_rate * n_rep)), n_rep)
   expect_gt(ev_ml$n_valid, 0L)
   expect_equal(ev_by$n_valid, n_rep)
-  # Regularized Bayesian engine never suffers singular variance collapse
-  expect_equal(ev_by$singular_rate, 0)
+  # Regularized Bayesian engine marks boundary singularity check as not applicable (NA)
+  expect_true(is.na(ev_by$singular_rate))
   expect_true(is.finite(ev_ml$power) && ev_ml$power >= 0 && ev_ml$power <= 1)
   expect_true(is.finite(ev_ml$ci_width_mean) && ev_ml$ci_width_mean > 0)
   expect_true("reduced_power" %in% names(ev_ml))
 
   # Verify lme4_fast backend integration
-  sp_lme4 <- specify_target(dgp, effect = "exposure", criterion = "power", engine = "lme4_fast", analysis_re = "uncorrelated", on_singular = "flag_only")
+  sp_lme4 <- specify_target(dgp, effect = "exposure", criterion = "power", engine = "lme4_fast",
+                            analysis_re = "uncorrelated",
+                            control = target_control(on_singular = "flag_only"))
   ev_lme4 <- evaluate_design_point(sp_lme4, n_subj = 32, n_item = 20, nsim = 3L, stream_seeds = 7L)
   expect_equal(ev_lme4$n_valid, 3L)
 
@@ -69,8 +71,8 @@ test_that("the regularized engine distinguishes small prior scales", {
                         contrast = "treatment")
   dgp <- calibrate_dgp(des, c(.72, .80), subj_sd = .8, item_sd = .6, slope_sd_ratio = 0)
   width <- function(s) {
-    spec <- specify_target(dgp, "arm", engine = "bayes_laplace", prior_tau_sd = s,
-                           on_singular = "flag_only")
+    spec <- specify_target(dgp, "arm", engine = "bayes_laplace",
+                           control = target_control(prior_tau_sd = s, on_singular = "flag_only"))
     evaluate_design_point(spec, 32, 12, nsim = 3, stream_seeds = 881)$logit_ci_width_mean
   }
   expect_lt(width(.1), width(.5))

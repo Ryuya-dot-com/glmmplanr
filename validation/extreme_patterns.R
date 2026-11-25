@@ -8,7 +8,8 @@ dgp <- calibrate_dgp(design,
   chance = 1/3, subj_prob_range = c(.42, .85), item_prob_range = c(.45, .86),
   slope_sd_ratio = .30, corr_structure = .20)
 planned <- specify_target(dgp, "A:B:C", scale = "pp", criterion = "joint", power_min = .80,
-                          ci_width = 12, engine = "bayes_laplace", prob_boot = 19, on_singular = "flag_only")
+                          ci_width = 12, engine = "bayes_laplace",
+                          control = target_control(prob_boot = 19, on_singular = "flag_only"))
 specs <- list(null = glmmplanr:::null_target_spec(planned), planned = planned)
 scenarios <- data.frame(scenario = c("natural", "perfect_person", "zero_item", "both_item_priority"),
                         persons = c(FALSE, TRUE, FALSE, TRUE), items = c(FALSE, FALSE, TRUE, TRUE))

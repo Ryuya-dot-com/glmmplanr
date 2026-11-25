@@ -50,7 +50,8 @@ test_that("marginal 2x2 contrasts and analysis formulas reproduce the design cod
   d <- design_testlet(list(A = c("a", "b"), B = c("c", "d")),
                       testlet_size = 2, between_subj = "B")
   cells <- cell_probs_from_diffs(d, .65, c(A = 8, B = 4, "A:B" = 4))
-  g <- calibrate_dgp(d, cells, chance = 1/3, subj_sd = .8, item_sd = .6, testlet_sd = .2)
+  g <- calibrate_dgp(d, cells, chance = 1/3, subj_sd = .8, item_sd = .6,
+                     control = calibrate_control(testlet_sd = .2))
   expect_equal(check_dgp(g, FALSE)$marginal_effects$effects_pp, c(8, 4, 4), tolerance = 1e-6)
   expect_identical(coef(g), g$beta)
   tr <- with_rng_stream(15L, simulate_dgp_data(g, n_subj = 24L, n_item = 16L))
@@ -74,5 +75,5 @@ test_that("marginal 2x2 contrasts and analysis formulas reproduce the design cod
                        uncorrelated = rep(1L, 10L))
     expect_equal(sort(unname(lengths(terms))), sort(expected))
   }
-  expect_identical(family(specify_target(g, "A", analysis_link = "logit"))$link, "logit")
+  expect_identical(family(specify_target(g, "A", control = target_control(analysis_link = "logit")))$link, "logit")
 })

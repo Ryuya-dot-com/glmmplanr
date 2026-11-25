@@ -230,8 +230,9 @@ spec1 &lt;- specify_target(
 )
 res1 &lt;- optimize_sample_size(
   spec1, n_subj_range = c(24, 80), n_item_range = c(16, 48),
-  prefer = "balanced", method = "grid", nsim_init = 60, nsim_final = 180,
-  nsim_topup = 80, workers = 2, seed = 810101
+  prefer = "balanced", method = "grid", nsim_final = 180,
+  workers = 2, seed = 810101,
+  control = optimize_control(nsim_init = 60L, nsim_topup = 80L)
 )</pre>
         </div>
       </div>
@@ -297,7 +298,7 @@ dgp2 &lt;- calibrate_dgp(
   subj_sd = 1.05, item_sd = 0.80, slope_sd_ratio = 0
 )
 spec2 &lt;- specify_target(dgp2, effect = "arm", scale = "pp", criterion = "power",
-  power_min = 0.80, prob_estimand = "marginal", prob_se_method = "joint_delta",
+  power_min = 0.80, prob_se_method = "joint_delta",
   engine = "bayes_laplace")
 validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030)</pre>
         </div>
@@ -356,20 +357,21 @@ validate_design_point(spec2, n_subj = 96, n_item = 32, nsim = 140, seed = 820030
 probs3 &lt;- cell_probs_from_diffs(des3, baseline_prob = 0.66, effects_pp = c(glossing = 8))
 dgp3 &lt;- calibrate_dgp(
   des3,
-  cell_probs             = probs3,
-  chance                 = 0.25,
-  subj_sd                = 0.75,
-  item_sd                = 0.50,
-  testlet_sd             = 0.45,
-  participant_testlet_sd = 0.30,
-  slope_sd_ratio         = 0.20,
-  corr_structure         = 0.10
+  cell_probs     = probs3,
+  chance         = 0.25,
+  subj_sd        = 0.75,
+  item_sd        = 0.50,
+  slope_sd_ratio = 0.20,
+  corr_structure = 0.10,
+  control        = calibrate_control(
+    testlet_sd             = 0.45,
+    participant_testlet_sd = 0.30
+  )
 )
 spec3 &lt;- specify_target(
   dgp3,
   effect         = "glossing",
   scale          = "pp",
-  prob_estimand  = "marginal",
   criterion      = "power",
   power_min      = 0.80,
   prob_se_method = "joint_delta",
@@ -388,12 +390,11 @@ res3 &lt;- optimize_sample_size(
   scenarios         = scens3,
   standard_scenario = "standard_8pp",
   method            = "grid",
-  nsim_init         = 50,
   nsim_final        = 150,
-  nsim_topup        = 60,
   workers           = 2L,
   seed              = 830303,
-  verbose           = FALSE
+  verbose           = FALSE,
+  control           = optimize_control(nsim_init = 50L, nsim_topup = 60L)
 )</pre>
         </div>
       </div>

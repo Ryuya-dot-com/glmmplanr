@@ -8,29 +8,15 @@ specify_target(
   dgp,
   effect,
   scale = c("logit", "pp", "percentage_point", "prob"),
-  prob_estimand = c("marginal", "conditional"),
-  contrast_weights = NULL,
   criterion = c("power", "ci_width", "both", "rope", "joint"),
   power_min = 0.8,
   ci_width = NULL,
-  ci_assurance = 0.8,
-  rope = NULL,
   alpha = 0.05,
-  failure_policy = c("effective", "conditional"),
-  min_valid_rate = 0.9,
-  mc_conf_level = 0.95,
-  engine = c("glmmTMB", "lme4_fast", "lme4", "stan_laplace", "stan_hmc", "bayes_laplace",
-    "cpp_laplace"),
-  stage1_engine = NULL,
-  stage1_re = c("match", "uncorrelated"),
-  on_singular = c("flag_and_compare", "flag_only", "reduce_corr", "switch_bayes"),
-  analysis_re = c("maximal", "uncorrelated", "intercept_only"),
-  analysis_link = c("match_dgp", "logit"),
-  lkj_eta = 2,
-  prior_beta_sd = 2.5,
-  prior_tau_sd = 1.5,
-  prob_boot = 99L,
-  prob_se_method = c("bootstrap", "joint_delta")
+  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc",
+    "stan_laplace"),
+  analysis_re = c("match_dgp", "maximal", "uncorrelated", "intercept_only"),
+  prob_se_method = c("bootstrap", "joint_delta"),
+  control = target_control()
 )
 }
 \arguments{
@@ -42,8 +28,11 @@ labels and model-matrix column names (e.g., \code{"exposure1:spacing1"}) are
 accepted. For a design with no experimental factors, use \code{"(Intercept)"}.
 On the logit scale its null is a zero conditional intercept (probability
 0.5 for an ordinary logit at zero random effects). On the probability
-scale the one cell gives an absolute probability. Use \code{ci_width} for its
-precision. Variance components and individual scores require a separate analysis.}
+scale the one cell gives an absolute probability: use \code{criterion = "ci_width"}
+for its precision, and confirm planned-condition coverage and width
+attainment via \code{\link[=validate_design_point]{validate_design_point()}} or \code{\link[=evaluate_design_point]{evaluate_design_point()}}
+(no zero-difference null applies). Variance components and individual
+scores require a separate analysis.}
 
 \item{scale}{Scale on which detection, precision (\code{ci_width}) and equivalence (\code{rope})
 targets are expressed and evaluated:
@@ -56,27 +45,12 @@ at most 10 percentage points, such as \verb{+5.0 pp [0.0, 10.0]}).
 (e.g., \code{ci_width = 0.10} for 10 percentage points).
 }}
 
-\item{prob_estimand}{Estimand used for probability-difference (\code{"pp"} /
-\code{"prob"}) calculations (and always reported diagnostically even when
-\code{scale = "logit"}):
-\itemize{
-\item \code{"marginal"} (default): Population-standardized (G-computation) accuracy
-difference averaging over participant and item random-effect variances via
-Gauss-Hermite quadrature.
-\item \code{"conditional"}: Accuracy difference for an average participant and
-average item (\eqn{u_S = 0, u_I = 0}).
-}}
-
-\item{contrast_weights}{Optional custom numeric vector of cell contrast
-weights of length \code{dgp$design$n_cells} (defaults to
-\code{\link[=cell_contrast_weights]{cell_contrast_weights()}}).}
-
 \item{criterion}{Evaluation objective:
 \itemize{
 \item \code{"power"}: Statistical power \eqn{\ge} \code{power_min}.
 \item \code{"ci_width"}: Precision / AIPE criterion requiring the \code{(1 - alpha)}
 interval width to be \eqn{\le} \code{ci_width} with probability \eqn{\ge}
-\code{ci_assurance}.
+\code{ci_assurance} (set in \code{\link[=target_control]{target_control()}}).
 \item \code{"both"}: Requires both statistical power \eqn{\ge} \code{power_min} and
 interval width criterion (\code{ci_width}), assessed separately.
 \item \code{"joint"}: Probability of detecting the effect and meeting the width bound
@@ -93,98 +67,44 @@ width \eqn{w_{\max}} in units matching \code{scale} (\code{logit} when
 \code{scale = "logit"}, percentage points \verb{0..100} when \code{scale = "pp"}, or
 probability \verb{0..1} when \code{scale = "prob"}).}
 
-\item{ci_assurance}{Target probability \eqn{\Pr(W \le w_{\max})} for AIPE
-interval width assurance (default \code{0.80}).}
-
-\item{rope}{Numeric vector \code{c(low, high)} defining the Region of Practical
-Equivalence in units matching \code{scale} (defaults to \code{c(-0.18, 0.18)} on
-\code{"logit"}, \code{c(-3, 3)} on \code{"pp"}, or \code{c(-0.03, 0.03)} on \code{"prob"}).}
-
 \item{alpha}{Two-sided significance level / \code{1 - conf_level} (default \code{0.05}).}
 
-\item{failure_policy}{How non-converged or failed replications enter sample
-size pass/fail decisions:
-\itemize{
-\item \code{"effective"} (default): Conservative unconditional probability of
-obtaining a valid converged fit that also meets the criterion (failed
-replications count as \code{0} / non-attainment), while still reporting
-\code{conditional_power} alongside.
-\item \code{"conditional"}: Evaluates \code{conditional_power} among valid fits while
-requiring \code{valid_rate >= min_valid_rate}.
-}}
-
-\item{min_valid_rate}{Minimum acceptable proportion of valid converged fits
-when \code{failure_policy = "conditional"} (default \code{0.90}).}
-
-\item{mc_conf_level}{Confidence level for Wilson Monte Carlo uncertainty
-intervals used to classify borderline candidates as \code{"pass"},
-\code{"indeterminate"}, or \code{"fail"} (default \code{0.95}; Morris et al., 2019).}
-
-\item{engine}{Primary estimation backend: \code{"glmmTMB"}, \code{"lme4_fast"},
-\code{"lme4"}, \code{"stan_hmc"}, \code{"bayes_laplace"}, \code{"cpp_laplace"}, or legacy alias
-\code{"stan_laplace"} (deprecated; executes full HMC/NUTS via \code{"stan_hmc"}
-rather than Laplace approximation). Unpenalized engines flag separation if
-all observed responses in any fixed-effect design cell are 0 or all are 1.
-Each cell has its own linear predictor in the factorial model. The primary
-fit is then invalid, and a bootstrap refit with this pattern is also
-invalid. Regularized engines can return finite estimates in these cases.
-For \code{"cpp_laplace"} and \code{"bayes_laplace"}, analytical fixed-effect SEs
-combine the Tierney-Kadane Laplace Hessian with a diagonal log-SD variance
-propagation term; off-diagonal covariances among SD estimates and
-uncertainty in random-slope correlation parameters are not propagated, so
-correlated-slope designs (especially under $m$-AFC or sparsity) should be
-cross-checked against \code{"stan_hmc"} or parametric bootstrap SEs.
-Check sensitivity to the fixed-effect prior. An individual participant or
-item with a constant response pattern can contribute to either fit.}
-
-\item{stage1_engine}{Fast estimation backend used during Stage-1 surrogate
-exploration before Stage-2 verification.}
-
-\item{stage1_re}{Random-effect covariance structure used during fast Stage-1
-surrogate exploration before Stage-2 verification: \code{"match"} (default; uses
-\code{analysis_re}) or \code{"uncorrelated"} (uses fast diagonal random slopes in
-Stage 1 while still verifying the full \code{analysis_re} model in Stage 2).}
-
-\item{on_singular}{Policy when maximum-likelihood fits hit a singular
-random-effects boundary: \code{"flag_and_compare"} (default), \code{"flag_only"},
-\code{"reduce_corr"}, or \code{"switch_bayes"}.}
+\item{engine}{Primary estimation backend: \code{"bayes_laplace"} (default,
+built-in regularized C++ Laplace engine supporting both ordinary binary
+logit and \code{chance > 0} links), \code{"cpp_laplace"}, \code{"lme4"}, \code{"lme4_fast"},
+\code{"glmmTMB"}, \code{"stan_hmc"}, or legacy alias \code{"stan_laplace"} (deprecated;
+executes full HMC/NUTS via \code{"stan_hmc"}). Optional external backends
+(\code{"glmmTMB"}, \code{"stan_hmc"}) abort rather than silently falling back if
+unavailable or incompatible with \code{chance > 0}, ensuring numerical
+consistency. Unpenalized engines flag separation if all observed responses
+in any fixed-effect design cell are 0 or all are 1. For \code{"cpp_laplace"}
+and \code{"bayes_laplace"}, analytical fixed-effect SEs combine the
+Tierney-Kadane Laplace Hessian with a diagonal log-SD variance propagation
+term; correlated-slope designs (especially under $m$-AFC or sparsity)
+should be cross-checked against \code{"stan_hmc"} or parametric bootstrap SEs.}
 
 \item{analysis_re}{Random-effect structure of the fitted analysis model:
-\code{"maximal"} (default), \code{"uncorrelated"}, or \code{"intercept_only"}.}
-
-\item{analysis_link}{Link function used in the analysis model: \code{"match_dgp"}
-(default) or \code{"logit"}.}
-
-\item{lkj_eta}{Shape parameter \eqn{\eta} for the LKJ correlation prior in
-Stan (default \code{2.0}); in \code{"bayes_laplace"}, controls unit-diagonal
-correlation shrinkage \eqn{n / (n + 2\max(\eta - 1, 0))} toward the
-identity matrix.}
-
-\item{prior_beta_sd}{Weakly informative Normal prior SD on non-intercept
-fixed effects in Bayesian engines (default \code{2.5}).}
-
-\item{prior_tau_sd}{Scale parameter for the Half-Student-t(\eqn{\nu = 3})
-prior on random-effect SDs in both Stan (\code{"stan_hmc"}) and the built-in
-regularized Laplace engine (\code{"bayes_laplace"}), default \code{1.5}. Whereas
-Stan performs full joint HMC/NUTS over \eqn{(\beta, \tau, L, z)},
-\code{"bayes_laplace"} uses an EM-Laplace approximation with exact
-\eqn{\log \tau}-space Half-Student-t(3) MAP variance updates and
-LKJ-scaled correlation shrinkage, so finite-sample intervals can still
-differ between the two engines.}
-
-\item{prob_boot}{Number of parametric bootstrap refits per final marginal
-probability-scale replication when \code{prob_se_method = "bootstrap"}
-(default \code{99}). At least 90\% of refits must succeed.}
+\code{"match_dgp"} (default; automatically fits \code{"intercept_only"} if \code{dgp} has
+no non-zero random slopes, \code{"uncorrelated"} if slopes have zero
+correlations, or \code{"maximal"} otherwise), \code{"maximal"}, \code{"uncorrelated"}, or
+\code{"intercept_only"}.}
 
 \item{prob_se_method}{Standard-error method for marginal probability-scale
 contrasts in Stage-2 final verification:
 \itemize{
-\item \code{"bootstrap"} (default): Parametric bootstrap refits (\code{prob_boot} draws)
-executed via a pre-allocated C++ batch kernel for built-in engines.
+\item \code{"bootstrap"} (default): Parametric bootstrap refits (\code{prob_boot} draws
+in \code{\link[=target_control]{target_control()}}) executed via a pre-allocated C++ batch kernel for
+built-in engines.
 \item \code{"joint_delta"}: Analytical Gauss-Hermite delta method propagating joint
 uncertainty in fixed effects \eqn{\beta} and random-effect log-SDs
 \eqn{\theta = \log \tau} (also used automatically in Stage-1 screening).
 }}
+
+\item{control}{Control list created by \code{\link[=target_control]{target_control()}} holding advanced
+settings (\code{prob_estimand}, \code{contrast_weights}, \code{ci_assurance}, \code{rope},
+\code{failure_policy}, \code{min_valid_rate}, \code{mc_conf_level}, \code{stage1_engine},
+\code{stage1_re}, \code{on_singular}, \code{analysis_link}, \code{lkj_eta}, \code{prior_beta_sd},
+\code{prior_tau_sd}, \code{prob_boot}).}
 }
 \value{
 An S3 object of class \code{"glmmplanr_spec"}.

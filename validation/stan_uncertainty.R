@@ -2,7 +2,8 @@
 library(glmmplanr)
 source("tests/testthat/helper-stan.R")
 dgp <- three_choice_reference_dgp()
-spec <- specify_target(dgp, "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+spec <- specify_target(dgp, "exposure", engine = "bayes_laplace",
+                       control = target_control(on_singular = "flag_only"))
 des <- dgp$design
 set.seed(303, kind = "L'Ecuyer-CMRG", normal.kind = "Inversion", sample.kind = "Rejection")
 tr <- simulate_dgp_data(dgp, generate_design_schedule(des, 48L, 32L))

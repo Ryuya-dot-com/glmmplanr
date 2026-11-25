@@ -41,23 +41,30 @@ test_that("stan_laplace emits deprecation warning and Bonferroni MC adjustment w
   des <- design_crossed(list(A = c("a", "b")), allocation = "latin_square")
   dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
 
-  expect_warning(
-    sp_sl <- specify_target(dgp, "A", engine = "stan_laplace"),
-    "deprecated alias"
-  )
+  if (glmmplanr:::has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE)) {
+    expect_warning(
+      sp_sl <- specify_target(dgp, "A", engine = "stan_laplace"),
+      "deprecated alias"
+    )
+  } else {
+    expect_error(
+      suppressWarnings(specify_target(dgp, "A", engine = "stan_laplace")),
+      "Stan backend"
+    )
+  }
 
   sp <- specify_target(dgp, "A", criterion = "power", power_min = 0.80,
                        engine = "bayes_laplace", analysis_re = "intercept_only",
-                       on_singular = "flag_only")
+                       control = target_control(on_singular = "flag_only"))
   res_none <- optimize_sample_size(
     sp, n_subj_range = c(12L, 20L), n_item_range = c(8L, 12L),
-    method = "grid", nsim_final = 16L, nsim_sensitivity = 0L,
-    mc_adjustment = "none", workers = 1L, seed = 777L, verbose = FALSE
+    method = "grid", nsim_final = 16L, workers = 1L, seed = 777L, verbose = FALSE,
+    control = optimize_control(nsim_sensitivity = 0L, mc_adjustment = "none")
   )
   res_bonf <- optimize_sample_size(
     sp, n_subj_range = c(12L, 20L), n_item_range = c(8L, 12L),
-    method = "grid", nsim_final = 16L, nsim_sensitivity = 0L,
-    mc_adjustment = "bonferroni", workers = 1L, seed = 777L, verbose = FALSE
+    method = "grid", nsim_final = 16L, workers = 1L, seed = 777L, verbose = FALSE,
+    control = optimize_control(nsim_sensitivity = 0L, mc_adjustment = "bonferroni")
   )
 
   expect_identical(res_bonf$search_meta$mc_adjustment, "bonferroni")
@@ -73,11 +80,11 @@ test_that("target attainment and inferential validity are separated and low cove
   dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
   sp <- specify_target(dgp, "A", criterion = "power", power_min = 0.80,
                        engine = "bayes_laplace", analysis_re = "intercept_only",
-                       on_singular = "flag_only")
+                       control = target_control(on_singular = "flag_only"))
   res <- optimize_sample_size(
     sp, n_subj_range = 16L, n_item_range = 8L,
-    method = "grid", nsim_final = 10L, nsim_sensitivity = 0L,
-    workers = 1L, seed = 778L, verbose = FALSE
+    method = "grid", nsim_final = 10L, workers = 1L, seed = 778L, verbose = FALSE,
+    control = optimize_control(nsim_sensitivity = 0L)
   )
 
   rep_normal <- report_plan(res, print_output = FALSE)
@@ -116,14 +123,13 @@ test_that("independent top-up applies sequential multiplicity control across rou
   dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
   sp <- specify_target(dgp, "A", criterion = "power", power_min = 0.80,
                        engine = "bayes_laplace", analysis_re = "intercept_only",
-                       on_singular = "flag_only")
+                       control = target_control(on_singular = "flag_only"))
 
   # Automatic Stage-3 independent top-up uses two-stage split (97.5% Wilson for 95% nominal)
   res_2stage <- optimize_sample_size(
     sp, n_subj_range = 12L, n_item_range = 8L,
-    method = "grid", nsim_final = 8L, nsim_topup = 8L,
-    topup_policy = "independent", nsim_sensitivity = 0L,
-    workers = 1L, seed = 779L, verbose = FALSE
+    method = "grid", nsim_final = 8L, workers = 1L, seed = 779L, verbose = FALSE,
+    control = optimize_control(nsim_topup = 8L, topup_policy = "independent", nsim_sensitivity = 0L)
   )
   expect_true(isTRUE(res_2stage$search_meta$sequential_topup_adjusted))
   expect_equal(res_2stage$search_meta$mc_conf_level_effective, 0.975)
@@ -131,8 +137,8 @@ test_that("independent top-up applies sequential multiplicity control across rou
   # Interactive topup_verification applies geometric alpha-spending and warns from round 2
   res_base <- optimize_sample_size(
     sp, n_subj_range = 12L, n_item_range = 8L,
-    method = "grid", nsim_final = 8L, nsim_topup = 0L,
-    nsim_sensitivity = 0L, workers = 1L, seed = 780L, verbose = FALSE
+    method = "grid", nsim_final = 8L, workers = 1L, seed = 780L, verbose = FALSE,
+    control = optimize_control(nsim_topup = 0L, nsim_sensitivity = 0L)
   )
   res_base$verified$decision_status <- "indeterminate"
   r1 <- topup_verification(res_base, nsim_extra = 8L, verbose = FALSE)
@@ -185,7 +191,7 @@ test_that("evaluate_design_point and validate_design_point accept custom data_fn
   dgp <- calibrate_dgp(des, c(a = 0.50, b = 0.72), subj_sd = 0.6, item_sd = 0.4, slope_sd_ratio = 0)
   sp <- specify_target(dgp, "A", scale = "logit", criterion = "power",
                        engine = "bayes_laplace", analysis_re = "intercept_only",
-                       on_singular = "flag_only")
+                       control = target_control(on_singular = "flag_only"))
 
   # Custom misspecified DGP: drop the lowest-performing 25% of subjects (MNAR-like dropout)
   mnar_fn <- function(schedule, spec) {
@@ -213,4 +219,83 @@ test_that("evaluate_design_point and validate_design_point accept custom data_fn
     evaluate_design_point(sp, 16L, 8L, nsim = 1L, data_fn = function(schedule, spec) schedule$trials),
     "binary"
   )
+})
+
+test_that("regularized singularity NA, single-cell validation, uneven-grid plot, and boundary/exploratory notes work", {
+  # 1. Single-condition absolute probability target validates planned precision without aborting
+  des_one <- design_crossed(list())
+  dgp_one <- calibrate_dgp(des_one, cell_probs = 0.65, chance = 0, subj_sd = 0.6, item_sd = 0.5)
+  sp_one <- specify_target(
+    dgp_one, effect = "(Intercept)", scale = "pp", criterion = "ci_width",
+    ci_width = 25, prob_se_method = "joint_delta", engine = "bayes_laplace"
+  )
+  expect_message(
+    val_one <- validate_design_point(sp_one, n_subj = 24L, n_item = 12L, nsim = 5L, seed = 301L),
+    "absolute probability"
+  )
+  expect_equal(nrow(val_one), 1L)
+  expect_identical(val_one$condition, "planned")
+  expect_true(is.finite(val_one$coverage))
+  expect_true(is.finite(val_one$width_attainment))
+
+  # 2. Uneven grid contour plot emits zero ggplot2 raster warnings; regularized singular_rate is NA
+  des_lat <- design_crossed(list(learning = c("incidental", "instruction")),
+                            allocation = "latin_square", items_per_subject = 8L, item_seed = 11L)
+  dgp_lat <- calibrate_dgp(des_lat, c(incidental = 0.55, instruction = 0.72),
+                           chance = 1 / 3, subj_sd = 0.7, item_sd = 0.5, slope_sd_ratio = 0)
+  dgp_out <- paste(cli::ansi_strip(testthat::capture_messages(print(dgp_lat))), collapse = "\n")
+  expect_match(dgp_out, "Implied 95% accuracy spans")
+  expect_match(dgp_out, "Random-slope assumption: 0")
+
+  sp_lat <- specify_target(
+    dgp_lat, effect = "learning", scale = "pp", criterion = "power", power_min = 0.80,
+    prob_se_method = "joint_delta", engine = "bayes_laplace", analysis_re = "intercept_only"
+  )
+  plan_lat <- optimize_sample_size(
+    sp_lat, n_subj_range = c(24, 32, 48), n_item_range = c(12, 16, 24),
+    method = "grid", nsim_final = 18L, workers = 1L, seed = 417L, verbose = FALSE,
+    control = optimize_control(nsim_sensitivity = 0L)
+  )
+  expect_true(all(is.na(plan_lat$verified$singular_rate)))
+
+  prt_msg <- paste(cli::ansi_strip(capture.output(print(plan_lat))), collapse = "\n")
+  if (!nzchar(prt_msg)) {
+    prt_msg <- paste(cli::ansi_strip(testthat::capture_messages(print(plan_lat))), collapse = "\n")
+  }
+  expect_match(prt_msg, "not applicable \\(regularized\\)")
+  expect_match(prt_msg, "EXPLORATORY REGIME")
+
+  rep_txt <- report_plan(plan_lat, print_output = FALSE)
+  expect_match(rep_txt, "not applicable under regularized estimation")
+  expect_match(rep_txt, "exploratory design regime")
+
+  # Force a near-boundary pass (+1.0 pp margin) with a higher-margin alternative to verify boundary note
+  plan_bnd <- plan_lat
+  plan_bnd$feasible <- TRUE
+  plan_bnd$verified$decision_status <- "fail"
+  plan_bnd$verified$decision_status[1L] <- "pass"
+  plan_bnd$verified$power[1L] <- 0.88
+  plan_bnd$verified$power_mc_lo[1L] <- 0.81
+  plan_bnd$verified$power_mc_hi[1L] <- 0.93
+  plan_bnd$verified$decision_status[nrow(plan_bnd$verified)] <- "pass"
+  plan_bnd$verified$power[nrow(plan_bnd$verified)] <- 0.98
+  plan_bnd$verified$power_mc_lo[nrow(plan_bnd$verified)] <- 0.92
+  plan_bnd$verified$power_mc_hi[nrow(plan_bnd$verified)] <- 0.995
+  plan_bnd$optimal <- plan_bnd$verified[1L, , drop = FALSE]
+  plan_bnd$decision_status <- "pass"
+  rep_bnd <- report_plan(plan_bnd, print_output = FALSE)
+  expect_match(rep_bnd, "Boundary sensitivity:")
+  expect_match(rep_bnd, "higher-margin verified alternative")
+
+  # Build ggplot on uneven grid and ensure zero warnings
+  plot_warns <- character(0)
+  withCallingHandlers({
+    gp <- plot(plan_lat, type = "contour")
+    built <- ggplot2::ggplot_build(gp)
+  }, warning = function(w) {
+    plot_warns <<- c(plot_warns, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  })
+  expect_length(plot_warns, 0L)
+  expect_s3_class(built, "ggplot_built")
 })

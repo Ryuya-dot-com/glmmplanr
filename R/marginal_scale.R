@@ -354,11 +354,13 @@ scenario_dgps <- function(
       chance = base_dgp$chance,
       subj_sd = s_sd,
       item_sd = i_sd,
-      testlet_sd = t_sd,
-      participant_testlet_sd = testlet_interaction_sd(base_dgp),
       corr_structure = base_dgp$corr_structure,
-      n_quad = base_dgp$n_quad,
-      check_nsim = 1000L
+      control = calibrate_control(
+        testlet_sd = t_sd,
+        participant_testlet_sd = testlet_interaction_sd(base_dgp),
+        n_quad = base_dgp$n_quad,
+        check_nsim = 1000L
+      )
     )
   }
   out

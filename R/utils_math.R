@@ -94,9 +94,19 @@ prob_range_to_sd <- function(prob_range, chance = 0, ci_level = 0.95) {
     cli::cli_abort("{.arg prob_range[1]} must be strictly less than {.arg prob_range[2]}.")
   }
   if (prob_range[1L] <= chance || prob_range[2L] >= 1) {
-    cli::cli_abort(
+    hints <- c(
       "{.arg prob_range} ({round(prob_range[1], 3)}, {round(prob_range[2], 3)}) must lie strictly inside ({round(chance, 3)}, 1)."
     )
+    if (prob_range[2L] > 1) {
+      hints <- c(hints, "i" = "Enter probabilities on the 0-1 scale (e.g., {.code c(0.40, 0.85)}), not percentages.")
+    }
+    if (chance > 0 && prob_range[1L] <= chance) {
+      hints <- c(
+        hints,
+        "i" = "With {.arg chance} = {round(chance, 3)}, both endpoints must strictly exceed the guessing floor (or set {.code chance = 0} for an ordinary binary logit model)."
+      )
+    }
+    cli::cli_abort(hints)
   }
   if (!is.numeric(ci_level) || length(ci_level) != 1L || ci_level <= 0 || ci_level >= 1) {
     cli::cli_abort("{.arg ci_level} must be a probability strictly between 0 and 1.")
@@ -182,7 +192,14 @@ mafc_binomial <- function(chance = 0) {
 validate_chance <- function(chance) {
   if (!is.numeric(chance) || length(chance) != 1L || is.na(chance) ||
       chance < 0 || chance >= 1) {
-    cli::cli_abort("{.arg chance} must be a numeric scalar in [0, 1).")
+    msg <- "{.arg chance} must be a numeric scalar in [0, 1)."
+    if (is.numeric(chance) && length(chance) == 1L && is.finite(chance) && chance >= 1) {
+      msg <- c(
+        msg,
+        "i" = "For an m-choice task, enter the guessing probability {.code 1/m} (e.g., {.code 1/3} for 3AFC or {.code 0.25} for 4AFC), not the number of choices or a percentage. Use {.code 0} for an ordinary binary logit model."
+      )
+    }
+    cli::cli_abort(msg)
   }
   invisible(chance)
 }

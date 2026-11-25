@@ -36,7 +36,8 @@ prepare <- function(j) {
   if (job$input == "calibrated") stopifnot(max(abs(implied - target)) < 1e-5)
   stopifnot(max(abs(dgp$mu_cells - drop(X %*% unlist(b)))) < 1e-5)
   sp <- specify_target(dgp, "group", engine = "bayes_laplace", scale = "logit",
-                       analysis_re = "intercept_only", on_singular = "flag_only")
+                       analysis_re = "intercept_only",
+                       control = target_control(on_singular = "flag_only"))
   schedule <- generate_design_schedule(des, 64, 24)
   tr <- schedule$trials
   ext <- tr[c("subj", "item", "group")]

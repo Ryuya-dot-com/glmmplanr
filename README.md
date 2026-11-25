@@ -79,14 +79,14 @@ spec <- specify_target(
 # 4. Evaluate candidate (N_subj x N_item) designs (small nsim for a fast demo)
 plan <- optimize_sample_size(
   spec,
-  n_subj_range     = c(24, 32, 48),
-  n_item_range     = c(12, 16, 24),
-  method           = "grid",
-  nsim_final       = 40L,
-  nsim_sensitivity = 0L,
-  workers          = 1L,
-  seed             = 417L,
-  verbose          = FALSE
+  n_subj_range = c(24, 32, 48),
+  n_item_range = c(12, 16, 24),
+  method       = "grid",
+  nsim_final   = 40L,
+  workers      = 1L,
+  seed         = 417L,
+  verbose      = FALSE,
+  control      = optimize_control(nsim_sensitivity = 0L)
 )
 
 plan                                    # Recommended design and decision status
@@ -102,8 +102,13 @@ plot(plan, type = "contour")            # 2D power surface + Pareto frontier
   - **`fail`**: The upper Monte Carlo bound falls below the target.
 - **Target attainment vs. inferential validity**: A `pass` status confirms only your specified power/precision target—it does **not** guarantee nominal interval coverage or null Type I error, because an estimator that underestimates standard errors can produce narrow intervals and high detection. Console summaries, `as_gt()`, and `report_plan()` report **Inferential validity** separately (flagging low Stage-2 coverage and pointing to `validate_design_point()`).
 - **`power` vs. `conditional_power`**: By default (`failure_policy = "effective"`), non-converged or separated fits count as misses in `power`, while `conditional_power` reports power among valid fits only.
-- **`plan$verified_pareto`**: Lists non-dominated passing `(N_subj, N_item)` trade-offs (reducing participants requires more items, and vice versa). Switch priorities without re-simulating via `switch_preference(plan, prefer = "fewer_subj")` or `"fewer_items"`.
-- **Final confirmation**: Before pre-registration, confirm your chosen design on a fresh seed with a larger `nsim` and your planned final interval method (e.g., `prob_se_method = "bootstrap"`) via `validate_design_point()`, which checks both Type I error under the null and power/coverage under the planned effect.
+- **`plan$verified_pareto`**: Lists non-dominated passing `(N_subj, N_item)` trade-offs (reducing participants requires more items, and vice versa). Switch priorities without re-simulating via `switch_preference(plan, prefer = "fewer_subj")` or `"fewer_items"`. Near the pass/fail threshold, the smallest passing pair can shift across search seeds—console summaries and `report_plan()` flag narrow Monte Carlo margins and suggest reporting the candidate range alongside a higher-margin alternative.
+- **Final confirmation**: Before pre-registration, confirm your chosen design on a fresh seed with a larger `nsim` and your planned final interval method (e.g., `prob_se_method = "bootstrap"`) via `validate_design_point()`, which checks both Type I error under the null and power/coverage under the planned effect (or planned-condition precision alone when estimating a single condition's accuracy).
+
+### Adapting the Quickstart Assumptions to Your Own Study
+
+- **Translating `subj_sd` and `item_sd` without prior GLMM tables**: Printing `dgp` shows the 95% participant and item accuracy spans implied by your SDs. If a prior paper does not report `VarCorr()`, pass expected 95% accuracy ranges directly via `subj_prob_range = c(0.42, 0.85)` and `item_prob_range = c(0.45, 0.86)` (or convert with `prob_range_to_sd()`), and compare low/moderate/high variance brackets via `scenarios`—see [Choosing starting inputs when the source paper omits `VarCorr`](vignettes/planning-workflows.Rmd).
+- **Do not keep `slope_sd_ratio = 0` uncritically**: Setting `slope_sd_ratio = 0` assumes the condition effect is *identical* for every learner and every word, which can yield optimistic sample sizes in within-participant or within-item designs. Unless you intentionally plan an intercept-only approximation and accept mismatch risk, test `slope_sd_ratio = 0.25`–`0.35` with `analysis_re = "match_dgp"` (or run `stress_test_models()`).
 
 ---
 
@@ -219,7 +224,6 @@ spec <- dgp |>
   specify_target(
     effect         = "exposure",
     scale          = "pp",
-    prob_estimand  = "marginal",
     criterion      = "both",
     power_min      = 0.80,
     ci_width       = 12,
@@ -242,10 +246,10 @@ plan_res <- spec |>
     scenarios         = scens,
     standard_scenario = "diff_8pp",
     method            = "surrogate_gp",
-    n_eval_init       = 16,
     nsim_final        = 400,
     workers           = 4,            # Match to your available CPU cores
-    seed              = 20261119
+    seed              = 20261119,
+    control           = optimize_control(n_eval_init = 16L)
   )
 
 # Instantaneously switch trade-off preferences without re-simulating

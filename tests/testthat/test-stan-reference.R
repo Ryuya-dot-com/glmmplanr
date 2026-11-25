@@ -1,10 +1,11 @@
 test_that("3AFC estimates agree with the independent Stan fit", {
   skip_if_not(identical(Sys.getenv("GLMMPLANR_TEST_STAN"), "true"),
               "Set GLMMPLANR_TEST_STAN=true to run the independent Stan fit")
-  skip_if_not(resolve_available_engine("stan_laplace", notify = FALSE) == "stan_laplace",
+  skip_if_not(has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE),
               "No Stan backend is installed")
   dgp <- three_choice_reference_dgp()
-  spec <- specify_target(dgp, effect = "exposure", engine = "bayes_laplace", on_singular = "flag_only")
+  spec <- specify_target(dgp, effect = "exposure", engine = "bayes_laplace",
+                         control = target_control(on_singular = "flag_only"))
   schedule <- generate_design_schedule(dgp$design, n_subj = 48, n_item = 32)
   set.seed(303, kind = "L'Ecuyer-CMRG", normal.kind = "Inversion", sample.kind = "Rejection")
   data <- simulate_dgp_data(dgp, schedule = schedule)

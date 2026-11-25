@@ -440,7 +440,7 @@ fit_via_stan_hmc <- function(
       vcov_full = as.matrix(V_est),
       prob_est = prob_est,
       prob_se = prob_se,
-      singular = FALSE,
+      singular = NA,
       converged = conv,
       status = if (conv) "converged" else diag_res$status,
       error_reason = reason_txt

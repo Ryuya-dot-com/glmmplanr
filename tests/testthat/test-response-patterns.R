@@ -44,7 +44,7 @@ test_that("design diagnostics agree with observed trials across execution paths 
   des <- design_crossed(list(A = c("a", "b")), attrition = .2, participant_dropout = .3)
   g <- calibrate_dgp(des, c(.6, .8), subj_sd = .4, item_sd = .3)
   sp <- specify_target(g, "A", engine = "bayes_laplace", analysis_re = "intercept_only",
-                       on_singular = "flag_only")
+                       control = target_control(on_singular = "flag_only"))
   sched <- generate_design_schedule(des, 8, 4)
   base <- allocate_stage_point_streams(6042L, 1L, 1L, 1L)
   streams <- derive_rep_substreams(base[[1]], 5L)
