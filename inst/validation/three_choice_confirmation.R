@@ -45,12 +45,15 @@ dgp_null <- calibrate_dgp(
   item_prob_range = c(0.45, 0.86),
   slope_sd_ratio = 0.30,
   corr_structure = 0.15,
-  seed = 1L
+  control = calibrate_control(seed = 1L)
 )
 
 dgps <- list(null = dgp_null, planned = dgp_planned)
 specs <- lapply(dgps, function(g) {
-  specify_target(g, effect = "exposure", scale = "logit", engine = "bayes_laplace", on_singular = "flag_only")
+  specify_target(
+    g, effect = "exposure", scale = "logit", engine = "bayes_laplace",
+    control = target_control(on_singular = "flag_only")
+  )
 })
 # Strict conditional null (true conditional exposure coefficient = 0 logit)
 specs$conditional_null <- glmmplanr:::null_target_spec(specs$planned)

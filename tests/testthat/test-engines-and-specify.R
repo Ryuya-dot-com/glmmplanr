@@ -78,3 +78,36 @@ test_that("the regularized engine distinguishes small prior scales", {
   expect_lt(width(.1), width(.5))
   expect_error(width(0), "prior_tau_sd")
 })
+
+test_that("cached XPtr workspace, auto-swapped n_item > n_subj, and sparse partial schedules match uncached fits", {
+  for (ips in list(NULL, 12L)) {
+    des <- design_crossed(
+      list(exposure = c("incidental", "intentional"), spacing = c("massed", "distributed")),
+      allocation = "latin_square", items_per_subject = ips, item_seed = 19L
+    )
+    dgp <- calibrate_dgp(
+      des, c(0.50, 0.62, 0.68, 0.82), chance = 1 / 3,
+      subj_sd = 0.75, item_sd = 0.65, slope_sd_ratio = 0.30, corr_structure = 0.20
+    )
+    sp <- specify_target(
+      dgp, "exposure", scale = "pp", prob_se_method = "joint_delta",
+      engine = "bayes_laplace", control = target_control(on_singular = "flag_only")
+    )
+    sched <- generate_design_schedule(des, n_subj = 16L, n_item = 24L)
+    cache <- prepare_cpp_schedule_cache(sp, sched)
+
+    set.seed(4041L)
+    sim_fast <- simulate_fast_y_keep(cache)
+    set.seed(4041L)
+    df_full <- simulate_dgp_data(dgp, schedule = sched)
+    expect_identical(sim_fast$y, df_full$y)
+
+    f_cached <- fit_via_cpp_cached(sim_fast, cache, sp, TRUE, "maximal", FALSE)
+    f_direct <- fit_single_dataset(df_full, sp, engine_use = "bayes_laplace", re_structure = "maximal")
+    expect_true(f_cached$converged)
+    expect_equal(f_cached$beta_full, f_direct$beta_full, tolerance = 1e-12)
+    expect_equal(f_cached$vcov_full, f_direct$vcov_full, tolerance = 1e-10)
+    expect_equal(f_cached$prob_est, f_direct$prob_est, tolerance = 1e-12)
+    expect_equal(f_cached$prob_se, f_direct$prob_se, tolerance = 1e-10)
+  }
+})

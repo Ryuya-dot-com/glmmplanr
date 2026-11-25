@@ -11,6 +11,63 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// cpp_create_glmm_workspace
+SEXP cpp_create_glmm_workspace(const Eigen::MatrixXd& X, const Eigen::VectorXi& subj_idx, const Eigen::MatrixXd& Z_subj, int n_subj, const Eigen::VectorXi& item_idx, const Eigen::MatrixXd& Z_item, int n_item, const Eigen::VectorXi& testlet_idx, const Eigen::MatrixXd& Z_testlet, int n_testlet);
+RcppExport SEXP _glmmplanr_cpp_create_glmm_workspace(SEXP XSEXP, SEXP subj_idxSEXP, SEXP Z_subjSEXP, SEXP n_subjSEXP, SEXP item_idxSEXP, SEXP Z_itemSEXP, SEXP n_itemSEXP, SEXP testlet_idxSEXP, SEXP Z_testletSEXP, SEXP n_testletSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type subj_idx(subj_idxSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Z_subj(Z_subjSEXP);
+    Rcpp::traits::input_parameter< int >::type n_subj(n_subjSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type item_idx(item_idxSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Z_item(Z_itemSEXP);
+    Rcpp::traits::input_parameter< int >::type n_item(n_itemSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type testlet_idx(testlet_idxSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Z_testlet(Z_testletSEXP);
+    Rcpp::traits::input_parameter< int >::type n_testlet(n_testletSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_create_glmm_workspace(X, subj_idx, Z_subj, n_subj, item_idx, Z_item, n_item, testlet_idx, Z_testlet, n_testlet));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_glmm_workspace_valid
+bool cpp_glmm_workspace_valid(SEXP ws_ptr);
+RcppExport SEXP _glmmplanr_cpp_glmm_workspace_valid(SEXP ws_ptrSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ws_ptr(ws_ptrSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_glmm_workspace_valid(ws_ptr));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_fit_crossed_glmm_ws
+Rcpp::List cpp_fit_crossed_glmm_ws(SEXP ws_ptr, const Eigen::VectorXi& y, double chance, int corr_mode, bool regularized, double lkj_eta, double prior_beta_sd, double prior_tau_sd, int max_em_iter, int max_pirls_iter, double tol, Rcpp::Nullable<Eigen::VectorXd> init_beta, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_subj, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_item, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_testlet, bool fix_cov, bool compute_joint_vcov, bool return_ranef);
+RcppExport SEXP _glmmplanr_cpp_fit_crossed_glmm_ws(SEXP ws_ptrSEXP, SEXP ySEXP, SEXP chanceSEXP, SEXP corr_modeSEXP, SEXP regularizedSEXP, SEXP lkj_etaSEXP, SEXP prior_beta_sdSEXP, SEXP prior_tau_sdSEXP, SEXP max_em_iterSEXP, SEXP max_pirls_iterSEXP, SEXP tolSEXP, SEXP init_betaSEXP, SEXP init_Sigma_subjSEXP, SEXP init_Sigma_itemSEXP, SEXP init_Sigma_testletSEXP, SEXP fix_covSEXP, SEXP compute_joint_vcovSEXP, SEXP return_ranefSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ws_ptr(ws_ptrSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< double >::type chance(chanceSEXP);
+    Rcpp::traits::input_parameter< int >::type corr_mode(corr_modeSEXP);
+    Rcpp::traits::input_parameter< bool >::type regularized(regularizedSEXP);
+    Rcpp::traits::input_parameter< double >::type lkj_eta(lkj_etaSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_beta_sd(prior_beta_sdSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_tau_sd(prior_tau_sdSEXP);
+    Rcpp::traits::input_parameter< int >::type max_em_iter(max_em_iterSEXP);
+    Rcpp::traits::input_parameter< int >::type max_pirls_iter(max_pirls_iterSEXP);
+    Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Eigen::VectorXd> >::type init_beta(init_betaSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Eigen::MatrixXd> >::type init_Sigma_subj(init_Sigma_subjSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Eigen::MatrixXd> >::type init_Sigma_item(init_Sigma_itemSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Eigen::MatrixXd> >::type init_Sigma_testlet(init_Sigma_testletSEXP);
+    Rcpp::traits::input_parameter< bool >::type fix_cov(fix_covSEXP);
+    Rcpp::traits::input_parameter< bool >::type compute_joint_vcov(compute_joint_vcovSEXP);
+    Rcpp::traits::input_parameter< bool >::type return_ranef(return_ranefSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_fit_crossed_glmm_ws(ws_ptr, y, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd, max_em_iter, max_pirls_iter, tol, init_beta, init_Sigma_subj, init_Sigma_item, init_Sigma_testlet, fix_cov, compute_joint_vcov, return_ranef));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_fit_crossed_glmm
 Rcpp::List cpp_fit_crossed_glmm(const Eigen::VectorXi& y, const Eigen::MatrixXd& X, const Eigen::VectorXi& subj_idx, const Eigen::MatrixXd& Z_subj, int n_subj, const Eigen::VectorXi& item_idx, const Eigen::MatrixXd& Z_item, int n_item, const Eigen::VectorXi& testlet_idx, const Eigen::MatrixXd& Z_testlet, int n_testlet, double chance, int corr_mode, bool regularized, double lkj_eta, double prior_beta_sd, double prior_tau_sd, int max_em_iter, int max_pirls_iter, double tol, Rcpp::Nullable<Eigen::VectorXd> init_beta, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_subj, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_item, Rcpp::Nullable<Eigen::MatrixXd> init_Sigma_testlet, bool fix_cov, bool compute_joint_vcov, bool return_ranef);
 RcppExport SEXP _glmmplanr_cpp_fit_crossed_glmm(SEXP ySEXP, SEXP XSEXP, SEXP subj_idxSEXP, SEXP Z_subjSEXP, SEXP n_subjSEXP, SEXP item_idxSEXP, SEXP Z_itemSEXP, SEXP n_itemSEXP, SEXP testlet_idxSEXP, SEXP Z_testletSEXP, SEXP n_testletSEXP, SEXP chanceSEXP, SEXP corr_modeSEXP, SEXP regularizedSEXP, SEXP lkj_etaSEXP, SEXP prior_beta_sdSEXP, SEXP prior_tau_sdSEXP, SEXP max_em_iterSEXP, SEXP max_pirls_iterSEXP, SEXP tolSEXP, SEXP init_betaSEXP, SEXP init_Sigma_subjSEXP, SEXP init_Sigma_itemSEXP, SEXP init_Sigma_testletSEXP, SEXP fix_covSEXP, SEXP compute_joint_vcovSEXP, SEXP return_ranefSEXP) {
@@ -60,6 +117,41 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_prob_bootstrap_batch_ws
+Rcpp::NumericVector cpp_prob_bootstrap_batch_ws(SEXP ws_ptr, int n_boot, const Eigen::VectorXi& cell_id, const Eigen::VectorXd& beta_hat, const Eigen::MatrixXd& Sigma_subj_hat, const Eigen::MatrixXd& Sigma_item_hat, Rcpp::Nullable<Eigen::MatrixXd> Sigma_testlet_hat, const Eigen::MatrixXd& X_cells, const Eigen::MatrixXd& Zs_cells, const Eigen::MatrixXd& Zi_cells, const Eigen::MatrixXd& Zt_cells, const Eigen::VectorXd& contrast_weights, const Eigen::VectorXd& gh_nodes, const Eigen::VectorXd& gh_weights, double chance, int corr_mode, bool regularized, double lkj_eta, double prior_beta_sd, double prior_tau_sd, int max_em_iter, int max_pirls_iter, double tol, int eff_idx_1based, bool marginal);
+RcppExport SEXP _glmmplanr_cpp_prob_bootstrap_batch_ws(SEXP ws_ptrSEXP, SEXP n_bootSEXP, SEXP cell_idSEXP, SEXP beta_hatSEXP, SEXP Sigma_subj_hatSEXP, SEXP Sigma_item_hatSEXP, SEXP Sigma_testlet_hatSEXP, SEXP X_cellsSEXP, SEXP Zs_cellsSEXP, SEXP Zi_cellsSEXP, SEXP Zt_cellsSEXP, SEXP contrast_weightsSEXP, SEXP gh_nodesSEXP, SEXP gh_weightsSEXP, SEXP chanceSEXP, SEXP corr_modeSEXP, SEXP regularizedSEXP, SEXP lkj_etaSEXP, SEXP prior_beta_sdSEXP, SEXP prior_tau_sdSEXP, SEXP max_em_iterSEXP, SEXP max_pirls_iterSEXP, SEXP tolSEXP, SEXP eff_idx_1basedSEXP, SEXP marginalSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ws_ptr(ws_ptrSEXP);
+    Rcpp::traits::input_parameter< int >::type n_boot(n_bootSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type cell_id(cell_idSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type beta_hat(beta_hatSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Sigma_subj_hat(Sigma_subj_hatSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Sigma_item_hat(Sigma_item_hatSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Eigen::MatrixXd> >::type Sigma_testlet_hat(Sigma_testlet_hatSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type X_cells(X_cellsSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Zs_cells(Zs_cellsSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Zi_cells(Zi_cellsSEXP);
+    Rcpp::traits::input_parameter< const Eigen::MatrixXd& >::type Zt_cells(Zt_cellsSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type contrast_weights(contrast_weightsSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type gh_nodes(gh_nodesSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type gh_weights(gh_weightsSEXP);
+    Rcpp::traits::input_parameter< double >::type chance(chanceSEXP);
+    Rcpp::traits::input_parameter< int >::type corr_mode(corr_modeSEXP);
+    Rcpp::traits::input_parameter< bool >::type regularized(regularizedSEXP);
+    Rcpp::traits::input_parameter< double >::type lkj_eta(lkj_etaSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_beta_sd(prior_beta_sdSEXP);
+    Rcpp::traits::input_parameter< double >::type prior_tau_sd(prior_tau_sdSEXP);
+    Rcpp::traits::input_parameter< int >::type max_em_iter(max_em_iterSEXP);
+    Rcpp::traits::input_parameter< int >::type max_pirls_iter(max_pirls_iterSEXP);
+    Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
+    Rcpp::traits::input_parameter< int >::type eff_idx_1based(eff_idx_1basedSEXP);
+    Rcpp::traits::input_parameter< bool >::type marginal(marginalSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_prob_bootstrap_batch_ws(ws_ptr, n_boot, cell_id, beta_hat, Sigma_subj_hat, Sigma_item_hat, Sigma_testlet_hat, X_cells, Zs_cells, Zi_cells, Zt_cells, contrast_weights, gh_nodes, gh_weights, chance, corr_mode, regularized, lkj_eta, prior_beta_sd, prior_tau_sd, max_em_iter, max_pirls_iter, tol, eff_idx_1based, marginal));
+    return rcpp_result_gen;
+END_RCPP
+}
 // cpp_prob_bootstrap_batch
 Rcpp::NumericVector cpp_prob_bootstrap_batch(int n_boot, const Eigen::VectorXi& cell_id, const Eigen::MatrixXd& X, const Eigen::VectorXi& subj_idx, const Eigen::MatrixXd& Z_subj, int n_subj, const Eigen::VectorXi& item_idx, const Eigen::MatrixXd& Z_item, int n_item, const Eigen::VectorXi& testlet_idx, const Eigen::MatrixXd& Z_testlet, int n_testlet, const Eigen::VectorXd& beta_hat, const Eigen::MatrixXd& Sigma_subj_hat, const Eigen::MatrixXd& Sigma_item_hat, Rcpp::Nullable<Eigen::MatrixXd> Sigma_testlet_hat, const Eigen::MatrixXd& X_cells, const Eigen::MatrixXd& Zs_cells, const Eigen::MatrixXd& Zi_cells, const Eigen::MatrixXd& Zt_cells, const Eigen::VectorXd& contrast_weights, const Eigen::VectorXd& gh_nodes, const Eigen::VectorXd& gh_weights, double chance, int corr_mode, bool regularized, double lkj_eta, double prior_beta_sd, double prior_tau_sd, int max_em_iter, int max_pirls_iter, double tol, int eff_idx_1based, bool marginal);
 RcppExport SEXP _glmmplanr_cpp_prob_bootstrap_batch(SEXP n_bootSEXP, SEXP cell_idSEXP, SEXP XSEXP, SEXP subj_idxSEXP, SEXP Z_subjSEXP, SEXP n_subjSEXP, SEXP item_idxSEXP, SEXP Z_itemSEXP, SEXP n_itemSEXP, SEXP testlet_idxSEXP, SEXP Z_testletSEXP, SEXP n_testletSEXP, SEXP beta_hatSEXP, SEXP Sigma_subj_hatSEXP, SEXP Sigma_item_hatSEXP, SEXP Sigma_testlet_hatSEXP, SEXP X_cellsSEXP, SEXP Zs_cellsSEXP, SEXP Zi_cellsSEXP, SEXP Zt_cellsSEXP, SEXP contrast_weightsSEXP, SEXP gh_nodesSEXP, SEXP gh_weightsSEXP, SEXP chanceSEXP, SEXP corr_modeSEXP, SEXP regularizedSEXP, SEXP lkj_etaSEXP, SEXP prior_beta_sdSEXP, SEXP prior_tau_sdSEXP, SEXP max_em_iterSEXP, SEXP max_pirls_iterSEXP, SEXP tolSEXP, SEXP eff_idx_1basedSEXP, SEXP marginalSEXP) {
@@ -104,11 +196,48 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// cpp_unit_response_counts
+Rcpp::List cpp_unit_response_counts(const Rcpp::IntegerVector& id, const Rcpp::LogicalVector& success, int n);
+RcppExport SEXP _glmmplanr_cpp_unit_response_counts(SEXP idSEXP, SEXP successSEXP, SEXP nSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type id(idSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::LogicalVector& >::type success(successSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_unit_response_counts(id, success, n));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cpp_fit_rasch_fixed_mml
+Rcpp::List cpp_fit_rasch_fixed_mml(const Eigen::VectorXi& subj_id, const Eigen::VectorXi& item_id, const Eigen::VectorXi& y, int n_subj, int n_item, const Rcpp::LogicalVector& estimable, const Eigen::VectorXd& gh_nodes, const Eigen::VectorXd& gh_weights, int max_iter, double tol);
+RcppExport SEXP _glmmplanr_cpp_fit_rasch_fixed_mml(SEXP subj_idSEXP, SEXP item_idSEXP, SEXP ySEXP, SEXP n_subjSEXP, SEXP n_itemSEXP, SEXP estimableSEXP, SEXP gh_nodesSEXP, SEXP gh_weightsSEXP, SEXP max_iterSEXP, SEXP tolSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type subj_id(subj_idSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type item_id(item_idSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXi& >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n_subj(n_subjSEXP);
+    Rcpp::traits::input_parameter< int >::type n_item(n_itemSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::LogicalVector& >::type estimable(estimableSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type gh_nodes(gh_nodesSEXP);
+    Rcpp::traits::input_parameter< const Eigen::VectorXd& >::type gh_weights(gh_weightsSEXP);
+    Rcpp::traits::input_parameter< int >::type max_iter(max_iterSEXP);
+    Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
+    rcpp_result_gen = Rcpp::wrap(cpp_fit_rasch_fixed_mml(subj_id, item_id, y, n_subj, n_item, estimable, gh_nodes, gh_weights, max_iter, tol));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_glmmplanr_cpp_create_glmm_workspace", (DL_FUNC) &_glmmplanr_cpp_create_glmm_workspace, 10},
+    {"_glmmplanr_cpp_glmm_workspace_valid", (DL_FUNC) &_glmmplanr_cpp_glmm_workspace_valid, 1},
+    {"_glmmplanr_cpp_fit_crossed_glmm_ws", (DL_FUNC) &_glmmplanr_cpp_fit_crossed_glmm_ws, 18},
     {"_glmmplanr_cpp_fit_crossed_glmm", (DL_FUNC) &_glmmplanr_cpp_fit_crossed_glmm, 27},
     {"_glmmplanr_cpp_constant_response_cell", (DL_FUNC) &_glmmplanr_cpp_constant_response_cell, 3},
+    {"_glmmplanr_cpp_prob_bootstrap_batch_ws", (DL_FUNC) &_glmmplanr_cpp_prob_bootstrap_batch_ws, 25},
     {"_glmmplanr_cpp_prob_bootstrap_batch", (DL_FUNC) &_glmmplanr_cpp_prob_bootstrap_batch, 34},
+    {"_glmmplanr_cpp_unit_response_counts", (DL_FUNC) &_glmmplanr_cpp_unit_response_counts, 3},
+    {"_glmmplanr_cpp_fit_rasch_fixed_mml", (DL_FUNC) &_glmmplanr_cpp_fit_rasch_fixed_mml, 10},
     {NULL, NULL, 0}
 };
 

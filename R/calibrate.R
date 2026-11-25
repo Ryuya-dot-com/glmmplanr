@@ -736,12 +736,16 @@ draw_dgp_trials <- function(dgp, schedule, keep_person_item_effects = FALSE) {
   sid <- tr$subj_id
   iid <- tr$item_id
 
-  zs_trial <- des$Z_subj_cells[cid, , drop = FALSE]
-  zi_trial <- des$Z_item_cells[cid, , drop = FALSE]
-
-  eta <- dgp$mu_cells[cid] +
-    rowSums(zs_trial * u_s[sid, , drop = FALSE]) +
-    rowSums(zi_trial * u_i[iid, , drop = FALSE])
+  eta <- if (p_s == 1L && p_i == 1L &&
+             all(des$Z_subj_cells == 1.0) && all(des$Z_item_cells == 1.0)) {
+    dgp$mu_cells[cid] + u_s[sid, 1L] + u_i[iid, 1L]
+  } else {
+    zs_trial <- des$Z_subj_cells[cid, , drop = FALSE]
+    zi_trial <- des$Z_item_cells[cid, , drop = FALSE]
+    dgp$mu_cells[cid] +
+      rowSums(zs_trial * u_s[sid, , drop = FALSE]) +
+      rowSums(zi_trial * u_i[iid, , drop = FALSE])
+  }
 
   if (des$has_testlet) {
     nt <- schedule$n_testlet

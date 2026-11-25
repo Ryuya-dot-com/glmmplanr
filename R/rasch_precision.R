@@ -130,13 +130,24 @@ plan_rasch_precision <- function(
 
   worker_fn <- function(tsk) {
     schedule <- generate_design_schedule(dgp$design, tsk$n_subj, tsk$n_item)
+    rasch_ctx <- if (identical(engine, "cpp_laplace")) {
+      build_rasch_cpp_ctx(schedule, tsk$n_subj, tsk$n_item, dgp$design)
+    } else {
+      NULL
+    }
     rows <- lapply(tsk$streams, function(stream) {
       with_rng_stream(stream, {
+        draw <- if (identical(engine, "cpp_laplace")) {
+          draw_rasch_trials_light(dgp, schedule)
+        } else {
+          draw_dgp_trials(dgp, schedule, keep_person_item_effects = TRUE)
+        }
         rasch_recovery_errors(
-          draw_dgp_trials(dgp, schedule, keep_person_item_effects = TRUE),
+          draw,
           dgp,
           control,
-          engine = engine
+          engine = engine,
+          rasch_ctx = rasch_ctx
         )
       })
     })
@@ -201,36 +212,102 @@ plan_rasch_precision <- function(
   ), class = "glmmplanr_rasch")
 }
 
-fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "lme4", control = NULL) {
+build_rasch_cpp_ctx <- function(schedule, n_subj, n_item, design) {
+  no_missing <- (design$attrition == 0 && design$participant_dropout == 0)
+  if (!no_missing) return(NULL)
+  tr <- schedule$trials
+  n_obs <- nrow(tr)
+  if (n_obs == 0L) return(NULL)
+  ones <- matrix(1.0, nrow = n_obs, ncol = 1L)
+  ws <- cpp_create_glmm_workspace(
+    X = ones,
+    subj_idx = as.integer(tr$subj_id) - 1L,
+    Z_subj = ones,
+    n_subj = as.integer(n_subj),
+    item_idx = as.integer(tr$item_id) - 1L,
+    Z_item = ones,
+    n_item = as.integer(n_item),
+    testlet_idx = integer(n_obs),
+    Z_testlet = matrix(0.0, nrow = n_obs, ncol = 0L),
+    n_testlet = 0L
+  )
+  list(
+    ws = ws,
+    unobs_subj = tabulate(tr$subj_id, nbins = n_subj) == 0L,
+    unobs_item = tabulate(tr$item_id, nbins = n_item) == 0L
+  )
+}
+
+draw_rasch_trials_light <- function(dgp, schedule) {
+  des <- dgp$design
+  ns <- schedule$n_subj
+  ni <- schedule$n_item
+  u_s <- matrix(stats::rnorm(ns) * dgp$L_subj[1L, 1L], nrow = ns, ncol = 1L)
+  u_i <- matrix(stats::rnorm(ni) * dgp$L_item[1L, 1L], nrow = ni, ncol = 1L)
+  tr <- schedule$trials
+  sid <- tr$subj_id
+  iid <- tr$item_id
+  eta <- dgp$mu_cells[tr$cell_id] + u_s[sid, 1L] + u_i[iid, 1L]
+  y <- stats::rbinom(length(eta), size = 1L, prob = stats::plogis(eta))
+  keep <- observed_trials(des, sid, ns)
+  trials_out <- if (!is.null(keep)) {
+    list(subj_id = sid[keep], item_id = iid[keep], y = y[keep], has_keep = TRUE)
+  } else {
+    list(subj_id = sid, item_id = iid, y = y, has_keep = FALSE)
+  }
+  list(trials = trials_out, subj = u_s, item = u_i)
+}
+
+fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "lme4", control = NULL, rasch_ctx = NULL) {
   if (identical(engine, "cpp_laplace")) {
-    n_obs <- nrow(trials)
-    ones <- matrix(1.0, nrow = n_obs, ncol = 1L)
+    n_obs <- length(trials$y)
+    use_ctx <- !is.null(rasch_ctx) && !isTRUE(trials$has_keep) && cpp_glmm_workspace_valid(rasch_ctx$ws)
     fit <- tryCatch(
-      cpp_fit_crossed_glmm(
-        y = as.integer(trials$y),
-        X = ones,
-        Z_subj = ones,
-        subj_idx = as.integer(trials$subj_id) - 1L,
-        n_subj = n_subj,
-        Z_item = ones,
-        item_idx = as.integer(trials$item_id) - 1L,
-        n_item = n_item,
-        Z_testlet = matrix(0.0, nrow = n_obs, ncol = 0L),
-        testlet_idx = integer(n_obs),
-        n_testlet = 0L,
-        chance = 0.0,
-        corr_mode = 0L,
-        regularized = FALSE,
-        lkj_eta = 2.0,
-        prior_tau_sd = 0.0,
-        prior_beta_sd = 0.0,
-        max_em_iter = 160L,
-        max_pirls_iter = 25L,
-        tol = 1e-4,
-        fix_cov = FALSE,
-        compute_joint_vcov = FALSE,
-        return_ranef = TRUE
-      ),
+      if (use_ctx) {
+        cpp_fit_crossed_glmm_ws(
+          ws_ptr = rasch_ctx$ws,
+          y = as.integer(trials$y),
+          chance = 0.0,
+          corr_mode = 0L,
+          regularized = FALSE,
+          lkj_eta = 2.0,
+          prior_tau_sd = 0.0,
+          prior_beta_sd = 0.0,
+          max_em_iter = 160L,
+          max_pirls_iter = 25L,
+          tol = 1e-4,
+          fix_cov = FALSE,
+          compute_joint_vcov = FALSE,
+          return_ranef = TRUE
+        )
+      } else {
+        ones <- matrix(1.0, nrow = n_obs, ncol = 1L)
+        cpp_fit_crossed_glmm(
+          y = as.integer(trials$y),
+          X = ones,
+          Z_subj = ones,
+          subj_idx = as.integer(trials$subj_id) - 1L,
+          n_subj = n_subj,
+          Z_item = ones,
+          item_idx = as.integer(trials$item_id) - 1L,
+          n_item = n_item,
+          Z_testlet = matrix(0.0, nrow = n_obs, ncol = 0L),
+          testlet_idx = integer(n_obs),
+          n_testlet = 0L,
+          chance = 0.0,
+          corr_mode = 0L,
+          regularized = FALSE,
+          lkj_eta = 2.0,
+          prior_tau_sd = 0.0,
+          prior_beta_sd = 0.0,
+          max_em_iter = 160L,
+          max_pirls_iter = 25L,
+          tol = 1e-4,
+          fix_cov = FALSE,
+          compute_joint_vcov = FALSE,
+          return_ranef = TRUE
+        )
+      },
       error = identity
     )
     if (inherits(fit, "error")) {
@@ -241,8 +318,13 @@ fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "l
     }
     ability <- as.numeric(fit$u_subj[, 1L])
     item <- as.numeric(fit$u_item[, 1L])
-    ability[tabulate(trials$subj_id, nbins = n_subj) == 0L] <- NA_real_
-    item[tabulate(trials$item_id, nbins = n_item) == 0L] <- NA_real_
+    if (use_ctx) {
+      ability[rasch_ctx$unobs_subj] <- NA_real_
+      item[rasch_ctx$unobs_item] <- NA_real_
+    } else {
+      ability[tabulate(trials$subj_id, nbins = n_subj) == 0L] <- NA_real_
+      item[tabulate(trials$item_id, nbins = n_item) == 0L] <- NA_real_
+    }
     v_s <- as.numeric(fit$Sigma_subj[1L, 1L])
     v_i <- as.numeric(fit$Sigma_item[1L, 1L])
     if (v_s <= 1e-8) v_s <- 0.0
@@ -292,21 +374,24 @@ fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "l
   )
 }
 
-rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4") {
+rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4", rasch_ctx = NULL) {
   data <- draw$trials
   result <- data.frame(
     ability = NA_real_, difficulty = NA_real_, difficulty_max_abs_error = NA_real_,
     person_sd = NA_real_, item_sd = NA_real_, person_variance = NA_real_, item_variance = NA_real_,
     singular = NA, fit_error = NA_character_
   )
-  if (length(unique(data$y)) < 2L) {
+  y_vec <- data$y
+  if (length(y_vec) < 2L || !any(y_vec == 0L) || !any(y_vec == 1L)) {
     result$fit_error <- "Fewer than two observed response values"
     return(result)
   }
 
   n_subj <- nrow(draw$subj)
   n_item <- nrow(draw$item)
-  fit <- fit_rasch_random_intercept_model(data, n_subj, n_item, engine = engine, control = control)
+  fit <- fit_rasch_random_intercept_model(
+    data, n_subj, n_item, engine = engine, control = control, rasch_ctx = rasch_ctx
+  )
   if (!is.na(fit$error)) {
     result$fit_error <- fit$error
     return(result)
@@ -538,6 +623,12 @@ plan_rasch_fixed_bank <- function(
   worker_fn <- function(tsk) {
     ns <- tsk$n_subj
     schedule <- generate_design_schedule(des, ns, n_item, diagnostics = tsk$rep_idx[1L] == 1L)
+    rasch_ctx <- if (method == "random_item" && identical(engine, "cpp_laplace")) {
+      build_rasch_cpp_ctx(schedule, ns, n_item, des)
+    } else {
+      NULL
+    }
+    use_light <- !identical(engine, "lme4")
     nb <- length(tsk$rep_idx)
     rows <- vector("list", nb)
     b_est_mat <- matrix(NA_real_, nrow = nb, ncol = n_item)
@@ -546,10 +637,12 @@ plan_rasch_fixed_bank <- function(
 
     for (k in seq_len(nb)) {
       out_k <- with_rng_stream(tsk$streams[[k]], {
-        sim <- simulate_fixed_bank_trials(des, schedule, b_true = b_true, person_sd = person_sd)
+        sim <- simulate_fixed_bank_trials(
+          des, schedule, b_true = b_true, person_sd = person_sd, lightweight = use_light
+        )
         eval_fixed_bank_replication(
           sim = sim, b_true = b_true, person_sd = person_sd,
-          method = method, engine = engine, control = control
+          method = method, engine = engine, control = control, rasch_ctx = rasch_ctx
         )
       })
       rows[[k]] <- out_k$metrics
@@ -685,13 +778,24 @@ plan_rasch_fixed_bank <- function(
   ), class = "glmmplanr_rasch")
 }
 
-simulate_fixed_bank_trials <- function(des, schedule, b_true, person_sd) {
+simulate_fixed_bank_trials <- function(des, schedule, b_true, person_sd, lightweight = FALSE) {
   ns <- schedule$n_subj
   theta <- stats::rnorm(ns, mean = 0.0, sd = person_sd)
   tr <- schedule$trials
-  eta <- theta[tr$subj_id] - b_true[tr$item_id]
-  tr$y <- stats::rbinom(nrow(tr), size = 1L, prob = stats::plogis(eta))
-  keep <- observed_trials(des, tr$subj_id, ns)
+  sid <- tr$subj_id
+  iid <- tr$item_id
+  eta <- theta[sid] - b_true[iid]
+  y <- stats::rbinom(length(eta), size = 1L, prob = stats::plogis(eta))
+  keep <- observed_trials(des, sid, ns)
+  if (isTRUE(lightweight)) {
+    trials_out <- if (!is.null(keep)) {
+      list(subj_id = sid[keep], item_id = iid[keep], y = y[keep], has_keep = TRUE)
+    } else {
+      list(subj_id = sid, item_id = iid, y = y, has_keep = FALSE)
+    }
+    return(list(trials = trials_out, theta = theta, n_subj = ns, n_item = length(b_true)))
+  }
+  tr$y <- y
   if (!is.null(keep)) {
     tr <- tr[keep, , drop = FALSE]
     rownames(tr) <- NULL
@@ -699,7 +803,7 @@ simulate_fixed_bank_trials <- function(des, schedule, b_true, person_sd) {
   list(trials = tr, theta = theta, n_subj = ns, n_item = length(b_true))
 }
 
-eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, control = NULL) {
+eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, control = NULL, rasch_ctx = NULL) {
   tr <- sim$trials
   ns <- sim$n_subj
   ni <- sim$n_item
@@ -710,12 +814,13 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
     stringsAsFactors = FALSE
   )
 
-  counts <- unit_response_counts(tr$item_id, tr$y == 1L, ni)
+  y_vec <- tr$y
+  counts <- unit_response_counts(tr$item_id, y_vec == 1L, ni)
   n_obs_item <- counts$observed
   item_zero <- counts$all_incorrect
   item_all1 <- counts$all_correct
   metrics$extreme_item <- any(counts$unobserved | item_zero | item_all1)
-  if (nrow(tr) == 0L || length(unique(tr$y)) < 2L) {
+  if (length(y_vec) < 2L || !any(y_vec == 0L) || !any(y_vec == 1L)) {
     metrics$fit_error <- "Fewer than two observed response values"
     return(list(
       metrics = metrics,
@@ -726,7 +831,9 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
   }
 
   if (method == "random_item") {
-    fit <- fit_rasch_random_intercept_model(tr, n_subj = ns, n_item = ni, engine = engine, control = control)
+    fit <- fit_rasch_random_intercept_model(
+      tr, n_subj = ns, n_item = ni, engine = engine, control = control, rasch_ctx = rasch_ctx
+    )
     if (!is.na(fit$error)) {
       metrics$fit_error <- fit$error
       return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
@@ -805,114 +912,17 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
 }
 
 fit_rasch_fixed_mml <- function(trials, n_subj, n_item, estimable, max_iter = 200L, tol = 1e-6) {
-  M <- matrix(0.0, nrow = n_subj, ncol = n_item)
-  Y <- matrix(0.0, nrow = n_subj, ncol = n_item)
-  idx <- cbind(trials$subj_id, trials$item_id)
-  M[idx] <- 1.0
-  Y[idx] <- as.numeric(trials$y)
-
-  est_j <- which(estimable)
-  obs_s <- which(rowSums(M[, est_j, drop = FALSE]) > 0)
-  if (length(obs_s) < 2L) {
-    return(list(error = "Fewer than two observed participants"))
-  }
-
-  M_sub <- M[obs_s, est_j, drop = FALSE]
-  Y_sub <- Y[obs_s, est_j, drop = FALSE]
-  n_sub <- colSums(M_sub)
-  s_sub <- colSums(Y_sub)
-
   q1 <- gh_quad_1d(21L)
-  z <- q1$nodes
-  log_w <- log(q1$weights)
-
-  p0 <- pmin(pmax(s_sub / n_sub, 0.02), 0.98)
-  b <- -stats::qlogis(p0)
-  sigma <- 0.80
-  converged <- FALSE
-
-  n_obs_s <- nrow(M_sub)
-  all_obs <- all(M_sub == 1.0)
-  log_w_mat <- matrix(log_w, nrow = n_obs_s, ncol = length(log_w), byrow = TRUE)
-
-  for (it in seq_len(max_iter)) {
-    b_old <- b
-    sig_old <- sigma
-
-    theta_q <- sigma * z
-    eta_jq <- outer(-b, theta_q, "+")
-    sp_jq <- ifelse(eta_jq > 0, eta_jq + log1p(exp(-eta_jq)), log1p(exp(eta_jq)))
-    LL <- if (all_obs) {
-      sweep(Y_sub %*% eta_jq, 2L, colSums(sp_jq), "-")
-    } else {
-      Y_sub %*% eta_jq - M_sub %*% sp_jq
-    }
-    LP <- LL + log_w_mat
-    mx <- LP[cbind(seq_len(n_obs_s), max.col(LP, ties.method = "first"))]
-    W_post <- exp(LP - mx)
-    R_iq <- W_post / rowSums(W_post)
-
-    # M-step for item difficulties b_j given posterior weights R_iq
-    N_jq <- if (all_obs) {
-      matrix(colSums(R_iq), nrow = length(b), ncol = length(z), byrow = TRUE)
-    } else {
-      crossprod(M_sub, R_iq)
-    }
-    for (nw in 1:4) {
-      P_jq <- 1.0 / (1.0 + exp(-outer(-b, theta_q, "+")))
-      grad_b <- rowSums(N_jq * P_jq) - s_sub
-      hess_b <- pmax(rowSums(N_jq * P_jq * (1.0 - P_jq)), 1e-8)
-      step_b <- pmin(pmax(grad_b / hess_b, -2.0), 2.0)
-      b <- b + step_b
-      if (max(abs(step_b)) < 1e-8) break
-    }
-
-    # Case-centering identification (`constraint = "cases"`): E_emp[EAP] = 0
-    eap_i <- as.numeric(R_iq %*% theta_q)
-    mu_case <- mean(eap_i)
-    b <- b - mu_case
-    var_new <- sum(colSums(R_iq) * (theta_q - mu_case)^2) / n_obs_s
-    sigma <- sqrt(max(var_new, 1e-10))
-
-    diff_max <- max(max(abs(b - b_old)), abs(sigma - sig_old))
-    if (diff_max < tol && it >= 3L) {
-      converged <- TRUE
-      break
-    }
-  }
-
-  if (!converged) {
-    return(list(error = "MML-EM reached iteration limit"))
-  }
-
-  theta_q <- sigma * z
-  eta_jq <- outer(-b, theta_q, "+")
-  sp_jq <- ifelse(eta_jq > 0, eta_jq + log1p(exp(-eta_jq)), log1p(exp(eta_jq)))
-  LL <- if (all_obs) {
-    sweep(Y_sub %*% eta_jq, 2L, colSums(sp_jq), "-")
-  } else {
-    Y_sub %*% eta_jq - M_sub %*% sp_jq
-  }
-  LP <- LL + log_w_mat
-  mx <- LP[cbind(seq_len(n_obs_s), max.col(LP, ties.method = "first"))]
-  W_post <- exp(LP - mx)
-  R_iq <- W_post / rowSums(W_post)
-  eap_obs <- as.numeric(R_iq %*% theta_q)
-  mu_case <- mean(eap_obs)
-  b <- b - mu_case
-  eap_obs <- eap_obs - mu_case
-
-  b_full <- rep(NA_real_, n_item)
-  b_full[est_j] <- b
-  ab_full <- rep(NA_real_, n_subj)
-  ab_full[obs_s] <- eap_obs
-  v_s <- if (sigma <= 1e-4) 0.0 else sigma^2
-
-  list(
-    error = NA_character_,
-    b_est = b_full,
-    ability = ab_full,
-    person_var = v_s,
-    singular = sigma <= 1e-4
+  cpp_fit_rasch_fixed_mml(
+    subj_id = as.integer(trials$subj_id),
+    item_id = as.integer(trials$item_id),
+    y = as.integer(trials$y),
+    n_subj = as.integer(n_subj),
+    n_item = as.integer(n_item),
+    estimable = as.logical(estimable),
+    gh_nodes = q1$nodes,
+    gh_weights = q1$weights,
+    max_iter = as.integer(max_iter),
+    tol = as.numeric(tol)
   )
 }

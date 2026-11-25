@@ -45,10 +45,7 @@ response_patterns <- function(y, participant, item) {
 }
 
 unit_response_counts <- function(id, success, n) {
-  observed <- tabulate(id, nbins = n)
-  correct <- tabulate(id[success], nbins = n)
-  list(observed = observed, correct = correct, all_correct = observed > 0L & correct == observed,
-       all_incorrect = observed > 0L & correct == 0L, unobserved = observed == 0L)
+  cpp_unit_response_counts(as.integer(id), as.logical(success), as.integer(n))
 }
 
 unit_pattern_names <- c("subj_all_correct", "subj_all_incorrect", "subj_unobserved",

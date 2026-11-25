@@ -184,42 +184,73 @@ summarize_probability_fit <- function(
         q1 <- gh_quad_1d(spec$dgp$n_quad)
         max_em <- if (chance > 0) 400L else 160L
         max_inner <- if (chance > 0) 44L else 22L
-        boot <- cpp_prob_bootstrap_batch(
-          n_boot = B,
-          cell_id = as.integer(unpenalized_cells),
-          X = cpp_boot_ctx$X,
-          subj_idx = cpp_boot_ctx$s_idx0,
-          Z_subj = cpp_boot_ctx$Z_s,
-          n_subj = cpp_boot_ctx$n_s,
-          item_idx = cpp_boot_ctx$i_idx0,
-          Z_item = cpp_boot_ctx$Z_i,
-          n_item = cpp_boot_ctx$n_i,
-          testlet_idx = cpp_boot_ctx$t_idx0,
-          Z_testlet = cpp_boot_ctx$Z_t,
-          n_testlet = cpp_boot_ctx$n_t,
-          beta_hat = fit$beta_full,
-          Sigma_subj_hat = fit$Sigma_subj,
-          Sigma_item_hat = fit$Sigma_item,
-          Sigma_testlet_hat = fit$Sigma_testlet,
-          X_cells = des$X_cells,
-          Zs_cells = Zs_c,
-          Zi_cells = Zi_c,
-          Zt_cells = Zt_c,
-          contrast_weights = unname(spec$contrast_weights),
-          gh_nodes = q1$nodes,
-          gh_weights = q1$weights,
-          chance = chance,
-          corr_mode = cpp_boot_ctx$corr_mode,
-          regularized = cpp_boot_ctx$regularized,
-          lkj_eta = spec$lkj_eta,
-          prior_beta_sd = spec$prior_beta_sd,
-          prior_tau_sd = spec$prior_tau_sd,
-          max_em_iter = max_em,
-          max_pirls_iter = max_inner,
-          tol = 1.5e-4,
-          eff_idx_1based = cpp_boot_ctx$eff_idx,
-          marginal = TRUE
-        )
+        ws_b <- cpp_boot_ctx$ws_ptr
+        boot <- if (!is.null(ws_b) && cpp_glmm_workspace_valid(ws_b)) {
+          cpp_prob_bootstrap_batch_ws(
+            ws_ptr = ws_b,
+            n_boot = B,
+            cell_id = as.integer(unpenalized_cells),
+            beta_hat = fit$beta_full,
+            Sigma_subj_hat = fit$Sigma_subj,
+            Sigma_item_hat = fit$Sigma_item,
+            Sigma_testlet_hat = fit$Sigma_testlet,
+            X_cells = des$X_cells,
+            Zs_cells = Zs_c,
+            Zi_cells = Zi_c,
+            Zt_cells = Zt_c,
+            contrast_weights = unname(spec$contrast_weights),
+            gh_nodes = q1$nodes,
+            gh_weights = q1$weights,
+            chance = chance,
+            corr_mode = cpp_boot_ctx$corr_mode,
+            regularized = cpp_boot_ctx$regularized,
+            lkj_eta = spec$lkj_eta,
+            prior_beta_sd = spec$prior_beta_sd,
+            prior_tau_sd = spec$prior_tau_sd,
+            max_em_iter = max_em,
+            max_pirls_iter = max_inner,
+            tol = 1.5e-4,
+            eff_idx_1based = cpp_boot_ctx$eff_idx,
+            marginal = TRUE
+          )
+        } else {
+          cpp_prob_bootstrap_batch(
+            n_boot = B,
+            cell_id = as.integer(unpenalized_cells),
+            X = cpp_boot_ctx$X,
+            subj_idx = cpp_boot_ctx$s_idx0,
+            Z_subj = cpp_boot_ctx$Z_s,
+            n_subj = cpp_boot_ctx$n_s,
+            item_idx = cpp_boot_ctx$i_idx0,
+            Z_item = cpp_boot_ctx$Z_i,
+            n_item = cpp_boot_ctx$n_i,
+            testlet_idx = cpp_boot_ctx$t_idx0,
+            Z_testlet = cpp_boot_ctx$Z_t,
+            n_testlet = cpp_boot_ctx$n_t,
+            beta_hat = fit$beta_full,
+            Sigma_subj_hat = fit$Sigma_subj,
+            Sigma_item_hat = fit$Sigma_item,
+            Sigma_testlet_hat = fit$Sigma_testlet,
+            X_cells = des$X_cells,
+            Zs_cells = Zs_c,
+            Zi_cells = Zi_c,
+            Zt_cells = Zt_c,
+            contrast_weights = unname(spec$contrast_weights),
+            gh_nodes = q1$nodes,
+            gh_weights = q1$weights,
+            chance = chance,
+            corr_mode = cpp_boot_ctx$corr_mode,
+            regularized = cpp_boot_ctx$regularized,
+            lkj_eta = spec$lkj_eta,
+            prior_beta_sd = spec$prior_beta_sd,
+            prior_tau_sd = spec$prior_tau_sd,
+            max_em_iter = max_em,
+            max_pirls_iter = max_inner,
+            tol = 1.5e-4,
+            eff_idx_1based = cpp_boot_ctx$eff_idx,
+            marginal = TRUE
+          )
+        }
       } else {
         group <- function(Z, id, Sigma) {
           index <- match(id, unique(id))
@@ -311,7 +342,7 @@ fit_via_cpp <- function(
 run_cpp_glmm_core <- function(
   y, X, s_idx0, Z_s, n_s, i_idx0, Z_i, n_i, t_idx0, Z_t, n_t,
   chance, corr_mode, regularized, spec, fast_stage, eff_idx,
-  warm = NULL
+  warm = NULL, ws_ptr = NULL
 ) {
   # The observed-curvature covariance update can approach the stopping
   # tolerance slowly for m-AFC. Allow more iterations at final verification.
@@ -321,32 +352,52 @@ run_cpp_glmm_core <- function(
 
   err_msg <- ""
   fit <- tryCatch(
-    cpp_fit_crossed_glmm(
-      y = y,
-      X = X,
-      subj_idx = s_idx0,
-      Z_subj = Z_s,
-      n_subj = n_s,
-      item_idx = i_idx0,
-      Z_item = Z_i,
-      n_item = n_i,
-      testlet_idx = t_idx0,
-      Z_testlet = Z_t,
-      n_testlet = n_t,
-      chance = chance,
-      corr_mode = corr_mode,
-      regularized = regularized,
-      lkj_eta = spec$lkj_eta,
-      prior_beta_sd = spec$prior_beta_sd,
-      prior_tau_sd = spec$prior_tau_sd,
-      max_em_iter = max_em,
-      max_pirls_iter = max_inner,
-      tol = tol_em,
-      init_beta = if (!is.null(warm)) warm$beta_full else NULL,
-      init_Sigma_subj = if (!is.null(warm)) warm$Sigma_subj else NULL,
-      init_Sigma_item = if (!is.null(warm)) warm$Sigma_item else NULL,
-      init_Sigma_testlet = if (!is.null(warm)) warm$Sigma_testlet else NULL
-    ),
+    if (!is.null(ws_ptr) && cpp_glmm_workspace_valid(ws_ptr)) {
+      cpp_fit_crossed_glmm_ws(
+        ws_ptr = ws_ptr,
+        y = y,
+        chance = chance,
+        corr_mode = corr_mode,
+        regularized = regularized,
+        lkj_eta = spec$lkj_eta,
+        prior_beta_sd = spec$prior_beta_sd,
+        prior_tau_sd = spec$prior_tau_sd,
+        max_em_iter = max_em,
+        max_pirls_iter = max_inner,
+        tol = tol_em,
+        init_beta = if (!is.null(warm)) warm$beta_full else NULL,
+        init_Sigma_subj = if (!is.null(warm)) warm$Sigma_subj else NULL,
+        init_Sigma_item = if (!is.null(warm)) warm$Sigma_item else NULL,
+        init_Sigma_testlet = if (!is.null(warm)) warm$Sigma_testlet else NULL
+      )
+    } else {
+      cpp_fit_crossed_glmm(
+        y = y,
+        X = X,
+        subj_idx = s_idx0,
+        Z_subj = Z_s,
+        n_subj = n_s,
+        item_idx = i_idx0,
+        Z_item = Z_i,
+        n_item = n_i,
+        testlet_idx = t_idx0,
+        Z_testlet = Z_t,
+        n_testlet = n_t,
+        chance = chance,
+        corr_mode = corr_mode,
+        regularized = regularized,
+        lkj_eta = spec$lkj_eta,
+        prior_beta_sd = spec$prior_beta_sd,
+        prior_tau_sd = spec$prior_tau_sd,
+        max_em_iter = max_em,
+        max_pirls_iter = max_inner,
+        tol = tol_em,
+        init_beta = if (!is.null(warm)) warm$beta_full else NULL,
+        init_Sigma_subj = if (!is.null(warm)) warm$Sigma_subj else NULL,
+        init_Sigma_item = if (!is.null(warm)) warm$Sigma_item else NULL,
+        init_Sigma_testlet = if (!is.null(warm)) warm$Sigma_testlet else NULL
+      )
+    },
     error = function(e) {
       err_msg <<- conditionMessage(e)
       NULL
@@ -411,6 +462,8 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
   t_fac <- if (has_t) as.integer(factor(tid)) else integer(0)
 
   X_full <- des$X_cells[cid, , drop = FALSE]
+  p_s <- ncol(des$Z_subj_cells)
+  p_i <- ncol(des$Z_item_cells)
 
   list(
     n_tr = n_tr,
@@ -418,9 +471,11 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
     ni = ni,
     has_t = has_t,
     nt = nt,
-    p_s = ncol(des$Z_subj_cells),
-    p_i = ncol(des$Z_item_cells),
+    p_s = p_s,
+    p_i = p_i,
     p_t = if (has_t) ncol(des$Z_testlet_cells) else 0L,
+    scalar_dgp = (p_s == 1L && p_i == 1L &&
+                    all(des$Z_subj_cells == 1.0) && all(des$Z_item_cells == 1.0)),
     cell_id = cid,
     sid = sid,
     iid = iid,
@@ -445,8 +500,38 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
     i_idx0_full = i_fac - 1L,
     n_i_full = max(i_fac),
     t_idx0_full = if (has_t) (t_fac - 1L) else integer(0),
-    n_t_full = if (has_t) max(t_fac) else 0L
+    n_t_full = if (has_t) max(t_fac) else 0L,
+    ws_env = new.env(parent = emptyenv())
   )
+}
+
+get_cached_cpp_ws <- function(cache, re_structure) {
+  env <- cache$ws_env
+  if (is.null(env)) return(NULL)
+  key <- if (re_structure == "intercept_only") "int" else "slope"
+  ws <- env[[key]]
+  if (!is.null(ws) && cpp_glmm_workspace_valid(ws)) return(ws)
+  Z_s <- if (re_structure == "intercept_only") cache$Z_int else cache$zs_dgp
+  Z_i <- if (re_structure == "intercept_only") cache$Z_int else cache$zi_dgp
+  Z_t <- if (cache$has_t) {
+    if (re_structure == "intercept_only") cache$Z_int else cache$zt_dgp
+  } else {
+    cache$Z_empty
+  }
+  ws <- cpp_create_glmm_workspace(
+    X = cache$X_full,
+    subj_idx = cache$s_idx0_full,
+    Z_subj = Z_s,
+    n_subj = cache$n_s_full,
+    item_idx = cache$i_idx0_full,
+    Z_item = Z_i,
+    n_item = cache$n_i_full,
+    testlet_idx = cache$t_idx0_full,
+    Z_testlet = Z_t,
+    n_testlet = cache$n_t_full
+  )
+  env[[key]] <- ws
+  ws
 }
 
 #' Zero-Allocation Response Simulation Matching simulate_dgp_data() Bit-for-Bit
@@ -455,9 +540,13 @@ simulate_fast_y_keep <- function(cache) {
   u_s <- matrix(stats::rnorm(cache$ns * cache$p_s), nrow = cache$ns, ncol = cache$p_s) %*% cache$t_Ls
   u_i <- matrix(stats::rnorm(cache$ni * cache$p_i), nrow = cache$ni, ncol = cache$p_i) %*% cache$t_Li
 
-  eta <- cache$mu_trial +
-    rowSums(cache$zs_dgp * u_s[cache$sid, , drop = FALSE]) +
-    rowSums(cache$zi_dgp * u_i[cache$iid, , drop = FALSE])
+  eta <- if (isTRUE(cache$scalar_dgp)) {
+    cache$mu_trial + u_s[cache$sid, 1L] + u_i[cache$iid, 1L]
+  } else {
+    cache$mu_trial +
+      rowSums(cache$zs_dgp * u_s[cache$sid, , drop = FALSE]) +
+      rowSums(cache$zi_dgp * u_i[cache$iid, , drop = FALSE])
+  }
 
   if (cache$has_t) {
     u_t <- matrix(stats::rnorm(cache$nt * cache$p_t), nrow = cache$nt, ncol = cache$p_t) %*% cache$t_Lt
@@ -493,6 +582,7 @@ fit_via_cpp_cached <- function(
     corr_mode <- if (re_structure == "maximal") 1L else 0L
   }
 
+  ws_ptr <- NULL
   if (is.null(sim_dat$keep)) {
     X <- cache$X_full
     Z_s <- Z_s_full
@@ -504,6 +594,7 @@ fit_via_cpp_cached <- function(
     n_i <- cache$n_i_full
     t_idx0 <- cache$t_idx0_full
     n_t <- cache$n_t_full
+    ws_ptr <- get_cached_cpp_ws(cache, re_structure)
   } else {
     kp <- sim_dat$keep
     if (length(unique(cache$cell_id[kp])) < ncol(cache$X_full)) {
@@ -549,7 +640,8 @@ fit_via_cpp_cached <- function(
       spec = spec,
       fast_stage = fast_stage,
       eff_idx = cache$eff_idx,
-      warm = warm_cpp
+      warm = warm_cpp,
+      ws_ptr = ws_ptr
     )
     if (is.null(warm_cpp) && isTRUE(res$converged)) warm_cpp <<- res
     res
@@ -559,7 +651,7 @@ fit_via_cpp_cached <- function(
     i_idx0 = i_idx0, Z_i = Z_i, n_i = n_i,
     t_idx0 = t_idx0, Z_t = Z_t, n_t = n_t,
     corr_mode = corr_mode, regularized = regularized,
-    eff_idx = cache$eff_idx
+    eff_idx = cache$eff_idx, ws_ptr = ws_ptr
   )
   cid <- if (!regularized) {
     if (is.null(sim_dat$keep)) cache$cell_id else cache$cell_id[sim_dat$keep]
