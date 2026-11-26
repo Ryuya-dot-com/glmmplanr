@@ -1,0 +1,16 @@
+{
+  "fresh_directory": "/private/tmp/glmmplanr-interval-audit-reproduce",
+  "all_numeric_outputs_identical": [
+    "interval_summary.csv",
+    "finite_pool.csv",
+    "paired.csv",
+    "intervals.csv.gz",
+    "finite_pool_summary.csv",
+    "se_strata.csv",
+    "error_diagnostics.csv",
+    "disjoint_blocks.csv",
+    "block_summary.csv"
+  ],
+  "figure_png_identical": true,
+  "input_preserved": true
+}

@@ -536,6 +536,27 @@ The defaults remain unchanged. Specify the same interval method and
 as intended for the analysis. No new minimum participant/item recommendation
 follows from these selected layouts.
 
+**What the saved draws explain.** Reanalysis of the same 3,072 datasets
+separates interval computation from model fitting. At 72×60, 54 of the 58
+joint-delta successes lost by the default bootstrap still detect the effect
+but exceed the 10pp width limit. Four disjoint 99-draw batches give 22–25
+joint successes among the same 32 long-draw datasets; all 399 draws give 26.
+This shows inner-simulation sensitivity, not a confirmed benefit or an
+80% guarantee for 399 refits. At the 162×30 null, RMS bootstrap SE matches
+the empirical SD closely (ratio 1.002), but the lowest-SE fifth has 17/102
+exclusions. Aggregate SE agreement therefore does not establish adequate
+calibration of dataset-specific intervals.
+
+Exploratory percentile/basic intervals reconstructed from the saved draws
+are not public interval options. With 99 refits, percentile intervals reduce
+162×30 null rejection from 40/512 to 32/512 (95% MC interval 4.46–8.69%),
+while 72×60 joint attainment falls from 395/512 to 318/512; planned coverage
+there remains 489/512. These tradeoffs do not justify an automatic method
+switch. The results use the covariance-corrected executable before the
+mode-roundoff repair and are not new independent confirmation of current
+inference. Defaults and the need to match planning/analysis settings remain
+unchanged. [Detailed saved-draw audit](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#interval-mechanism-audit).
+
 [Protocol, paired results, retained inner counts and figure](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#default-bootstrap-confirmation).
 
 <a id="rasch-mml-acceleration"></a>

@@ -42,15 +42,26 @@ not a new independent simulation proving nominal inference. The approximate
 covariance updates and their nonstationarity remain disclosed limitations.
 Details are in `validation/README.md#covariance-mode-repair`.
 
+A saved-draw follow-up reanalyzes the earlier default-bootstrap confirmation
+without new GLMM fits or datasets. Width-threshold variability explains most
+72-by-60 joint-decision losses; aggregate SE agreement does not settle the
+162-by-30 null diagnostic. Exploratory percentile/basic intervals and
+conditional finite-pool resampling do not justify a new default. The updated
+guide retains these limits. R and independent Python arithmetic agree for
+12,864 intervals and their summary decisions; details are in
+`validation/README.md#interval-mechanism-audit`.
+
 ## Current local candidate
 
-Source archive: `glmmplanr_0.1.0.tar.gz` (1,257,141 bytes).
-SHA-256: `ca751f6a0405f8f053eee6f57976dbd7b37647fd1412efb254f566da7d528355`.
+Source archive: `glmmplanr_0.1.0.tar.gz` (1,258,394 bytes).
+SHA-256: `add111e217880877426f11e971d65389b60800b377f5b981c6165a0da05127d8`.
 
-0 errors | 0 warnings | 1 note
+Previous numerical-source check: 0 errors | 0 warnings | 1 note.
+The documentation-only rebuild below reuses that code/test evidence.
 
 * macOS, R 4.6.1, `aarch64-apple-darwin23`.
-* `R CMD check --as-cran --no-manual --no-tests`, with
+* The preceding archive, SHA-256 `ca751f6a0405f8f053eee6f57976dbd7b37647fd1412efb254f566da7d528355`,
+  passed `R CMD check --as-cran --no-manual --no-tests`, with
   `_R_CHECK_FORCE_SUGGESTS_=false`, `_R_CHECK_DEPENDS_ONLY_=true`,
   `_R_CHECK_CRAN_INCOMING_REMOTE_=true`, `_R_CHECK_SYSTEM_CLOCK_=false`.
 * Installation, compiled-code checks, help, examples, URLs and vignette
@@ -66,12 +77,18 @@ SHA-256: `ca751f6a0405f8f053eee6f57976dbd7b37647fd1412efb254f566da7d528355`.
   `cmdstanr` repository (availability confirmed). Optional `instantiate`
   was not available. An initial sandboxed check stopped at DNS access before
   installation; the network-enabled check above completed successfully.
-* The archive's 43 R/C++/Stan/test and selected documentation files match
-  the working source exactly; all 13 relative README links resolve and the
-  updated validation section appears in the built HTML vignette.
+* The current archive differs in the validation guide and its generated HTML,
+  DESCRIPTION's build timestamp, and three printed environment addresses in
+  the planning-workflow HTML. Its 40 R/C++/Stan/test files are identical to
+  the checked archive and working source. Help, examples and vignette source
+  are unchanged. R CMD build reconstructed vignettes successfully, including
+  the added saved-draw explanation. All 13 relative README links resolve.
+  No full numerical test/check was repeated for this documentation change.
 * No new Win-builder upload, three-platform CI or formal submission was made.
 * Build/check logs and source identity are retained in
   `validation/covariance_mode_replay/` (excluded from the CRAN archive).
+  The documentation rebuild and complete archive difference record are in
+  `validation/interval_mechanism_audit/`.
 
 ## Previous local candidate before the numerical repair
 

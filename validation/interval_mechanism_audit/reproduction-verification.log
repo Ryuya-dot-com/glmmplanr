@@ -1,0 +1,11 @@
+{
+  "interval_rows": 12864,
+  "outer_datasets": 3072,
+  "saved_draws": 361728,
+  "max_endpoint_difference_pp": 1.509903313490213e-13,
+  "endpoint_tolerance_pp": 1e-10,
+  "summary_rows": 42,
+  "paired_rows": 36,
+  "new_fits": 0,
+  "checked": "draw-based endpoints, counts, Wilson bounds, paired MCSEs, error diagnostics"
+}

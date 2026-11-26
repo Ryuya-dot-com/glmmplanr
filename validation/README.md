@@ -19,6 +19,170 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="interval-mechanism-audit"></a>
+
+## Saved-draw audit of interval calibration and planning thresholds (2026-11-26)
+
+This exploratory follow-up asks why the 72×60 planned joint decision changes
+between joint-delta and default bootstrap intervals, and why the 162×30 null
+rejection remains high. It uses the completed default-bootstrap study's
+three frozen designs × null/planned × 512 datasets, with 99 saved parametric
+refits for every dataset and 399 for the first 32 per cell. The estimand is
+the same marginal effect in percentage points (null 0, planned 8); schedules,
+data, fitted estimates, priors and simulation seeds are unchanged. The
+54×30 intercept-only design is a control. These are the covariance-corrected
+fits before the later mode-roundoff repair; source identities are retained,
+and no new current-kernel fitting or independent confirmation is implied.
+
+The data are simulated binary responses under the frozen vocabulary-study
+planning assumptions, not raw participant data. Each person sees 30 items
+in a Latin-square schedule (`item_seed=37`); guessing and random-effect
+correlations are zero. Planned marginal probabilities are .42/.50. The
+participant/item intercept SDs are .8/.6 for 54×30 and 72×60, and 1.1/.9
+for 162×30; corresponding slope SDs are 0/0, .25/.35 and .4/.5. The source
+study's native regularized estimator, priors and equal-marginal null are
+retained exactly.
+
+Before reanalysis, the following comparisons were fixed. First, inspect
+bias, empirical SD versus RMS SE, standardized-error tails, and the joint
+detection/width decision's two components. Mean-bias removal and replacing
+SE by the same cell's empirical SD are descriptive oracle diagnostics, not
+available interval corrections. Second, compare the existing Wald interval
+with percentile and basic intervals from exactly the same parametric draws,
+using boot's normal-quantile interpolation. No bootstrap-t or BCa calculation
+is attempted because per-refit variance/influence information is not saved.
+Both alternative intervals are exploratory, not new public methods. The
+bootstrap Wald interval remains centered at the original estimate; it is
+not boot.ci's bias-adjusted normal interval.
+
+Third, on only the 32 datasets per cell with 399 draws, inspect four disjoint
+99-draw blocks (three unused draws), and 2,000 nested empirical resamples
+of size 99/399 from each saved 399-draw pool (with replacement; root
+953260001). This isolates variability of the interval computation conditional
+on the finite pool. The 399-draw pool is not an infinite-bootstrap truth.
+The 2,000 resamples are not additional independent outer datasets; sampling
+uncertainty across the 32 outer datasets remains distinct from conditional
+resampling error. No selection or extension of outer replications is made.
+
+Valid intervals require valid original fits, >=90% successful inner refits,
+and finite ordered endpoints; failures remain in detection, width and joint
+denominators. Coverage uses valid intervals. Report pointwise Wilson 95%
+MC intervals, paired differences/MCSEs, and the existing width <=10pp,
+joint lower bound >=.80, coverage lower bound >=.925 and null upper bound
+<=.075 rules. These practical gates are distinct from nominal .95/.05.
+The saved original Wald SEs/counts must match within 1e-7pp and exactly,
+respectively. Published claims and defaults will not change on exploratory
+improvements alone. See the [boot interval documentation](https://stat.ethz.ch/R-manual/R-devel/library/boot/html/boot.ci.html)
+for interval definitions and required inputs; the present generating scheme
+remains parametric and uses the native fitted GLMM.
+
+**Completed results and interpretation.** No new response datasets or GLMM
+fits were generated. All 3,072 original datasets and 361,728 saved refits
+were retained. The 12,864 computed intervals include four methods for all
+512 datasets per cell and three 399-draw methods for only 32 per cell.
+Original Wald SEs, valid counts, decisions and paired response hashes match.
+
+At moderate-slope 72×60, joint attainment falls from 434/512 with joint delta
+to 395/512 with the default Wald bootstrap: 58 losses and 19 gains. Of the
+58 losses, 54 retain detection but fail width <=10pp, and four lose detection
+while retaining the width criterion. Detection actually rises from 484 to
+486; width attainment falls from 457 to 415. Thus lower joint attainment
+in this batch primarily concerns the width threshold, not lower power.
+Similar RMS SEs do not imply similar per-dataset threshold decisions.
+
+The long-draw subset contains 32 datasets per cell, not 512. At 72×60,
+the four disjoint 99-draw batches give planned joint counts 22, 25, 25 and
+23 out of the same 32 datasets, versus 26/32 using all 399. In the conditional
+finite-pool experiment, mean SE CV falls from 7.15% to 3.54% as B rises from
+99 to 399. Mean conditional joint probabilities are 74.86% and 78.74%, a
+3.88pp difference (conditional resampling MCSE .134pp; across-outer SE of
+the difference 1.414pp). The latter is not the uncertainty of a fresh
+512-dataset confirmation. The empirical pools are themselves noisy and
+shared between the comparisons. These results establish sensitivity to
+inner simulation; they neither attribute the entire full-sample -7.62pp
+difference to B nor establish that B=399 passes the 80% planning gate.
+
+For the high-variance 162×30 null, the mean error is .01099pp (MCSE .09284),
+the empirical SD is 2.10072pp, and bootstrap RMS SE is 2.10517pp (ratio 1.00212).
+The standardized-error SD is nevertheless 1.04976, with 18 left-tail and 22
+right-tail exclusions. The lowest-SE fifth has RMS SE 1.68590pp, error RMSE
+2.25845pp and 17/102 exclusions; the highest fifth has RMS SE 2.51965pp,
+error RMSE 2.20089pp and 6/103 exclusions. These are post hoc descriptive
+strata. A near-correct aggregate SE does not demonstrate that each fitted
+SE adequately reflects that dataset's error. Removing the observed mean
+bias gives 41/512 exclusions, while substituting the cell's empirical SD
+gives 31/512. Neither oracle operation is available for an actual new study,
+and neither identifies a unique cause or a universally correct multiplier
+or degrees of freedom. In particular, this is not evidence that finite-B
+noise alone explains the 7.81% null rejection.
+
+The alternative intervals use the same parametric refits and original point
+estimate; both remain exploratory. On the full 512-dataset cells:
+
+| Metric | Default Wald (99) | Percentile (99) | Basic (99) |
+| --- | --- | --- | --- |
+| 162×30 null rejection | 40/512 (7.81%) | 32/512 (6.25%) | 36/512 (7.03%) |
+| 162×30 planned coverage | 480/512 (93.75%) | 485/512 (94.73%) | 488/512 (95.31%) |
+| 72×60 planned coverage | 489/512 (95.51%) | 489/512 (95.51%) | 494/512 (96.48%) |
+| 72×60 detection AND width <=10pp | 395/512 (77.15%) | 318/512 (62.11%) | 317/512 (61.91%) |
+
+The percentile null interval at 162×30 is 4.46–8.69%, still indeterminate
+against the practical 7.5% upper gate; its paired improvement is not a
+general calibration guarantee. At 72×60 its mean width is 9.60pp versus
+9.20pp for Wald, and its per-dataset widths also vary more at B=99. The
+399-draw subset is insufficient to rank nominal coverage. Selecting the
+method with the largest planning pass rate would ignore inferential validity;
+selecting percentile/basic solely for a smaller observed null rate would
+ignore both uncertainty and precision cost. No new interval option, default
+change, t correction, or general participant/item recommendation is adopted.
+Independent confirmation follows only a sufficiently justified candidate;
+these results do not meet that adoption criterion.
+
+[Analysis](interval_mechanism_audit.R) ·
+[independent arithmetic verification](verify_interval_mechanism_audit.py) ·
+[all interval summaries and Wilson bounds](interval_mechanism_audit/interval_summary.csv) ·
+[paired changes and MCSEs](interval_mechanism_audit/paired.csv) ·
+[error/SE diagnostics](interval_mechanism_audit/error_diagnostics.csv) ·
+[SE strata](interval_mechanism_audit/se_strata.csv) ·
+[finite-pool sensitivity](interval_mechanism_audit/finite_pool_summary.csv) ·
+[figure](interval_mechanism_audit/interval_comparison.png).
+
+To reproduce with an installed glmmplanr and boot, use a fresh output directory
+so the retained evidence is not overwritten:
+
+```sh
+Rscript --vanilla validation/interval_mechanism_audit.R /tmp/glmmplanr-interval-audit
+python3 validation/verify_interval_mechanism_audit.py /tmp/glmmplanr-interval-audit
+```
+
+A fresh-directory execution of these entry points reproduced all nine numeric
+tables and the PNG byte-for-byte (comparing decompressed CSV content for gzip
+files), and passed the independent verification again. The original response
+and refit files were not modified; see [reproduction record](interval_mechanism_audit/reproduction.json).
+
+R assertions and an independent Python implementation verify all 42 summary
+rows, 36 paired comparisons, draw-based interval endpoints, counts, Wilson
+bounds and error moments. The largest endpoint discrepancy is 1.51e-13pp
+(tolerance 1e-10pp). The figure was visually inspected: theme_bw, no automatic
+title/caption. Two initial analysis-only attempts stopped at key ordering and
+CSV empty-string type checks; those bookkeeping issues were corrected before
+the successful analysis, without altering input data or the model. Logs and
+[verification details](interval_mechanism_audit/verification.json) are retained.
+The package kernel/API and tests are unchanged; successful 740-assertion
+evidence is reused rather than rerun. This study does not extend the old
+candidate's platform-check coverage or replace its existing limitations.
+
+The guide update is included in a documentation-only rebuild (1,258,394 bytes;
+SHA-256 `add111e217880877426f11e971d65389b60800b377f5b981c6165a0da05127d8`).
+R CMD build and vignette reconstruction passed. Complete archive comparison
+against `ca751f6a...` finds changes only in the guide, its HTML, the build
+timestamp and three printed environment addresses in another vignette.
+All 40 R/C++/Stan/test files are unchanged, and all 13 README relative links
+resolve. This combines the previous numerical checks with the new document
+build and identity audit, rather than claiming a new full check. See
+[archive comparison](interval_mechanism_audit/archive-identity.json) and
+[build log](interval_mechanism_audit/build.log).
+
 <a id="covariance-mode-repair"></a>
 
 ## Conditional-mode roundoff and diagnostic contract repair (2026-11-26)

@@ -1,0 +1,3 @@
+Error in match.arg(method) : 'arg' must be of length 1
+Calls: stopifnot ... [.data.frame -> ord -> do.call -> <Anonymous> -> match.arg
+Execution halted
