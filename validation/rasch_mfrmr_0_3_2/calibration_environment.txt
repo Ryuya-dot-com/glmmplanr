@@ -1,0 +1,33 @@
+R version 4.6.1 (2026-06-24)
+Platform: aarch64-apple-darwin23
+Running under: macOS Golden Gate 27.2.1
+
+Matrix products: default
+BLAS:   /Library/Frameworks/R.framework/Versions/4.6/Resources/lib/libRblas.0.dylib 
+LAPACK: /Library/Frameworks/R.framework/Versions/4.6/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] C.UTF-8/C.UTF-8/C.UTF-8/C/C.UTF-8/C.UTF-8
+
+time zone: Asia/Tokyo
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] glmmplanr_0.1.0
+
+loaded via a namespace (and not attached):
+ [1] tidyr_1.3.2      R6_2.6.1         tidyselect_1.2.1 magrittr_2.0.5  
+ [5] glue_1.8.1       tibble_3.3.1     parallel_4.6.1   pkgconfig_2.0.3 
+ [9] dplyr_1.2.1      generics_0.1.4   lifecycle_1.0.5  cli_3.6.6       
+[13] grid_4.6.1       vctrs_0.7.3      mfrmr_0.3.2      compiler_4.6.1  
+[17] purrr_1.2.2      tools_4.6.1      pillar_1.11.1    Rcpp_1.1.2      
+[21] rlang_1.3.0     
+
+mfrmr 0.3.2
+mode=calibration workers=10 reps=512 seed=91661001
+
+Candidate archive SHA-256 f0ebe1a9880e6ffaf41f96654408a9f9305604f7a95b120917cfc147c59ec4ab
+Calibration elapsed seconds 2243.9

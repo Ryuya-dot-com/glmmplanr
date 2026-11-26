@@ -1,0 +1,13 @@
+"profile","n_subj","n_item","case","condition","job"
+"conservative_5pp",162,60,11,"null",1
+"high_variance_8pp",162,30,25,"null",2
+"high_variance_8pp",216,90,30,"null",3
+"high_variance_8pp",72,90,21,"null",4
+"published_8pp",54,30,31,"null",5
+"slopes_8pp",72,60,50,"null",6
+"conservative_5pp",162,60,11,"planned",7
+"high_variance_8pp",162,30,25,"planned",8
+"high_variance_8pp",216,90,30,"planned",9
+"high_variance_8pp",72,90,21,"planned",10
+"published_8pp",54,30,31,"planned",11
+"slopes_8pp",72,60,50,"planned",12

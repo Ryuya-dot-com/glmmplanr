@@ -7,7 +7,7 @@ test_that("Rasch losses agree with direct IRT simulation and an independent fitt
               person_variance = 0.25, item_variance = 0.25)
   set.seed(231)
   old_seed <- .Random.seed
-  plan <- plan_rasch_precision(g, sizes, limits, nsim = 3, seed = 64)
+  plan <- plan_rasch_precision(g, sizes, limits, nsim = 3, seed = 64, engine = "lme4")
   expect_identical(.Random.seed, old_seed)
   schedule <- generate_design_schedule(design, 48, 16)
   stream <- derive_rep_substreams(allocate_stage_point_streams(64, 1L, 1L, 1L)[[1L]], 1L)[[1L]]
@@ -64,12 +64,12 @@ test_that("boundary estimates and unobserved participants have distinct recovery
   draw <- with_rng_stream(77, draw_dgp_trials(g, schedule, keep_person_item_effects = TRUE))
   draw$trials$y <- with(draw$trials, (subj_id + item_id) %% 2L)
   control <- lme4::glmerControl(optimizer = "bobyqa")
-  errors <- rasch_recovery_errors(draw, g, control)
+  errors <- rasch_recovery_errors(draw, g, control, engine = "lme4")
   expect_true(errors$singular)
   expect_true(is.na(errors$fit_error))
   expect_equal(c(errors$person_sd, errors$item_sd), c(0, 0), tolerance = 1e-5)
   draw$trials <- draw$trials[draw$trials$subj_id != 4L, ]
-  errors <- rasch_recovery_errors(draw, g, control)
+  errors <- rasch_recovery_errors(draw, g, control, engine = "lme4")
   expect_true(is.na(errors$ability))
   expect_true(is.finite(errors$difficulty))
 })
@@ -162,5 +162,51 @@ test_that("a participant with only constant items has no fixed-bank ability esti
     expect_true(is.na(fit$metrics$ability))
     expect_true(is.na(fit$b_est[9L]))
     expect_true(all(is.finite(fit$b_est[1:8])))
+  }
+})
+
+test_that("slow fixed-bank EM agrees with an independent marginal likelihood optimizer", {
+  # Saved 200-iteration failure: narrow population, case 5, replication 7.
+  stream <- make_lecuyer_streams(91661001L, 7L)[[7L]]
+  y <- with_rng_stream(stream, {
+    theta <- .4 * rnorm(480L)
+    uniform <- matrix(runif(480L * 16L), 480L, 16L)
+    1L * (uniform[1:120, ] < plogis(outer(theta[1:120], seq(-1.8, 1.8, length.out = 16), "-")))
+  })
+  tr <- expand.grid(subj_id = 1:120, item_id = 1:16)
+  tr$y <- as.integer(y)
+  fit <- fit_rasch_fixed_mml(tr, 120L, 16L, rep(TRUE, 16L))
+  expect_true(is.na(fit$error))
+  expect_gt(fit$person_var, .01)
+  # Higher-order quadrature, direct observed likelihood, no EM map.
+  gh <- gh_quad_1d(61L)
+  nll <- function(par) {
+    eta <- outer(sqrt(par[17]) * gh$nodes, -par[1:16], "+")
+    ll <- y %*% t(eta) + matrix(rowSums(log1p(-plogis(eta))), 120, 61, byrow = TRUE)
+    ll <- sweep(ll, 2L, log(gh$weights), "+")
+    peak <- apply(ll, 1L, max)
+    -sum(peak + log(rowSums(exp(ll - peak))))
+  }
+  ref <- optim(c(-qlogis(colMeans(y)), .16), nll, method = "L-BFGS-B",
+               lower = c(rep(-Inf, 16L), 0), control = list(factr = 1e3))
+  expect_equal(ref$convergence, 0L)
+  expect_equal(fit$b_est, ref$par[1:16], tolerance = 2e-4)
+  expect_equal(sqrt(fit$person_var), sqrt(ref$par[17]), tolerance = 2e-4)
+  expect_lt(abs(nll(c(fit$b_est, fit$person_var)) - ref$value), 1e-5)
+})
+
+test_that("fixed-bank variance boundary is finite for complete and partial forms", {
+  for (partial in c(FALSE, TRUE)) {
+    tr <- expand.grid(subj_id = 1:40, item_id = 1:12)
+    tr$y <- with(tr, (subj_id + item_id) %% 2L)
+    if (partial) tr <- subset(tr, subj_id <= 39 & (subj_id + item_id) %% 3 != 0)
+    fit <- fit_rasch_fixed_mml(tr, 40L, 12L, rep(TRUE, 12L))
+    expect_true(is.na(fit$error))
+    expect_true(fit$singular)
+    expect_identical(fit$person_var, 0)
+    exact <- -qlogis(tapply(tr$y, tr$item_id, mean))
+    expect_equal(fit$b_est, as.numeric(exact), tolerance = 1e-8)
+    expect_true(all(fit$ability[unique(tr$subj_id)] == 0))
+    if (partial) expect_true(is.na(fit$ability[40]))
   }
 })

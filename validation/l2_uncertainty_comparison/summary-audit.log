@@ -1,0 +1,108 @@
+ case condition  variant n_valid  coverage  detection joint_decision
+   11      null baseline    2048 0.9472656 0.05273438           fail
+   21      null baseline    2048 0.9375000 0.06250000           fail
+   25      null baseline    2048 0.9316406 0.06835938           fail
+   30      null baseline    2048 0.9375000 0.06250000           fail
+   31      null baseline    2048 0.9565430 0.04345703           fail
+   50      null baseline    2048 0.9589844 0.04101562           fail
+   11   planned baseline    2048 0.9501953 0.85839844           pass
+   21   planned baseline    2048 0.9531250 0.94726562           pass
+   25   planned baseline    2048 0.9355469 0.96875000           pass
+   30   planned baseline    2048 0.9375000 0.99853516           pass
+   31   planned baseline    2048 0.9545898 0.94677734           pass
+   50   planned baseline    2048 0.9580078 0.93261719           pass
+   11      null  guarded    2048 0.9501953 0.04980469           fail
+   21      null  guarded    2048 0.9414062 0.05859375           fail
+   25      null  guarded    2048 0.9389648 0.06103516           fail
+   30      null  guarded    2035 0.9444717 0.05517578           fail
+   31      null  guarded    2048 0.9565430 0.04345703           fail
+   50      null  guarded    2048 0.9604492 0.03955078           fail
+   11   planned  guarded    2048 0.9526367 0.85253906           pass
+   21   planned  guarded    2048 0.9545898 0.94287109           pass
+   25   planned  guarded    2048 0.9448242 0.96191406           pass
+   30   planned  guarded    2041 0.9416952 0.99511719           pass
+   31   planned  guarded    2048 0.9541016 0.94677734           pass
+   50   planned  guarded    2048 0.9594727 0.93017578           pass
+ coverage_floor_decision null_ceiling_decision nominal_adverse_flag
+                    pass                  pass                FALSE
+                    pass                  pass                 TRUE
+           indeterminate         indeterminate                 TRUE
+                    pass                  pass                 TRUE
+                    pass                  pass                FALSE
+                    pass                  pass                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+           indeterminate                  <NA>                 TRUE
+                    pass                  <NA>                 TRUE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  pass                FALSE
+                    pass                  pass                FALSE
+                    pass                  pass                 TRUE
+                    pass                  pass                FALSE
+                    pass                  pass                FALSE
+                    pass                  pass                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+                    pass                  <NA>                FALSE
+ case           profile n_subj n_item  n old_valid new_valid old_median_cpu
+   11  conservative_5pp    162     60 16        16        16         0.0985
+   21 high_variance_8pp     72     90 16        16        16         0.0675
+   25 high_variance_8pp    162     30 16        16        16         0.0190
+   30 high_variance_8pp    216     90 16        16        16         0.2050
+   31     published_8pp     54     30 16        16        16         0.0020
+   50        slopes_8pp     72     60 16        16        16         0.0530
+  101        correlated     48     32 16        16        16         0.0095
+  102          guessing     48     32 16        16        16         0.0060
+ new_median_cpu aggregate_cpu_ratio
+         0.2925           3.6455060
+         0.1305           1.9185939
+         0.0455           2.6342282
+         0.4275           2.3918254
+         0.0030           1.2000000
+         0.1150           2.0249729
+         0.0065           0.7733333
+         0.0055           0.7478261
+ case condition    n n_both_valid n_validity_changed n_status_changed
+   11      null 2048         2048                  0                0
+   21      null 2048         2048                  0                0
+   25      null 2048         2048                  0                0
+   30      null 2048         2035                  0                0
+   31      null 2048         2048                  0                0
+   50      null 2048         2048                  0                0
+   11   planned 2048         2048                  0                0
+   21   planned 2048         2048                  0                0
+   25   planned 2048         2048                  0                0
+   30   planned 2048         2041                  0                0
+   31   planned 2048         2048                  0                0
+   50   planned 2048         2048                  0                0
+ max_point_difference_pp max_se_difference_pp n_beyond_tolerance
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+                       0                    0                  0
+ n_coverage_changed n_detection_changed n_joint_changed
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+                  0                   0               0
+All 24,576 response pairs, decisions and unchanged-path values audited.

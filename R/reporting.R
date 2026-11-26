@@ -445,7 +445,7 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
     gt::sub_missing(missing_text = "-")
 }
 
-#' Plot 2D Iso-Power / Iso-Precision Contours, 3D Surfaces, and Pareto Trade-offs
+#' Plot Sample Size Trade-offs and Scenario Comparisons
 #'
 #' @param x A `"glmmplanr_result"` object.
 #' @param type Visualization type:
@@ -455,12 +455,22 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
 #'   * `"pareto"`: Non-dominated `(N_subj vs N_item)` Pareto trade-off curve
 #'     showing the exact minimum participants required at each item count.
 #'   * `"surface3d"`: Interactive `plotly` 3D response surface.
-#' @param metric Surface metric to render: `"power"` (default), `"ci_width"`
+#'   * `"scenarios"`: Compare verified designs across the scenarios supplied to
+#'     [optimize_sample_size()], showing detection with its stored Monte Carlo
+#'     interval and mean interval width in separate panels. Absolute probability
+#'     targets show width attainment in place of detection. Shapes give the
+#'     stored decision under the plan's criterion.
+#' @param metric Surface metric for `"contour"` and `"surface3d"`: `"power"` (default), `"ci_width"`
 #'   (on `x$spec$scale`), or `"prob_ci_width_pp"` (95% CI width in percentage
 #'   points).
 #' @param show_pareto_frontier Logical; overlay the non-dominated `(N_subj, N_item)`
 #'   Pareto frontier on `"contour"` plots (default `TRUE`).
 #' @param ... Additional arguments (unused).
+#' @param candidates For `"scenarios"`, an optional data frame with `n_subj`
+#'   and `n_item` columns giving the verified design pairs to display. By
+#'   default, show the designs selected under the standard scenario and
+#'   across all scenarios, with one row of panels if the selections coincide.
+#'   Increase the saved figure height when showing many designs.
 #' @return A `ggplot` object or `plotly` htmlwidget.
 #' @examples
 #' # Create the five-replication demonstration plan from the optimizer help.
@@ -469,12 +479,14 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
 #' @export
 plot.glmmplanr_result <- function(
   x,
-  type = c("contour", "surface3d", "pareto"),
+  type = c("contour", "surface3d", "pareto", "scenarios"),
   metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
-  ...
+  ...,
+  candidates = NULL
 ) {
   type <- match.arg(type)
+  if (type == "scenarios") return(plot_scenario_comparison(x, candidates))
   metric <- match.arg(metric)
 
   if (type == "contour") {
@@ -484,6 +496,178 @@ plot.glmmplanr_result <- function(
     return(plot_surface_3d(x, metric = metric))
   }
   plot_pareto_curve(x)
+}
+
+plot_scenario_comparison <- function(x, candidates) {
+  robust <- x$robust
+  ev <- robust$scenario_evaluations
+  if (is.null(ev) || !nrow(ev)) {
+    cli::cli_abort("Scenario plots require a plan computed with multiple {.arg scenarios}.")
+  }
+  coord <- c("n_subj", "n_item")
+  if (is.null(candidates)) {
+    candidates <- rbind(robust$optimal_standard[coord], robust$optimal_robust[coord])
+  }
+  if (!is.data.frame(candidates) || !all(coord %in% names(candidates)) || !nrow(candidates)) {
+    cli::cli_abort("Supply verified designs in a data frame with {.field n_subj} and {.field n_item} columns.")
+  }
+  candidates <- unique(candidates[coord])
+  keys <- with(ev, paste(n_subj, n_item))
+  chosen <- with(candidates, paste(n_subj, n_item))
+  if (!all(chosen %in% keys)) cli::cli_abort("Every candidate must have verified scenario results.")
+  ev <- ev[keys %in% chosen, , drop = FALSE]
+  label <- function(d) sprintf("%s participants\n%s items in bank", d$n_subj, d$n_item)
+  designs <- factor(label(ev), levels = label(candidates))
+  presentation <- vapply(seq_len(nrow(ev)), function(i) {
+    des <- robust$specs[[as.character(ev$scenario[i])]]$dgp$design
+    if (is.null(des)) {
+      return(sprintf("%g scheduled trials per participant", ev$n_trials_scheduled[i] / ev$n_subj[i]))
+    }
+    items <- if (is.null(des$items_per_subject)) ev$n_item[i] else des$items_per_subject
+    sprintf("%s items per participant", items)
+  }, character(1L))
+  scenario <- paste(ev$scenario, presentation, sep = "\n")
+  ordered <- order(ev$scenario != robust$standard_scenario, match(ev$scenario, unique(ev$scenario)))
+  logit <- identical(x$spec$scale, "logit")
+  has_null <- can_define_null_target(x$spec)
+  rate <- if (has_null) "power" else "aipe_prob"
+  mc_prefix <- if (has_null) "power" else "aipe"
+  panels <- c(if (has_null) "Detection (%)" else "Width attainment (%)",
+              if (logit) "Mean interval width (logits)" else "Mean interval width (pp)")
+  width <- if (logit) ev$ci_width_mean else ev$prob_ci_width_mean_pp
+  points <- data.frame(design = designs, scenario = factor(scenario, levels = rev(unique(scenario[ordered]))),
+    decision = ev$decision_status, panel = factor(rep(panels, each = nrow(ev)), levels = panels),
+    value = c(100 * ev[[rate]], width),
+    lo = c(100 * ev[[paste0(mc_prefix, "_mc_lo")]], rep(NA_real_, nrow(ev))),
+    hi = c(100 * ev[[paste0(mc_prefix, "_mc_hi")]], rep(NA_real_, nrow(ev))))
+  ranges <- points[is.finite(points$value) & is.finite(points$lo) & is.finite(points$hi), ]
+  p <- ggplot2::ggplot(points, ggplot2::aes(x = .data$value, y = .data$scenario))
+  reference <- if (!has_null) x$spec$ci_assurance else
+    if (x$spec$criterion %in% c("power", "both")) x$spec$power_min else NA_real_
+  if (is.finite(reference)) {
+    p <- p + ggplot2::geom_vline(data = data.frame(panel = panels[1L], target = 100 * reference),
+      ggplot2::aes(xintercept = .data$target), linetype = "dashed", color = "grey55")
+  }
+  rate_sample <- if (x$spec$failure_policy == "effective") "all simulated studies" else "valid fits"
+  p + ggplot2::geom_segment(data = ranges,
+      ggplot2::aes(x = .data$lo, xend = .data$hi, yend = .data$scenario), color = "grey40") +
+    ggplot2::geom_point(ggplot2::aes(shape = .data$decision), size = 2.8, na.rm = TRUE) +
+    ggplot2::geom_text(data = points[!is.finite(points$value), ], x = 0,
+      label = "Unavailable", hjust = 0, size = 3) +
+    ggplot2::facet_grid(design ~ panel, scales = "free", space = "free_y", switch = "y") +
+    ggplot2::expand_limits(x = 0) +
+    ggplot2::scale_shape_manual(values = c(pass = 16, indeterminate = 17, fail = 4)) +
+    ggplot2::labs(title = "Verified designs across scenarios", x = NULL, y = NULL, shape = "Decision",
+      caption = sprintf(paste("Bars show stored Monte Carlo intervals for rates among %s.",
+                              "Mean widths use valid fits. Shapes show the plan's criterion decision.", sep = "\n"),
+                        rate_sample)) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(strip.placement = "outside", strip.text.y.left = ggplot2::element_text(angle = 0),
+      legend.position = "bottom", plot.title.position = "plot",
+      plot.caption.position = "plot", plot.caption = ggplot2::element_text(hjust = 0))
+}
+
+#' Plot Fixed-design Validation Results
+#'
+#' @param x A result from [validate_design_point()].
+#' @param type `"rates"` (default) shows planned power, null Type I error, and
+#'   interval coverage with Wilson Monte Carlo intervals. For absolute
+#'   probability targets it displays coverage and any planned width attainment.
+#'   `"patterns"` shows the share of diagnosed studies with at least one
+#'   all-correct, all-incorrect, or unobserved participant or item. For the
+#'   two extreme scores it also reports the largest observation count seen in
+#'   a unit with that pattern. Use [response_patterns()] for counts by unit
+#'   in a single dataset.
+#' @param ... Additional arguments (unused).
+#' @return An editable `ggplot` object. Dashed lines in the rate plot show
+#'   nominal or planning targets. These lines are reference values.
+#' @export
+plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...) {
+  type <- match.arg(type)
+  settings <- attr(x, "validation_settings")
+  cols <- c("condition", "nsim", "n_valid", "detection", "detection_lo", "detection_hi",
+            "coverage", "coverage_lo", "coverage_hi", "width_attainment", pattern_columns)
+  if (is.null(settings) || !nrow(x) || !all(cols %in% names(x)) || anyDuplicated(x$condition)) {
+    cli::cli_abort("Plot the complete result from {.fn validate_design_point}.")
+  }
+  subtitle <- sprintf("%s participants / %s items in bank / %s items per participant",
+    settings$n_subj, settings$n_item, settings$items_per_subject)
+  if (type == "patterns") return(plot_validation_patterns(x, subtitle))
+
+  condition <- ifelse(x$condition == "null", "Null", "Planned")
+  studies <- sprintf("%s\n%s/%s valid fits", condition, x$n_valid, x$nsim)
+  detection_denom <- if (settings$failure_policy == "effective") x$nsim else x$n_valid
+  make_panel <- function(panel, rate, lo, hi, target) {
+    data.frame(panel, studies, rate, lo, hi, target)
+  }
+  coverage <- make_panel("Interval coverage", x$coverage, x$coverage_lo, x$coverage_hi, 1 - settings$alpha)
+  if (settings$has_null) {
+    power_target <- if (settings$criterion %in% c("power", "both")) settings$power_min else NA_real_
+    detection <- make_panel(ifelse(x$condition == "null", "Type I error", "Power"),
+      x$detection, x$detection_lo, x$detection_hi,
+      ifelse(x$condition == "null", settings$alpha, power_target))
+    points <- rbind(detection, coverage)
+  } else {
+    points <- coverage
+    if (!is.null(settings$ci_width)) {
+      ci <- wilson_mc_ci(round(x$width_attainment * detection_denom), detection_denom, settings$mc_conf_level)
+      points <- rbind(coverage, make_panel("Width attainment", x$width_attainment,
+        unname(ci["lo"]), unname(ci["hi"]), settings$ci_assurance))
+    }
+  }
+  points$panel <- factor(points$panel, levels = c("Power", "Type I error", "Interval coverage", "Width attainment"))
+  points$studies <- factor(points$studies, levels = rev(unique(studies[order(x$condition != "null")])))
+  ranges <- points[is.finite(points$rate) & is.finite(points$lo) & is.finite(points$hi), ]
+  targets <- unique(points[is.finite(points$target), c("panel", "target")])
+  rate_denom <- if (settings$failure_policy == "effective") "all scheduled studies" else "valid fits"
+  rate_label <- if (settings$has_null) "Detection" else "Width attainment"
+  caption <- sprintf("%g%% Wilson Monte Carlo intervals. Coverage uses valid fits.", 100 * settings$mc_conf_level)
+  if (settings$has_null || !is.null(settings$ci_width)) {
+    caption <- paste(caption, sprintf("%s uses %s.", rate_label, rate_denom), sep = "\n")
+  }
+  ggplot2::ggplot(points, ggplot2::aes(x = .data$rate, y = .data$studies)) +
+    ggplot2::geom_vline(data = targets, ggplot2::aes(xintercept = .data$target),
+      linetype = "dashed", color = "grey55") +
+    ggplot2::geom_segment(data = ranges,
+      ggplot2::aes(x = .data$lo, xend = .data$hi, yend = .data$studies), color = "#2563eb") +
+    ggplot2::geom_point(size = 2.6, color = "#2563eb", na.rm = TRUE) +
+    ggplot2::geom_text(data = points[!is.finite(points$rate), ], x = 0.5, label = "Unavailable", size = 3) +
+    ggplot2::facet_wrap(~panel, ncol = 1, scales = "free_y") +
+    ggplot2::scale_x_continuous(limits = c(0, 1), labels = function(v) paste0(100 * v, "%")) +
+    ggplot2::labs(title = "Fixed-design validation", subtitle = subtitle, x = "Share of studies", y = NULL,
+      caption = paste(caption, "Dashed lines show nominal or planning targets.")) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(plot.title.position = "plot", plot.caption.position = "plot",
+      plot.caption = ggplot2::element_text(hjust = 0))
+}
+
+plot_validation_patterns <- function(x, subtitle) {
+  labels <- rep(c("All correct", "All incorrect", "Unobserved"), 2L)
+  units <- rep(c("Participants", "Items"), each = 3L)
+  points <- do.call(rbind, lapply(seq_len(nrow(x)), function(i) {
+    diagnosed <- x$pattern_nsim[i]
+    counts <- unlist(x[i, paste0("n_rep_", unit_pattern_names)], use.names = FALSE)
+    max_obs <- rep(NA_integer_, length(labels))
+    max_obs[labels != "Unobserved"] <- unlist(x[i, observed_max_columns], use.names = FALSE)
+    details <- paste0(counts, "/", diagnosed, " studies",
+      ifelse(!is.na(max_obs) & counts > 0L, paste0(" / max ", max_obs, " responses"), ""))
+    data.frame(condition = if (x$condition[i] == "null") "Null" else "Planned",
+      pattern = paste0(units, " - ", labels, "\n", details),
+      rate = if (diagnosed > 0L) counts / diagnosed else NA_real_)
+  }))
+  key <- paste(points$condition, points$pattern)
+  points$row <- factor(key, levels = rev(key))
+  ggplot2::ggplot(points, ggplot2::aes(x = .data$rate, y = .data$row)) +
+    ggplot2::geom_point(size = 2.6, color = "#2563eb", na.rm = TRUE) +
+    ggplot2::facet_wrap(~condition, ncol = 1, scales = "free_y") +
+    ggplot2::scale_x_continuous(limits = c(0, 1), labels = function(v) paste0(100 * v, "%")) +
+    ggplot2::scale_y_discrete(labels = stats::setNames(points$pattern, key)) +
+    ggplot2::labs(title = "Response patterns in validation studies", subtitle = subtitle,
+      x = "Share of diagnosed studies with at least one such unit", y = NULL,
+      caption = "Max responses is the largest observation count in an extreme-scoring unit.") +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(plot.title.position = "plot", plot.caption.position = "plot",
+      plot.caption = ggplot2::element_text(hjust = 0))
 }
 
 axis_tile_bounds <- function(vals) {

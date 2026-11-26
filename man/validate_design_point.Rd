@@ -36,14 +36,16 @@ dropout, item-specific guessing, or non-normal random effects. Default
 replications (default \code{FALSE}).}
 }
 \value{
-A data frame with two rows (\code{"null"} and \code{"planned"}) for contrasts
+A data frame of class \code{glmmplanr_validation} with two rows
+(\code{"null"} and \code{"planned"}) for contrasts
 or logit targets, or one \code{"planned"} row when \code{spec} targets an absolute
 probability (e.g., a single-condition design on \code{scale = "pp"} or \code{"prob"}
 where no zero-difference null exists), including the true target, detection and
 its Wilson interval under the chosen failure policy, valid-fit coverage
 and its Wilson interval, and the valid-fit count. Null detection is the
 Type I error. Response-pattern counts follow \code{\link[=evaluate_design_point]{evaluate_design_point()}}.
-Prespecify validation tolerances and replication counts.
+Use \code{\link[=plot.glmmplanr_validation]{plot.glmmplanr_validation()}} to display these results. Prespecify
+validation tolerances and replication counts.
 }
 \description{
 Evaluates the complete analysis specified by \code{spec} under the planned

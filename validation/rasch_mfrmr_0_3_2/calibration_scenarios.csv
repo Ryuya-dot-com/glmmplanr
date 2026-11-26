@@ -1,0 +1,15 @@
+"n","items_per_person","profile","sd","difficulty_shift","focal_slope","group_shift","dif","responses","responses_per_item","task","case","n_rep","seed","native_rep"
+120,16,"targeted",0.8,0,1,0,0,1920,120,"calibration",1,512,91661001,32
+240,16,"targeted",0.8,0,1,0,0,3840,240,"calibration",2,512,91661001,32
+480,16,"targeted",0.8,0,1,0,0,7680,480,"calibration",3,512,91661001,32
+480,8,"targeted",0.8,0,1,0,0,3840,240,"calibration",4,512,91661001,32
+120,16,"narrow",0.4,0,1,0,0,1920,120,"calibration",5,512,91661001,32
+240,16,"narrow",0.4,0,1,0,0,3840,240,"calibration",6,512,91661001,32
+480,16,"narrow",0.4,0,1,0,0,7680,480,"calibration",7,512,91661001,32
+480,8,"narrow",0.4,0,1,0,0,3840,240,"calibration",8,512,91661001,32
+120,16,"off_target",0.8,1.4,1,0,0,1920,120,"calibration",9,512,91661001,32
+240,16,"off_target",0.8,1.4,1,0,0,3840,240,"calibration",10,512,91661001,32
+480,16,"off_target",0.8,1.4,1,0,0,7680,480,"calibration",11,512,91661001,32
+480,8,"off_target",0.8,1.4,1,0,0,3840,240,"calibration",12,512,91661001,32
+120,16,"low_discrimination",0.8,0,0.35,0,0,1920,120,"calibration",13,512,91661001,32
+480,16,"low_discrimination",0.8,0,0.35,0,0,7680,480,"calibration",14,512,91661001,32

@@ -1,0 +1,9 @@
+"profile","n_subj","n_item","case"
+"conservative_5pp",162,30,1
+"conservative_5pp",162,60,2
+"high_variance_8pp",72,60,3
+"high_variance_8pp",72,90,4
+"high_variance_8pp",162,30,5
+"published_8pp",54,30,6
+"slopes_8pp",72,60,7
+"slopes_8pp",108,30,8

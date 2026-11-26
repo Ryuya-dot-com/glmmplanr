@@ -1,0 +1,9 @@
+Synthetic Rasch: a=1, no guessing, independent items given theta.
+Known-bank EAP scoring prior N(0,1); no item estimation uncertainty.
+Recalibration: theta mean zero, SD 0.4/0.8, N=120/240/480; MML.
+Joint error limits: bank RMSE <= .35 and max abs <= .60 logits.
+Assurance .80, pointwise Wilson 95% intervals, invalid = miss.
+GLMM: mean accuracy .50/.58; N=60/120, J=30/60/150, 30 per person.
+Person/item intercept SD .8/.6; slope SD 0/0 or .25/.35, rho=0.
+Marginal 8pp target; 95% CI width <= 20pp; native joint_delta.
+repetitions=128 master_seed=92611001

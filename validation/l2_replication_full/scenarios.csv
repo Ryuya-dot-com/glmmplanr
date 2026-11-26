@@ -1,0 +1,9 @@
+"profile","effect_pp","subj_intercept","item_intercept","subj_slope","item_slope","preference","job"
+"published_8pp",8,0.8,0.6,0,0,"fewer_subj",1
+"slopes_8pp",8,0.8,0.6,0.25,0.35,"fewer_subj",2
+"conservative_5pp",5,0.8,0.6,0.25,0.35,"fewer_subj",3
+"high_variance_8pp",8,1.1,0.9,0.4,0.5,"fewer_subj",4
+"published_8pp",8,0.8,0.6,0,0,"fewer_items",5
+"slopes_8pp",8,0.8,0.6,0.25,0.35,"fewer_items",6
+"conservative_5pp",5,0.8,0.6,0.25,0.35,"fewer_items",7
+"high_variance_8pp",8,1.1,0.9,0.4,0.5,"fewer_items",8

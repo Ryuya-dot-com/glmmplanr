@@ -1,0 +1,26 @@
+# Deterministic counterexamples for a primary beta step, not a coverage study.
+source("validation/planning_comparison_helpers.R")
+args<-commandArgs(TRUE);stopifnot(length(args)==2L)
+out<-args[1];variant<-args[2]
+checkpoint_dir(out,"validation/l2_uncertainty_beta_guard.R",
+  list(seed=37111L,n_subj=48L,n_item=24L,variant=variant),c("glmmplanr","digest"))
+des<-design_crossed(list(condition=c("a","b")))
+dgp<-calibrate_dgp(des,c(a=.1,b=.9),subj_sd=.4,item_sd=.3,corr_structure="zero")
+spec<-specify_target(dgp,"condition",analysis_re="intercept_only",engine="bayes_laplace",prob_se_method="joint_delta")
+sch<-generate_design_schedule(des,48L,24L)
+tr<-glmmplanr:::with_rng_stream(37111L,glmmplanr:::simulate_dgp_data(dgp,sch))
+responses<-list(mixed=tr$y,separated=as.integer(tr$cell_id==2L))
+rows<-lapply(names(responses),function(kind){
+ tr$y<-responses[[kind]];f<-glmmplanr:::fit_single_dataset(tr,spec)
+ means<-tapply(tr$y,tr$cell_id,mean)
+ data.frame(variant=variant,kind=kind,n=nrow(tr),response_hash=digest::digest(tr$y,algo="xxhash64"),
+   observed_control=means[1],observed_treatment=means[2],observed_difference_pp=100*diff(means),
+   converged=f$converged,status=f$status,error=f$error_reason,
+   conditional_logit_contrast=sum((des$X_cells[2,]-des$X_cells[1,])*f$beta_full),
+   marginal_estimate_pp=100*f$prob_est,se_pp=100*f$prob_se)
+})
+z<-do.call(rbind,rows);write.csv(z,file.path(out,"results.csv"),row.names=FALSE)
+file.copy("src/glmm_laplace.cpp",file.path(out,"source_glmm_laplace.cpp"),overwrite=TRUE)
+file.copy("R/engines.R",file.path(out,"source_engines.R"),overwrite=TRUE)
+file.copy("validation/l2_uncertainty_beta_guard.R",file.path(out,"source_script.R"),overwrite=TRUE)
+print(z,row.names=FALSE)

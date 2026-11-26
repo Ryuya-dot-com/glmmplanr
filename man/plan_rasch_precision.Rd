@@ -12,7 +12,7 @@ plan_rasch_precision(
   nsim = 200L,
   seed = 2026L,
   mc_conf_level = 0.95,
-  engine = c("lme4", "cpp_laplace"),
+  engine = c("cpp_laplace", "lme4"),
   workers = 1L,
   parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   verbose = FALSE
@@ -45,9 +45,9 @@ tolerances are in squared logits. The other tolerances are in logits.}
 
 \item{mc_conf_level}{Pointwise confidence level of Wilson Monte Carlo intervals.}
 
-\item{engine}{Estimation backend: \code{"lme4"} (default; \code{lme4::glmer()} with
-\code{"bobyqa"}) or \code{"cpp_laplace"} (fast native C++ Laplace / Empirical Bayes
-solver).}
+\item{engine}{Estimation backend: \code{"cpp_laplace"} (default; native C++
+Laplace / Empirical Bayes solver) or \code{"lme4"} (\code{lme4::glmer()} with
+\code{"bobyqa"}). Specify \code{"lme4"} to reproduce earlier runs using that engine.}
 
 \item{workers}{Integer number of parallel workers (default \code{1L}). Results are
 strictly worker-invariant via per-replication L'Ecuyer-CMRG substreams.}
@@ -71,8 +71,8 @@ A pass requires the lower Monte Carlo bound to reach \code{assurance}.
 \description{
 Evaluates each proposed allocation of people and items with the same set of
 error tolerances. Fits a crossed random-intercept logistic model to each
-simulated study using either \code{lme4::glmer()} (default) or the fast native
-C++ Laplace engine (\code{"cpp_laplace"}). Person ability has population mean
+simulated study using the native C++ Laplace engine (\code{"cpp_laplace"},
+default) or explicitly selected \code{lme4::glmer()}. Person ability has population mean
 zero. Item difficulty is the negative sum of the fixed and item intercepts.
 }
 \examples{

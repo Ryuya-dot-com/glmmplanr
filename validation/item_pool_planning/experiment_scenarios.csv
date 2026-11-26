@@ -1,0 +1,13 @@
+"n_subj","n_item","slopes","items_per_subject","responses","item_per_condition"
+60,30,"zero",30,1800,30
+120,30,"zero",30,3600,60
+60,60,"zero",30,1800,15
+120,60,"zero",30,3600,30
+60,150,"zero",30,1800,6
+120,150,"zero",30,3600,12
+60,30,"heterogeneous",30,1800,30
+120,30,"heterogeneous",30,3600,60
+60,60,"heterogeneous",30,1800,15
+120,60,"heterogeneous",30,3600,30
+60,150,"heterogeneous",30,1800,6
+120,150,"heterogeneous",30,3600,12

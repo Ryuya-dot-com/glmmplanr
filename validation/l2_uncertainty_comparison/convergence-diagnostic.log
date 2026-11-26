@@ -1,0 +1,2 @@
+max_em_iter (160) reached before convergence (diff=3.08e-06, scaled covariance score=5.09e-03) 
+Failure retained; numerical result unchanged after diagnostic text update.

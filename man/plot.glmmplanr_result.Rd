@@ -2,14 +2,15 @@
 % Please edit documentation in R/reporting.R
 \name{plot.glmmplanr_result}
 \alias{plot.glmmplanr_result}
-\title{Plot 2D Iso-Power / Iso-Precision Contours, 3D Surfaces, and Pareto Trade-offs}
+\title{Plot Sample Size Trade-offs and Scenario Comparisons}
 \usage{
 \method{plot}{glmmplanr_result}(
   x,
-  type = c("contour", "surface3d", "pareto"),
+  type = c("contour", "surface3d", "pareto", "scenarios"),
   metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
-  ...
+  ...,
+  candidates = NULL
 )
 }
 \arguments{
@@ -23,9 +24,14 @@ recommended design.
 \item \code{"pareto"}: Non-dominated \verb{(N_subj vs N_item)} Pareto trade-off curve
 showing the exact minimum participants required at each item count.
 \item \code{"surface3d"}: Interactive \code{plotly} 3D response surface.
+\item \code{"scenarios"}: Compare verified designs across the scenarios supplied to
+\code{\link[=optimize_sample_size]{optimize_sample_size()}}, showing detection with its stored Monte Carlo
+interval and mean interval width in separate panels. Absolute probability
+targets show width attainment in place of detection. Shapes give the
+stored decision under the plan's criterion.
 }}
 
-\item{metric}{Surface metric to render: \code{"power"} (default), \code{"ci_width"}
+\item{metric}{Surface metric for \code{"contour"} and \code{"surface3d"}: \code{"power"} (default), \code{"ci_width"}
 (on \code{x$spec$scale}), or \code{"prob_ci_width_pp"} (95\% CI width in percentage
 points).}
 
@@ -33,12 +39,18 @@ points).}
 Pareto frontier on \code{"contour"} plots (default \code{TRUE}).}
 
 \item{...}{Additional arguments (unused).}
+
+\item{candidates}{For \code{"scenarios"}, an optional data frame with \code{n_subj}
+and \code{n_item} columns giving the verified design pairs to display. By
+default, show the designs selected under the standard scenario and
+across all scenarios, with one row of panels if the selections coincide.
+Increase the saved figure height when showing many designs.}
 }
 \value{
 A \code{ggplot} object or \code{plotly} htmlwidget.
 }
 \description{
-Plot 2D Iso-Power / Iso-Precision Contours, 3D Surfaces, and Pareto Trade-offs
+Plot Sample Size Trade-offs and Scenario Comparisons
 }
 \examples{
 # Create the five-replication demonstration plan from the optimizer help.

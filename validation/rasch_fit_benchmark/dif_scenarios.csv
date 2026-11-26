@@ -1,0 +1,9 @@
+"n","items_per_person","profile","sd","difficulty_shift","focal_slope","group_shift","dif","responses","responses_per_item","task","case","n_rep","seed","native_rep"
+120,16,"group_impact",0.8,0,1,0.6,0,1920,120,"dif",1,384,91662001,0
+480,16,"group_impact",0.8,0,1,0.6,0,7680,480,"dif",2,384,91662001,0
+480,8,"group_impact",0.8,0,1,0.6,0,3840,240,"dif",3,384,91662001,0
+120,16,"group_impact_and_dif",0.8,0,1,0.6,0.7,1920,120,"dif",4,384,91662001,0
+480,16,"group_impact_and_dif",0.8,0,1,0.6,0.7,7680,480,"dif",5,384,91662001,0
+480,8,"group_impact_and_dif",0.8,0,1,0.6,0.7,3840,240,"dif",6,384,91662001,0
+480,16,"no_group_impact",0.8,0,1,0,0,7680,480,"dif",7,384,91662001,0
+480,16,"dif_only",0.8,0,1,0,0.7,7680,480,"dif",8,384,91662001,0

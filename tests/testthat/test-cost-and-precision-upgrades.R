@@ -185,7 +185,8 @@ test_that("plan_rasch_precision(cpp_laplace) and plan_rasch_fixed_bank handle ex
   sizes <- data.frame(n_subj = c(40L, 80L), n_item = c(12L, 16L))
   lim <- c(ability = 0.55, difficulty = 0.45, difficulty_max_abs_error = 0.80)
 
-  p_cpp1 <- plan_rasch_precision(dgp, sizes, lim, nsim = 12L, seed = 88L, engine = "cpp_laplace", workers = 1L)
+  p_cpp1 <- plan_rasch_precision(dgp, sizes, lim, nsim = 12L, seed = 88L, workers = 1L)
+  expect_identical(p_cpp1$engine, "cpp_laplace")
   p_cpp2 <- plan_rasch_precision(dgp, sizes, lim, nsim = 12L, seed = 88L, engine = "cpp_laplace", workers = 2L)
   ids <- c("n_subj", "n_item", "replication", "singular", "fit_error")
   expect_identical(p_cpp1$replications[ids], p_cpp2$replications[ids])

@@ -1,0 +1,6 @@
+"model","engine","error","n"
+"2PL","mirt","Constant item: complete bank not estimable",9623
+"Rasch","mirt","Constant item: complete bank not estimable",7351
+"Rasch","native","Incomplete bank (nonfinite item estimate)",158902
+"Rasch","native","MML-EM reached iteration limit",2
+"2PL","mirt","Nonconvergence",738

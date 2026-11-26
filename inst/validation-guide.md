@@ -1,5 +1,410 @@
 # Scope, Statistical Validation, and Related R Packages (`glmmplanr`)
 
+## Built-in Estimation and External Checks
+
+The default planning engines are `bayes_laplace` for crossed binary GLMM
+effects, `cpp_laplace` for random-item Rasch recovery, and `mml` for fixed-item
+Rasch banks. Fixed-bank Rasch has fixed item intercepts and a random person
+intercept; its one-dimensional quadrature MML solver is a separate numerical
+path from crossed-GLMM Laplace estimation. A correction or validation of one
+path does not establish the accuracy of the other.
+
+TAM and mirt are the primary external references for fixed-bank IRT checks.
+Match the response matrix, latent scale, discrimination and variance
+constraints, and failure denominators. Crossed random-item effects require
+a matching mixed model for external comparison. Previous binary special-case
+comparisons with mfrmr remain supporting evidence; its main application is
+many-facet Rasch measurement. Existing results keep their recorded engines.
+To reproduce earlier random-item planning with the previous default, specify
+`engine = "lme4"` explicitly.
+
+The [native covariance-update correction](#l2-uncertainty-correction) changes
+the zero-correlation, zero-guessing crossed-GLMM path. Earlier GLMM benchmarks
+below retain their original implementation and should not be read as a fresh
+validation of every old design under the correction. Fixed-bank MML is
+unchanged by this update and retains its existing calibration evidence.
+
+<a id="item-pool-planning"></a>
+
+## Practical Pilot: Short Forms and Stimulus Pools
+
+A synthetic 150-item Rasch pool has three content strata of 50 items, each
+spanning -2.5 to 2.5 logits. Candidate forms retain equal stratum counts:
+30 central-difficulty items, 30 or 60 spread-difficulty items, or all 150.
+Their identities are fixed before response generation. This is a worked
+planning example, not validation of an actual short form.
+
+**Measurement with known items.** Under a fixed N(0,1) EAP scoring prior,
+integration over every possible score gives the following conditional person
+RMSE. Item parameters are treated as known; item estimation uncertainty is
+not included. Halving the numerical grid spacing changed bias/RMSE by less
+than 0.000001 logits.
+
+| Form | RMSE at ability 0 | RMSE at ability 3 |
+|---|---:|---:|
+| Central 30 | 0.341 | 0.907 |
+| Spread 30 | 0.385 | 0.805 |
+| Spread 60 | 0.292 | 0.534 |
+| Full 150 | 0.193 | 0.316 |
+
+Which form is acceptable depends on the ability range and allowable error.
+EAP bias and information are also saved: neither information alone nor a
+single population-average RMSE describes conditional scoring accuracy.
+
+**Recalibration sample size.** Native fixed-item MML evaluated 30 scenarios:
+five layouts (the four forms plus 150 items with 30 per person), N=120/240/480,
+and person SD=0.4/0.8, each with 128 replications. The illustrative joint target
+is bank RMSE <= 0.35 and every-item absolute error <= 0.60 logits; a pass
+requires the pointwise Wilson 95% lower bound to reach assurance 0.80.
+All 3,840 fits completed, but some banks had constant items and were
+unevaluable for whole-bank accuracy; these remain misses.
+
+At SD=0.8 and N=120, the central 30 passed in 113/128 runs (88.3%, Wilson
+95% interval 81.6–92.8%); the spread 30 passed in 53/128 (41.4%, 33.2–50.1%).
+The same central form had worse measurement at ability 3. Ease of calibration
+therefore cannot substitute for short-form measurement evidence.
+At N=480, all four fixed forms passed the assurance criterion for both SDs;
+the rotating 150-item pool met the joint tolerance only 1/128 times at each
+SD. Its mean exposure was 96 per item, compared with 480 for a fixed form.
+Requiring all 150 items to meet the maximum-error criterion also makes the
+joint target more demanding than for 30 items.
+
+**Experimental stimuli.** A separate native crossed-GLMM pilot used N=60/120,
+J=30/60/150 and 30 items per person in a two-condition Latin square. The
+marginal planned difference was 8 percentage points (50% versus 58%), with
+person/item intercept SDs 0.8/0.6. Slope SDs were either zero or 0.25/0.35,
+with zero correlations and a matching analysis. Each of 12 layouts/profiles
+had 128 planned and 128 null runs; all 3,072 fits were valid. For N=60 and
+heterogeneous slopes, detection was 82.8%, 89.1%, and 85.2% at J=30,60,150,
+with overlapping Wilson intervals. This does not establish an optimal J.
+Across the pilot, null detection ranged from 1.6% to 8.6%; 128 replications
+do not tightly establish Type I error control. New items were sampled each
+replication: these results do not estimate the effect of selecting particular
+word identities or changing the target population to high-frequency words.
+
+This example uses existing APIs. Content-constrained assembly can supply
+candidate forms, for example through [TestDesign](https://choi-phd.github.io/TestDesign/).
+glmmplanr evaluates their design consequences. The matched extension below
+now includes `mlpwr` and `irtsim`, with shared objectives, candidate designs,
+failure denominators and independent confirmation. The two comparisons
+address estimation and design search separately.
+
+Scripts, parameters, item IDs, full curves, trial-level plan objects and
+Monte Carlo intervals are recorded in the repository's
+[item-pool validation](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#item-pool-planning).
+The macOS pilot took about 11 seconds for recalibration and 80 seconds for
+the experimental planned/null checks, excluding installation and compilation;
+these are observed times for these settings, not runtime guarantees.
+
+<a id="item-pool-package-comparison"></a>
+
+### Matched Comparisons with irtsim and mlpwr
+
+The extension asks whether another Rasch workflow supports the same
+recalibration plans, and whether another search algorithm identifies useful
+designs for the same native estimator. It uses the synthetic pool and content
+quotas above, without adding a public API.
+
+**irtsim 0.2.0.** Its public 1PL workflow with mirt and native MML evaluates
+identical response matrices, item IDs, masks, discrimination 1 and a mean-zero,
+free-variance ability scale. Five layouts, two ability SDs and five sample
+sizes (120/240/480/960/1920) give 50 conditions ×128 replications.
+Both estimators have 6,095/6,400 complete valid banks. Only two per-trial
+joint decisions differ, one in each direction at the .60 maximum-error
+boundary. All 50 attainment counts and ten proposed sample sizes agree.
+Item estimates are not identical (maximum paired difference .02620 logits).
+The [screening figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/main/validation/item_pool_comparison.png)
+shows the layout effect; it is not evidence of equivalence outside these
+Rasch conditions.
+
+Independent confirmation used 15 distinct returned points ×512 fresh
+replications with both IRT engines. All 15 decision classifications agree
+(eight per-trial differences among 7,680 pairs). Of the ten minimum-N screen
+proposals, nine pass and one remains indeterminate: spread-60, SD=.4,
+N=240 reaches 80.7% (95% interval 77.0–83.9%). A separately proposed N=480
+passes at 98.8% (97.5–99.5%). Rotating 150 items with 30 per person requires
+the tested N=1920 candidate to pass: 93.8% (91.3–95.5%) at SD=.4 and
+95.1% (92.9–96.7%) at SD=.8. These are tested candidates under specified
+whole-bank tolerances, not universal minimum sample sizes.
+
+**mlpwr 1.1.1.** It receives the same native success function, candidate grid
+and cost as glmmplanr's uniform grid evaluation. This includes Rasch recovery
+as well as GLMM detection/precision; mlpwr already supports custom IRT
+simulations, as illustrated in its [IRT tutorial](https://cran.r-project.org/web/packages/mlpwr/vignettes/IRT_Vignette.html).
+This comparison does not evaluate glmmplanr's GP optimizer. There are 50
+Rasch searches and 20 GLMM searches per method, using five search seeds per
+family/preference. Actual simulation budgets match at 30,000 Rasch and
+20,880 GLMM evaluations per method. Errors, warnings and unqualified
+fallback coordinates remain in the report.
+
+For the GLMM search, both methods selected independently confirmed designs
+in 19/20 runs. The grid's other candidate (zero slopes, 30×30) is
+indeterminate; mlpwr's other run encountered a reproducible duplicate-index
+error after 360 evaluations. With heterogeneous slopes, 60×30 attained the
+joint detection/20pp-width target in 428/512 fresh trials (83.6%, Wilson
+95% interval 80.1–86.5%). Its null rejection was 29/512 (5.7%, 4.0–8.0%);
+passing the planning target does not guarantee nominal Type I error control.
+All confirmation intervals met the 20pp width limit, so detection drives the
+joint attainment differences in this example.
+
+In ten rotating-pool searches, mlpwr's default logistic surrogate warned
+that no good design was found. Replacing only that surrogate with a GP,
+using the same saved 600 outcomes and no additional simulations, returned
+N=1920 in all ten. This is an exploratory refit after a default-setting
+failure, not a prespecified GP search benchmark. It illustrates why a
+particular surrogate's failure is not a general limitation of mlpwr. Both
+returned N=1920 designs pass the independent confirmation.
+
+The [full protocol, results and reproducible scripts](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#item-pool-package-comparison)
+record seeds, common data checks, failures, actual budgets and Monte Carlo
+intervals. Repeated searches returning the same candidate share its
+independent confirmation and must not be counted as independent precision
+replications.
+
+<a id="l2-empirical-planning"></a>
+
+### Empirical Vocabulary Banks and Replication Planning
+
+An additional pilot uses [Hamada et al.'s public vocabulary data](https://osf.io/t8ax6/):
+1,220 participants, 50 word identities, and five booklets with 20 recall and
+30 recognition responses per person. Separate 2PL fits follow the authors'
+model calls. Separate Rasch working-model refits supply the native simulation
+banks; they are not the source paper's reported model. Their native/mirt item
+differences are below .001 logits. The two formats retain their own scales.
+
+The native pilot has 240 conditions ×64 replications, crossing two formats,
+five 25/50-item layouts (including the original booklets), six ability
+profiles and N=100/200/500/1000. A 24-condition subset has 32 paired mirt Rasch
+and 32 separate mirt 2PL runs. Ability shifts are sensitivity assumptions,
+not age or CEFR labels. All failures and constant-item banks remain misses.
+
+For the recall Rasch bank with all 50 items and N=1000, difficulty attainment
+(RMSE <=.35 and maximum error <=.60) falls from 60/64 (93.8%, Wilson
+95% interval 85.0–97.5%) in the reference distribution to 4/64
+(6.3%, 2.5–15.0%) when its mean is shifted -3 logits, and 0/64
+(0–5.7%) at -5 logits. The latter has 4.73 constant items on average.
+For the easier recognition bank, the -3 shift improves attainment from
+24/64 (37.5%) to 61/64 (95.3%) by reducing ceiling responses. Thus the
+relevant quantity is the population/item match, not simply low ability.
+The [targeting figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/main/validation/l2_targeting.png)
+shows these within-format comparisons.
+
+In the separate correctly specified 2PL recall arm at N=1000, response-curve
+RMSE <=.05 is attained in 32/32 trials, but the whole-bank difficulty and
+discrimination tolerances jointly in only 1/32. These outcomes concern
+different uses of the estimates. This pilot does not add native 2PL fitting,
+validate person-score precision, propagate calibration-parameter uncertainty,
+or establish a universal required sample size.
+
+A second example makes the existing Huang et al. vocabulary-learning vignette
+concrete. It plans a focused three-round computer-test comparison from
+published means .42/.50. Missing random-effect variances are explicit
+assumptions; the original full interaction design is not reproduced.
+The target is simultaneous detection and a 95% interval width <=10pp,
+with 30 responses per person. Equal-budget grid and mlpwr GP proposals are
+independently checked with 512 planned and 512 null replications per point.
+
+| Assumed profile | Confirmed candidate N × pool J | Joint attainment (Wilson 95%) |
+| --- | --- | --- |
+| 8pp, intercept SDs .8/.6, no slopes | 54 × 30 | 94.7% (92.4–96.4%) |
+| 8pp, same intercepts, slope SDs .25/.35 | 72 × 60 | 84.8% (81.4–87.6%) |
+| Same slope profile, fewer items prioritized | 108 × 30 | 91.0% (88.2–93.2%) |
+| 5pp, slope SDs .25/.35 | 162 × 60 | 84.6% (81.2–87.4%) |
+| 8pp, intercept SDs 1.1/.9, slopes .4/.5 | 162 × 30 | 94.9% (92.7–96.5%) |
+
+Passing the planning target is not the same as validated nominal inference.
+For example, another high-variance candidate, 72×90, passes at 90.6% but has
+null rejection 7.2% (5.3–9.8%) and planned coverage 92.0% (89.3–94.0%). It
+is therefore not an unqualified recommendation. The 162×30 alternative has
+null rejection 4.9% (3.3–7.1%) and coverage 94.1% (91.8–95.9%). The 10pp
+width condition also affects decisions: moderate slopes at 72×60 give
+92.4% detection, 91.8% width attainment and only 84.8% joint attainment.
+
+These are the initial 512-run results. In the subsequent independent
+2,048-run confirmation, the 72×90 warning was not reproduced (null 5.0%,
+coverage 94.7%), while 162×30 gave null rejection 7.1% (6.0–8.3%). The
+[large-run evidence](#l2-large-confirmation) updates the candidate assessment;
+the pilot's apparent ranking of those two designs should not be retained.
+
+[Full methods, parameter provenance, results and scripts](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#l2-empirical-planning)
+separate the 64/32-replication targeting pilot from the 512-replication design
+confirmations. These are tested grid candidates under stated assumptions,
+not universal minima or exact reconstructions of the source studies.
+
+<a id="l2-large-confirmation"></a>
+
+### Large Independent Vocabulary Confirmation
+
+The public-data targeting study now has 300 native Rasch conditions with
+1,024 fresh replications each, including N=2000. Seventy representative
+conditions also have 256 paired mirt Rasch and 256 separate mirt 2PL trials.
+All 17,920 native/mirt Rasch response hashes and validity decisions match;
+five trial-level precision decisions differ, but all 70 condition-level
+classifications agree at the same 256-trial denominator.
+
+At N=2000 with all 50 items, native Rasch difficulty attainment is 99.9%
+for reference recall, 49.2% after shifting the mean -3, and 0% after -5.
+For reference recognition it is 65.0%, rising to 99.4% after the -3 shift
+reduces ceiling responses. These are each format's own fitted scale, not
+age or CEFR differences. At N=1000, reference recall gives 96.1% under full
+presentation, 64.5% under equal booklets and 56.8% under the original booklet
+proportions. Both booklet allocations pass at N=2000. Selection of fewer
+or harder items changes the calibration problem and does not establish
+equivalent vocabulary-size measurement.
+
+For the correctly specified 2PL recall bank at N=2000, all 256 runs satisfy
+the probability-curve criterion but only 54/256 (21.1%, 16.5–26.5%) satisfy
+the joint difficulty/discrimination criterion. For recognition these counts
+are 253/256 and 0/256. Whole-bank parameter tolerances, in-population
+probability prediction and person-score measurement are distinct purposes.
+For recall, difficulty RMSE alone succeeds in 249/256 trials: the maximum
+item-error limits account for much of the stricter criterion's low success.
+The probability RMSE is averaged across items and ability points and does
+not guarantee a small error for every individual item curve.
+The examples do not implement native 2PL or replace conditional planning
+with a universal required N.
+
+Before the covariance correction, the learning study confirmed all 60 designs with 2,048 planned
+and 2,048 null runs each; all 245,760 fits are valid. Representative joint
+attainment results are 94.5% (93.4–95.4%) for intercept-only 54×30, 84.5%
+(82.8–86.0%) for moderate-slope 72×60, and 93.1% (91.9–94.1%) for moderate-slope
+108×30. Every person still answers 30 items. Under the 5pp effect, 162×60
+passes planning at 85.7% but has coverage 93.9% (92.8–94.9%); 216×60 has
+91.9% joint attainment and 95.2% (94.2–96.1%) coverage in that profile.
+
+For larger variances, the old 72×90 warning is not reproduced: joint
+attainment is 91.2% (89.9–92.3%), null rejection 5.0% (4.1–6.0%) and
+coverage 94.7% (93.7–95.6%). Conversely, 162×30 has null rejection 7.1%
+(6.0–8.3%) despite 94.1% joint attainment. These updates preserve the old
+512-run results while giving precedence to the fresh, larger confirmation.
+
+Thirty-nine of 60 designs pass planning, but 14 of those also have an
+adverse nominal-departure flag; 18 designs are flagged overall. These use
+pointwise intervals, not familywise tests. Four layouts pass planning in
+all four generating profiles, but each has at least one inference flag
+across those profiles. This grid therefore does not establish a universally
+adequate plan across the tested variance/effect assumptions. At high-variance
+216×90, for example, RMS estimated SE is 1.480pp versus empirical SD 1.548pp,
+with bias +0.176pp and 93.6% coverage. The subsequent
+[mechanism checks](#l2-uncertainty-correction) identified an inconsistency in
+the covariance update; residual interval approximation is assessed separately.
+
+The equal-budget search comparison now uses five seeds per profile/preference:
+40 searches and 43,200 evaluations per method. Uniform grid proposals give
+30 confirmations, six indeterminate and four failed decisions; mlpwr GP gives
+34 confirmations and six indeterminate decisions. Neither search has an
+error; 29 mlpwr boundary warnings are retained. Both use the same native
+estimator and shared independent confirmation, so this is a limited search
+comparison and does not certify the uncertainty approximation.
+
+[Protocol, full counts, intervals, failures and reproducible scripts](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#l2-large-confirmation)
+preserve the smaller pilot separately. Parameters fitted to the source data
+are fixed here; their calibration-sample uncertainty is not propagated.
+
+<a id="l2-uncertainty-correction"></a>
+
+### Native Covariance Updates and Interval Calibration
+
+The learning example exposed a practical distinction: a design can achieve
+the requested detection and width targets while its nominal interval
+under-covers. Saved trials were used to investigate this before expanding
+the design grid. Fixing variance components at their generating values was
+a diagnostic comparison only, not an estimator available in practice.
+
+For zero assumed random-effect correlations and no guessing lower asymptote,
+the covariance update now includes movement of the conditional random-effect
+mode in the Laplace determinant. Fixed effects and variances target the same
+approximate marginal objective. A small parameter change alone is no longer
+enough to declare convergence; the scaled covariance score must also be small.
+An iteration-limit failure remains a failure in planning denominators, even
+when finite coefficients can be returned. The correction applies to native
+regularized and unpenalized crossed fits, including testlets. It does not
+change fixed-bank MML or the correlated/guessing-adjusted calculation paths.
+
+Screening uses the same numerical settings as confirmation on the corrected
+path. Its former smaller iteration budget could reject a dataset that fitted
+successfully in confirmation and thereby underestimate a design's attainment.
+Screening remains cheaper through fewer simulation replications and omission
+of bootstrap refitting; a smaller numerical budget is not used to obtain
+that saving on this path.
+
+Strong contrasts are also checked against a separate calculation of the
+fixed-effect score. Large coefficient updates continue in bounded steps.
+For example, a simulated sample with about 10% versus 91% correct gives an
+estimated marginal difference of 80.9pp. A fully separated stress example
+still reaches the iteration limit and remains invalid for planning. A prior
+permits finite coefficient estimates without guaranteeing convergence within
+the numerical budget; finite coefficients alone do not establish a valid fit.
+
+Independent profile optimization, a separate conditional Hessian calculation,
+and finite-difference scores check the numerical change. They establish
+agreement with the same approximate objective, not exact integration or
+nominal frequentist coverage. The follow-up compares six selected layouts
+on fresh, matched responses; it does not identify new minimum sample sizes
+over the full original grid. Planning PASS and inferential diagnostics should
+continue to be read separately.
+
+The fresh comparison used 2,048 null and 2,048 planned trials per design,
+with the same responses for previous and corrected executables. Each person
+answers 30 words. The corrected results are:
+
+| Profile; N×J | Null rejection (95% MC interval) | Planned coverage (95% MC interval) | Detection AND width (95% MC interval) |
+| --- | --- | --- | --- | --- |
+| 8pp, intercepts only; 54×30 | 4.35% (3.54–5.32) | 95.41% (94.42–96.23) | 94.68% (93.62–95.57) |
+| 8pp, moderate slopes; 72×60 | 3.96% (3.19–4.89) | 95.95% (95.00–96.72) | 81.79% (80.06–83.40) |
+| 5pp, moderate slopes; 162×60 | 4.98% (4.12–6.01) | 95.26% (94.26–96.10) | 85.25% (83.65–86.72) |
+| 8pp, larger variances; 72×90 | 5.86% (4.92–6.96) | 95.46% (94.47–96.28) | 89.55% (88.15–90.80) |
+| 8pp, larger variances; 162×30 | 6.10% (5.15–7.22) | 94.48% (93.41–95.39) | 92.77% (91.57–93.82) |
+| 8pp, larger variances; 216×90 | 5.52% (4.61–6.59) | 94.17% (93.07–95.11) | 99.51% (99.10–99.73) |
+
+Coverage uses valid fits; rejection and joint attainment use all 2,048
+attempts. There are 24,556/24,576 valid corrected fits, compared with all
+24,576 previously. The 20 iteration-limit failures are retained: 13 null
+and seven planned at the larger-variance 216×90 design. Every observed cell
+valid rate exceeds 99%. The six layouts meet the prespecified practical
+checks: coverage interval lower bound >=92.5% and null-rejection interval
+upper bound <=7.5%. These bounds are more permissive than exact 95%/5%
+calibration. The 162×30 null rate still has its interval above nominal 5%.
+
+All six still pass the joint planning target (95% interval width <=10pp,
+with detection/width joint-rate lower bound >=80%). However, moderate-slope
+72×60 falls from 84.57% joint attainment to 81.79%, with a lower bound of
+80.06%. It is a borderline planning pass, not a robust minimum. The old
+60-design grid has not been rerun with this correction, and no new universal
+participant/item recommendation follows from these six selected layouts.
+
+The numerical correction has a cost: in separate matched timing checks,
+median cached-fit CPU time rises from 0.053 to 0.115 seconds at 72×60 and
+from 0.205 to 0.428 seconds at high-variance 216×90. These are per-fit CPU
+times on the recorded machine, excluding generation and setup, not a
+promise of total simulation wall time. The small intercept-only design
+remains around 0.002–0.003 seconds per fit. CPU timings also vary with
+concurrent load and processor frequency.
+
+[Detailed protocol, executable provenance and paired results](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#l2-uncertainty-correction)
+are retained with the earlier results.
+
+<a id="rasch-mml-acceleration"></a>
+
+### Slow Fixed-Bank MML and the Variance Boundary
+
+The native solver now attempts safeguarded squared EM extrapolation after
+the ordinary iteration limit. It accepts an exact zero-variance solution only
+when the profile right derivative is nonpositive and its likelihood is not
+lower. Fallback convergence also checks the variance score, since tiny EM
+updates near zero can misleadingly suggest convergence.
+
+Replaying 457 previously capped fits recovered 456 (99.8%); one near-zero
+positive-variance case still reached the limit and remains a miss. An initial
+update-only stopping rule returned all 457, but independent likelihood checks
+revealed premature convergence; that rule was rejected. The 112 previously
+successful controls retained exactly the same item RMSE and person SD.
+On 564 common valid pairs with archived TAM results, all bank pass/fail
+decisions agreed. Parameter and likelihood differences remain, especially
+near the boundary; neither package is treated as the truth. Direct marginal
+likelihood optimization and mirt checks are saved separately. This repair
+does not validate crossed-GLMM intervals or all possible item banks.
+
 <a id="cross-field-designs"></a>
 
 ## Scope Across Research Designs and Units of Assignment
@@ -27,7 +432,25 @@ All validation scripts and trial-level CSVs are archived in the public repositor
 | Fixed-bank 1PL Rasch calibration (complete presentation, including extreme anchor items) | `mml`, `TAM::tam.mml`, `cpp_laplace`, `lme4` | **Floor-checked** (benchmarked regimes) | 64-dataset paired cross-validation against `TAM` on a 16-item bank with extreme anchors ($\pm 3.5$ logit); constant-response items retained in denominator. |
 | Partial item presentation (`items_per_subject`), random intercepts (`chance = 0`) | `bayes_laplace`, `lme4::glmer` | **Exploratory** (`indeterminate` at $N=96$ vs. 90% floor) | On `64 x 20` (5 items/person = `320` trials, between-subject), 96-dataset paired confirmation gave `89/96` (`92.7% [85.6%, 97.0%]`) planned and `90/96`–`91/96` (`93.8–94.8%`, Type I error `5.2–6.2%`) null coverage under `bayes_laplace`, matching `lme4::glmer` (`88/96` planned, `48/96` singular ML fits); verify coverage for your specific schedule via `validate_design_point()`. |
 | Sparse / partial presentation with **correlated random slopes**, or higher-order interactions (`A:B:C`) | `bayes_laplace`, `cpp_laplace` | **Exploratory** (schedule-dependent) | On within-unit `64 x 24` Latin square (`8` items/person = `512` trials, `slope_sd_ratio = 0.30`, `corr = 0.20`), `bayes_laplace` achieved `94/96`–`95/96` (`97.9–99.0%`) coverage and `2.1%` null detection (`pass`, conservative Half-$t$ regularization), but sparser schedules or `chance > 0` remain unestablished; verify with `validate_design_point()`. |
-| Passage / testlet nesting (`design_testlet()`) and participant-by-testlet local dependence | `bayes_laplace`, `lme4::glmer` | **Exploratory** (`below_floor` with few passages or local dependence) | On `48 x 24` with **only 6 passages** (`3` per condition, between-passage), asymptotic normal Wald intervals undercovered even at `participant_testlet_sd = 0` (`lme4` Type I error `20.8%`, coverage `79.2%` `below_floor`; `bayes_laplace` `14.6%`, `85.4%`), and unmodeled local dependence (`SD = 0.4`) dropped planned coverage to `76.0–82.3%` (`below_floor`). Ensure an adequate number of passages and verify via `validate_design_point()`. |
+| Passage / testlet nesting (`design_testlet()`) and participant-by-testlet local dependence | `bayes_laplace` with `joint_delta`; pilot `lme4::glmer` | **Exploratory** (allocation- and variance-dependent) | In a 1,024-dataset confirmation per scenario at `48 x 24`, `6 x 4` and `12 x 2` passages × questions gave 12.7% and 8.0% null detection with passage SD 0.5 and participant-by-passage SD 0.4. Planned coverage was 87.6% and 92.5%, respectively. The `12 x 2` design passed the coverage floor and had an indeterminate Type I error gate. |
+
+At the same 1,152 responses, a single passage per arm (`2 x 12`) gave 41.0% null detection and 60.7% planned coverage in the same benchmark. With weaker shared passage variation (SD 0.25), `6 x 4` and `12 x 2` both passed coverage and null gates. A separate `3 x 8` benchmark shared all passages across arms and randomized readers, with 94.9% coverage and 5.9% null detection under a common effect across passages. All tested designs fell below the 80% power target. The [allocation benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4b-passage-allocation-at-fixed-response-count) uses binary logit with full presentation and lists the exact Monte Carlo intervals for each scenario.
+
+When both arms use the same passages, state whether the interval describes the average for those passages or for a population of passages. In a shared-passage benchmark with 48 readers, 24 questions and heterogeneous condition effects, the fixed passage-by-condition analysis with two passages covered the presented-passage average in 244/256 runs (95.3%) and the population average in 197/256 (77.0%). In the population-null scenario, adding a random passage slope reduced false detection from 63/256 (24.6%) to 12/256 (4.7%). At the planned ten-point effect, it also increased mean interval width from 18.26 to 28.65 percentage points. All fits were valid and the results varied with the effect heterogeneity and the intended scope of inference. The benchmark uses the native kernel and research code to specify the fixed passage effects. [Shared-passage benchmark and Monte Carlo intervals](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4h-fixed-and-random-passage-effects-with-two-to-six-shared-passages)
+
+In the independent external comparison, the two-passage, 48-reader population-null scenario with heterogeneous slopes gave 18.8% and 18.5% null detection using only random passage intercepts under the native engine and `glmmTMB`. With passage slopes, the rates were 5.8% and 12.5%. At 12 passages and the same 1,152 responses, the slope-model rates were 5.4% and 5.7%, planned coverage was 94.5% and 94.2%, and planned power was 52.1% and 54.7%, respectively. A separate analysis of the two presented passages and their actual items also used `TAM` and `mirt`. Fixed-form point-estimate RMSE was similar on the common valid datasets. Interval availability varied across methods, with `mirt` returning 379/512 intervals. [External validation and exact Monte Carlo intervals](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4i-shared-passage-comparisons-with-external-irt-and-glmm-estimators)
+
+In an exploratory fixed-bank comparison with 128 datasets per scenario, the native common-discrimination calibration agreed with `mirt` Rasch to within 0.00082 standardized difficulty units. With 240 readers, eight items and equal true discrimination, both met the difficulty criteria in 122/128 runs. With wide discrimination heterogeneity at 480 readers and eight items, `TAM` and `mirt` 2PL met the difficulty criteria in 90/128 runs, and the Rasch fits met them in 0/128. The likelihood diagnostics also found extreme positive loadings in the rank-one Laplace GLMM under short tests. This benchmark holds the response data and ability scale constant and compares the item curves with the known truth. [2PL comparison and reproduction](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4j-fixed-bank-2pl-calibration-with-glmm-and-irt-estimators)
+
+For the same 16-item bank and 240 responses per item, 240 readers answering all items gave 240 co-observations per item pair, and 480 readers answering eight items in balanced booklets gave 112. With wide discrimination heterogeneity, the joint difficulty and discrimination criterion under mirt and TAM 2PL was met in 27/128 complete runs and 5/128 booklet runs. Under equal true discrimination, the Rasch difficulty criterion was met in 124/128 and 125/128 runs. An independent 2PL workflow in `irtsim` using the same booklet matrix also gave lower joint attainment for the booklets. [Equal-exposure comparison and reproduction](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4k-complete-and-incomplete-presentation-at-equal-item-exposure)
+
+In a complete-presentation vocabulary-learning benchmark with 2,048 datasets per generating model, the relative precision of 32 participants × 48 words and 96 × 16 reversed when the dominant source of treatment-effect variation switched between participants and words. With words rotated across conditions, 48 × 32 passed coverage, null detection, and 80% power gates for an eight-point marginal recall effect under balanced slopes. The three 3,072-response layouts passed across all four core slope profiles. The highest power for a five-point effect was 71.7%. These checks use binary logit, `bayes_laplace`, and `joint_delta`. Numerical results for complete presentation also include participant and word assignment, correlation sensitivity, and a separate internal example with continuous covariates. [L2 vocabulary benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4c-l2-vocabulary-recall-and-the-allocation-of-participants-and-words)
+
+A complementary L2 vocabulary benchmark uses 3,072 datasets per generating model and 1,536 scheduled responses per dataset. At the word-dominant slope setting, spreading 96 participants' responses across 48 words in linked lists reduced mean interval width from 12.67 to 10.81 percentage points compared with giving everyone the same 16 words. Linked and disjoint lists gave similar precision for the marginal method effect under the common-form assumptions. An allocation with identical participant and word margins still produced about 12.9 points of bias when compatible participant–word pairs were overrepresented in one arm. Modeling observed compatibility corrected that bias in the benchmark. Outcome-dependent missingness left bias after adjustment. This benchmark uses precomputed balanced schedules and internal interfaces to the native estimator. [Partial-presentation and compatibility benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4d-partial-presentation-and-participantword-compatibility)
+
+In a related 2,048-dataset-per-scenario benchmark, a 48-word bank supplied initial 16-word lists to 96 participants. When known-word rates were 30% at −1 vocabulary SD and 70% at +1 SD, topping up to 16 words under perfect screening raised eight-point unknown-word power from 56.7% to 82.1%. The top vocabulary quartile screened an average of 46.1 words to learn 12.0 genuinely unknown words. With 90% sensitivity and 95% specificity, the same quartile learned 10.7 genuinely unknown words, and population unknown-word power fell to 73.9%. The analysis uses a common generating reference distribution for the unknown-word contrast and internal covariate matrices. [Prior knowledge and screening benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4e-prior-word-knowledge-and-vocabulary-screening)
+
+In a floor and ceiling vocabulary benchmark with 2,048 datasets per scenario, 96 learners studied 16 words each from a 48-word bank. At reference accuracies of 10%, 42%, and 90%, detection of a fixed five-point effect was 78.8%, 48.6%, and 93.7%. Holding the conditional log odds ratio constant gave smaller true effects at the endpoints and detection of 19.7%, 48.6%, and 17.7%. The benchmark compares 14 allocations and also examines concentrated learner and word extremes, random-slope and correlation sensitivity, and measured covariates. It reports counts of all-correct and all-wrong learners or words alongside the observations per unit. [Floor and ceiling benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4f-vocabulary-recall-at-the-floor-and-ceiling)
 
 <a id="modeling-assumptions"></a>
 
@@ -112,11 +535,27 @@ Assuming complete presentation without missingness, `65%` marginal accuracy, per
 
 Fixing 14 core item difficulties evenly between $-1$ and $+1$ logit plus two extreme anchor items at $\pm 3.5$ logit (ability SD `0.8`), 64 replications at $N_{\text{subj}} = 100$ achieved bank-wide difficulty RMSE $\le 0.50$ in `64/64` replications under random-item Empirical Bayes shrinkage and `62/64` under `TAM` fixed-item Marginal Maximum Likelihood (MML), whereas simultaneous worst-item accuracy ($|\hat{b}_i - b_i| \le 0.50$ across all 16 items) dropped to `19/64` and `15/64`. At $N_{\text{subj}} = 30$, the hardest anchor item yielded zero correct responses in `17/64` replications. Under unpenalized fixed-difficulty estimation, all-correct and all-incorrect items are retained in the evaluation denominator as non-attaining replications. `plan_rasch_fixed_bank()` plans examinee sample sizes for a fixed difficulty vector via MML (built-in `"mml"` or `"tam"`) or Empirical Bayes shrinkage (`"cpp_laplace"` or `"lme4"`), whereas `plan_rasch_precision()` resamples items across replications ([TAM MML reference](https://search.r-project.org/CRAN/refmans/TAM/html/tam.mml.html)).
 
+A separate Rasch bank-expansion benchmark applies a common-item location shift after fixed-item MML. At 480 new examinees with 16 items per person and a 500-examinee reference calibration, four, eight, and twelve stable anchors spanning the difficulty scale yielded joint attainment of 78.0%, 82.5%, and 62.8%, respectively. Joint attainment includes limits on the origin error, new-item RMSE, and worst new-item error. The research script uses the built-in calibrator for the simulation and compares paired fits from `TAM`. The fixed-bank planning API identifies the origin by centering the ability distribution. [Common-item linking benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4g-common-item-linking-for-rasch-bank-expansion)
+
+A paired 16-item benchmark with glmmplanr 0.1.0, TAM and mfrmr compared
+14 calibration and eight DIF conditions on 10,240 simulated datasets.
+At 240 responses per item, the targeted 240-person complete and 480-person
+eight-item booklet designs gave difficulty RMSEs of 0.161 and 0.162
+logits and person EAP reliabilities of 0.648 and 0.479. With ability SD
+0.4, the release MML iteration cap allowed 143/512 booklet fits. A
+follow-up at a higher cap recovered 367/369 of those failed fits. For
+one preselected item with uniform DIF of 0.70 logits and 15 invariant
+anchors, TAM and mfrmr detected DIF in 329/384 complete and 213/384
+booklet datasets at 480 persons. The benchmark computes EAP and
+residual diagnostics from the fitted models and compares them with
+package-reported values. The glmmplanr DIF comparison uses the
+validation script's Laplace GLMM. [Rasch fit, separation, and anchored DIF benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4l-rasch-calibration-fit-separation-and-anchored-dif)
+
 <a id="related-packages"></a>
 
 ## Related R Packages by Research Goal
 
-To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 19 CRAN and R-universe packages that address statistical power, multi-axis design search, interval precision, or psychometric calibration for binary and multilevel data, based on each package's documented interface and primary methodological reference. Empirical benchmarks in this guide cover marginal probability intervals (`lme4::glmer`), 3AFC conditional-logit intervals (`rstan`), fixed-bank Rasch calibration (`TAM`), and [probability-to-logit input calibration (`PowRPriori`, `simr`, and `mlpwr`)](#package-calibration).
+To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize CRAN and R-universe packages that address statistical power, multi-axis design search, interval precision, or psychometric calibration for binary and multilevel data, based on each package's documented interface and primary methodological reference. Empirical benchmarks include the [matched irtsim/mlpwr item-pool comparison](#item-pool-package-comparison), marginal probability intervals (`lme4::glmer`), 3AFC conditional-logit intervals (`rstan`), fixed-bank Rasch calibration (`TAM`), and [probability-to-logit input calibration (`PowRPriori`, `simr`, and `mlpwr`)](#package-calibration).
 
 `glmmplanr` is specifically designed for studies that start from substantive population-averaged accuracy differences (percentage points), lower guessing asymptotes, and crossed presentation schedules, and then identify non-dominated Pareto-optimal $(N_{\text{subj}}, N_{\text{item}})$ designs meeting power and interval-width criteria. For arbitrary numbers of hierarchical random factors, group-mean centering of continuous predictors, or free 2PL/3PL slope and guessing estimation, the packages below provide complementary capabilities.
 
@@ -127,7 +566,7 @@ To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 
 | **PowRPriori** | Defines crossed/nested structures via `define_design()`, converts expected binary probabilities into fixed effects, and increments a chosen design axis in `power_sim()`, including within/between predictor centering. | Closest counterpart for canonical binary GLMMs. Standard vignettes apply direct logit transformation, whereas `glmmplanr::calibrate_dgp()` inverts Gauss-Hermite quadrature over the combined cell normal variance so marginal probabilities match under the specified random-effect variances ([PowRPriori workflow](https://CRAN.R-project.org/package=PowRPriori/vignettes/Workflow-Example.html)). |
 | **simr** | Evaluates power via `powerSim()` and 1D `powerCurve()` from either fitted `lme4` models or synthetic `makeGlmer()` objects given an external schedule, fixed effects, and variance components. | Standard reference for canonical binomial GLMMs without pilot data when supplied with calibrated conditional parameters and explicit schedule data frames ([Green & MacLeod, 2016](https://doi.org/10.1111/2041-210X.12504); [from-scratch vignette](https://CRAN.R-project.org/package=simr/vignettes/fromscratch.html)). |
 | **mixedpower** | Computes simulation-based power for fixed effects and interactions from a fitted `lme4` model and pilot dataset; `R2power()` scans a second random factor while holding the first at a specified size. | Direct precedent for participant-by-stimulus trade-offs when pilot data and fitted `lme4` models are available ([Kumle et al., 2021](https://doi.org/10.3758/s13428-021-01546-0); [manual](https://lkumle.github.io/power_notebooks/intro/Introduction_to_mixedpower.pdf)). |
-| **mlpwr** | Accepts a user-written binary simulation function in `find.design()` to search multi-parameter design spaces via surrogate modeling, with IRT and multilevel examples. | Surrogate-search counterpart. `glmmplanr::optimize_sample_size()` adds declarative crossed schedules, $m$-AFC quadrature calibration, 2D Pareto frontiers, and Stage-2 Wilson lower-bound verification to prevent optimistic point-estimate selection ([Zimmer et al., 2024](https://doi.org/10.3758/s13428-023-02269-0); [manual](https://CRAN.R-project.org/package=mlpwr/refman/mlpwr.html)). |
+| **mlpwr** | Accepts a user-written binary simulation function in `find.design()` to search multi-parameter design spaces via surrogate modeling, with IRT and multilevel examples. | Surrogate-search counterpart that can use glmmplanr's native simulation as its callback. The [matched comparison](#item-pool-package-comparison) applies the same independent Wilson confirmation to both methods; glmmplanr supplies the declarative schedules and effect/precision targets ([Zimmer et al., 2024](https://doi.org/10.3758/s13428-023-02269-0); [manual](https://CRAN.R-project.org/package=mlpwr/refman/mlpwr.html)). |
 | **glmmrOptim** | Selects $c$-optimal observation subsets from candidate schedules by minimizing asymptotic linear-contrast variance via the GLMM information matrix. | Useful for optimal condition-level observation allocation; asymptotic variance criteria complement simulation-verified finite-sample CI-width assurance and coverage ([glmmrOptim manual](https://samuel-watson.r-universe.dev/glmmrOptim/doc/manual.html)). |
 | **pilotr** | Generates crossed participant-by-item experimental datasets (including Bernoulli outcomes) and evaluates Type S/M errors, mean CI width, and ROPE metrics. | Precision-reporting counterpart; `power_mixed()` in v0.3.1 targets linear mixed models via `lmerTest`/Satterthwaite rather than binary GLMM refitting ([pilotr manual](https://CRAN.R-project.org/package=pilotr/refman/pilotr.html); [precision & ROPE vignette](https://CRAN.R-project.org/package=pilotr/vignettes/precision-rope.html)). |
 | **simglm** | Simulates configurable regression/multilevel data-generating and fitting models, summarizing power, Type I error, and parameter precision via `compute_statistics()`. | Flexible engine for custom covariate distributions and misspecification stress tests when conditional coefficients are specified directly ([simglm manual](https://CRAN.R-project.org/package=simglm/refman/simglm.html)). |
@@ -145,6 +584,7 @@ To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 
 
 | Package | Target Measurement Question | Role Relative to `glmmplanr` |
 |---|---|---|
+| **irtsim** | Simulation-based IRT study planning with item-parameter recovery and missingness/booklet designs. | Independent planning workflow with a mirt backend. The [matched Rasch comparison](#item-pool-package-comparison) uses the same responses, scale and whole-bank success event ([manual](https://cran.r-project.org/web/packages/irtsim/refman/irtsim.html)). |
 | **irtpwr** | Analytical/asymptotic sample size calculation for IRT model-comparison and item-fit hypotheses (e.g., Rasch vs. 2PL). | Suited to hypothesis testing of IRT model structure, whereas `plan_rasch_precision()` bounds parameter RMSE and variance recovery tolerances ([irtpwr vignette](https://CRAN.R-project.org/package=irtpwr/vignettes/demo.html)). |
 | **pwrRasch** | Simulation-based power to detect Rasch model misfit via group-by-item interaction tests. | Addresses DIF / model-fit testing rather than individual item calibration error bounds ([pwrRasch manual](https://CRAN.R-project.org/package=pwrRasch/refman/pwrRasch.html)). |
 | **TAM** & **eRm** | Item calibration for operational item banks via Marginal Maximum Likelihood (`TAM`) or Conditional Maximum Likelihood (`eRm`). | `plan_rasch_fixed_bank()` cross-validates directly against `TAM::tam.mml()` on identical response matrices; `eRm` provides CML sensitivity checks ([TAM reference](https://search.r-project.org/CRAN/refmans/TAM/html/tam.mml.html); [Mair & Hatzinger, 2007](https://www.jstatsoft.org/article/view/v020i09)). |

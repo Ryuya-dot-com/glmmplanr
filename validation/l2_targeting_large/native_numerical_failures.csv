@@ -1,0 +1,3 @@
+"case","model","engine","replicate","valid","rmse","max_error","a_rmse","a_max_error","probability_rmse","success","parameter_success","probability_success","b_bias","worst_item","n_extreme_items","n_extreme_people","mean_response","exposure_min","exposure_max","error","data_hash","format","layout","profile","n_subj"
+255,"Rasch","native",248,FALSE,NA,NA,NA,NA,NA,FALSE,FALSE,FALSE,NA,NA,14,83,0.0116,100,100,"MML-EM reached iteration limit","e5ad70fa4e4744a2","Recall","difficult25","severe_lower",100
+265,"Rasch","native",883,FALSE,NA,NA,NA,NA,NA,FALSE,FALSE,FALSE,NA,NA,13,170,0.0104,200,200,"MML-EM reached iteration limit","444589f0d6efa01f","Recall","difficult25","severe_lower",200

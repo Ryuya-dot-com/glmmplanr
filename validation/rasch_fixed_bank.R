@@ -114,7 +114,7 @@ print(table(random_pass = paired_pass[, "random_item"], fixed_pass = paired_pass
 random_dgp <- calibrate_dgp(design, 0.65, subj_sd = 0.8, item_sd = 0.6)
 plan <- plan_rasch_precision(random_dgp, data.frame(n_subj = 100L, n_item = 16L),
                              c(difficulty = limit, difficulty_max_abs_error = limit),
-                             nsim = 32L, seed = 890123L)
+                             nsim = 32L, seed = 890123L, engine = "lme4")
 results <- as.data.frame(plan)
 stopifnot(all(plan$replications$difficulty <= plan$replications$difficulty_max_abs_error),
           with(results, n_met[target == "difficulty_max_abs_error"] == n_met[target == "joint"]))

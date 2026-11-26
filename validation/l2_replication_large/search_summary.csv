@@ -1,0 +1,17 @@
+"profile","preference","method","searches","evaluations","confirmed","indeterminate","failed","no_candidate","search_errors","boundary_warnings","proposals_with_inference_flags"
+"conservative_5pp","fewer_items","glmmplanr_grid",5,5400,2,1,2,0,0,0,5
+"high_variance_8pp","fewer_items","glmmplanr_grid",5,5400,4,1,0,0,0,0,4
+"published_8pp","fewer_items","glmmplanr_grid",5,5400,5,0,0,0,0,0,0
+"slopes_8pp","fewer_items","glmmplanr_grid",5,5400,5,0,0,0,0,0,0
+"conservative_5pp","fewer_subj","glmmplanr_grid",5,5400,3,0,2,0,0,0,3
+"high_variance_8pp","fewer_subj","glmmplanr_grid",5,5400,1,4,0,0,0,0,0
+"published_8pp","fewer_subj","glmmplanr_grid",5,5400,5,0,0,0,0,0,0
+"slopes_8pp","fewer_subj","glmmplanr_grid",5,5400,5,0,0,0,0,0,0
+"conservative_5pp","fewer_items","mlpwr",5,5400,3,2,0,0,0,2,5
+"high_variance_8pp","fewer_items","mlpwr",5,5400,3,2,0,0,0,5,3
+"published_8pp","fewer_items","mlpwr",5,5400,5,0,0,0,0,5,0
+"slopes_8pp","fewer_items","mlpwr",5,5400,5,0,0,0,0,5,0
+"conservative_5pp","fewer_subj","mlpwr",5,5400,4,1,0,0,0,3,5
+"high_variance_8pp","fewer_subj","mlpwr",5,5400,4,1,0,0,0,4,1
+"published_8pp","fewer_subj","mlpwr",5,5400,5,0,0,0,0,5,0
+"slopes_8pp","fewer_subj","mlpwr",5,5400,5,0,0,0,0,0,0

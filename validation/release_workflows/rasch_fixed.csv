@@ -1,0 +1,5 @@
+"n_subj","n_item","method","engine","target","max_error","nsim","n_valid_fit","n_extreme_item_reps","n_singular","n_evaluable","rmse","n_met","attainment","mc_lo","mc_hi","decision"
+32,12,"fixed_item","mml","difficulty",0.5,6,6,3,0,3,0.545639456737483,0,0,0,0.390334287902165,"fail"
+32,12,"fixed_item","mml","joint",NA,6,6,3,0,3,NA,0,0,0,0.390334287902165,"fail"
+48,12,"fixed_item","mml","difficulty",0.5,6,6,0,0,6,0.573779835434052,1,0.166666666666667,0.0300533697483066,0.56350282218647,"fail"
+48,12,"fixed_item","mml","joint",NA,6,6,0,0,6,NA,1,0.166666666666667,0.0300533697483066,0.56350282218647,"fail"

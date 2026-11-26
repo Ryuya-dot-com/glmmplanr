@@ -13,6 +13,12 @@
 
 Most workflows follow four steps: **1. Declare design** → **2. Calibrate probabilities** → **3. Specify target** → **4. Search or verify sample sizes**.
 
+Planning uses built-in estimators by default: `bayes_laplace` for crossed
+GLMM effects, `cpp_laplace` for random-item Rasch recovery, and `mml` for
+fixed-item Rasch banks. External engines can be selected explicitly for
+comparison or to reproduce earlier analyses. Each recommendation applies
+to its specified model, estimator, and success criterion.
+
 | Your planning goal | Start here |
 |---|---|
 | Find combinations of **participants × items** that achieve target power or CI width | `design_crossed()` → `calibrate_dgp()` → `specify_target()` → `optimize_sample_size()` |
@@ -21,6 +27,12 @@ Most workflows follow four steps: **1. Declare design** → **2. Calibrate proba
 | Plan participants and items for **random-item Rasch** recovery (new people & new items) | `plan_rasch_precision()` |
 | Plan examinees to calibrate a **fixed list of Rasch items** (e.g., an operational word list) | `plan_rasch_fixed_bank()` |
 | Inspect all-correct, all-incorrect, or unobserved participants/items in trial data | `response_patterns()` |
+
+For a large item bank or stimulus pool, first define admissible candidate
+sets, then compare their measurement or experimental precision and required
+sample sizes. The [150-item worked example](inst/validation-guide.md#item-pool-planning)
+distinguishes a fixed short form from rotating partial presentation of the
+whole bank, and known-bank scoring precision from item recalibration.
 
 ---
 
@@ -262,12 +274,22 @@ head(as.data.frame(plan_res))
 as_gt(plan_res)
 plot(plan_res, type = "contour", metric = "prob_ci_width_pp")
 plot(plan_res, type = "pareto")
+plot(plan_res, type = "scenarios")
 # plot(plan_res, type = "surface3d", metric = "power")  # Requires optional 'plotly'
 report_plan(plan_res)
 
-# Independent paired null + planned confirmation on a fresh seed
-# validate_design_point(spec, n_subj = 48, n_item = 32, nsim = 200, seed = 74011)
+# Independent null and planned confirmation on a fresh seed
+check <- validate_design_point(spec, n_subj = 48, n_item = 32, nsim = 200, seed = 74011)
+plot(check)
+plot(check, type = "patterns")
 ```
+
+The scenario plot compares the designs selected under the standard scenario
+and across all scenarios. Pass a data frame with `n_subj` and `n_item` as
+`candidates` to compare specific verified pairs. The validation plot shows
+Monte Carlo intervals for power, Type I error, and coverage with the valid-fit
+counts. The pattern plot reports the frequency of extreme scores and
+unobserved units by participant and item.
 
 ---
 

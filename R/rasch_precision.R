@@ -2,8 +2,8 @@
 #'
 #' Evaluates each proposed allocation of people and items with the same set of
 #' error tolerances. Fits a crossed random-intercept logistic model to each
-#' simulated study using either `lme4::glmer()` (default) or the fast native
-#' C++ Laplace engine (`"cpp_laplace"`). Person ability has population mean
+#' simulated study using the native C++ Laplace engine (`"cpp_laplace"`,
+#' default) or explicitly selected `lme4::glmer()`. Person ability has population mean
 #' zero. Item difficulty is the negative sum of the fixed and item intercepts.
 #'
 #' @param dgp A [calibrate_dgp()] model with `chance = 0`, no experimental
@@ -25,9 +25,9 @@
 #' @param nsim Number of independent studies per design.
 #' @param seed Integer master simulation seed.
 #' @param mc_conf_level Pointwise confidence level of Wilson Monte Carlo intervals.
-#' @param engine Estimation backend: `"lme4"` (default; `lme4::glmer()` with
-#'   `"bobyqa"`) or `"cpp_laplace"` (fast native C++ Laplace / Empirical Bayes
-#'   solver).
+#' @param engine Estimation backend: `"cpp_laplace"` (default; native C++
+#'   Laplace / Empirical Bayes solver) or `"lme4"` (`lme4::glmer()` with
+#'   `"bobyqa"`). Specify `"lme4"` to reproduce earlier runs using that engine.
 #' @param workers Integer number of parallel workers (default `1L`). Results are
 #'   strictly worker-invariant via per-replication L'Ecuyer-CMRG substreams.
 #' @param parallel_backend Parallel backend (`"auto"`, `"mirai"`, `"multicore"`,
@@ -57,7 +57,7 @@ plan_rasch_precision <- function(
   nsim = 200L,
   seed = 2026L,
   mc_conf_level = 0.95,
-  engine = c("lme4", "cpp_laplace"),
+  engine = c("cpp_laplace", "lme4"),
   workers = 1L,
   parallel_backend = c("auto", "mirai", "multicore", "sequential"),
   verbose = FALSE
@@ -258,7 +258,7 @@ draw_rasch_trials_light <- function(dgp, schedule) {
   list(trials = trials_out, subj = u_s, item = u_i)
 }
 
-fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "lme4", control = NULL, rasch_ctx = NULL) {
+fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "cpp_laplace", control = NULL, rasch_ctx = NULL) {
   if (identical(engine, "cpp_laplace")) {
     n_obs <- length(trials$y)
     use_ctx <- !is.null(rasch_ctx) && !isTRUE(trials$has_keep) && cpp_glmm_workspace_valid(rasch_ctx$ws)
@@ -374,7 +374,7 @@ fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "l
   )
 }
 
-rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4", rasch_ctx = NULL) {
+rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "cpp_laplace", rasch_ctx = NULL) {
   data <- draw$trials
   result <- data.frame(
     ability = NA_real_, difficulty = NA_real_, difficulty_max_abs_error = NA_real_,
@@ -467,7 +467,8 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "lme4", ra
 #'     bank mean can be substantial for extreme items.
 #' @param engine Estimation engine: `"auto"` (default; selects `"mml"` for
 #'   `method = "fixed_item"` and `"cpp_laplace"` for `method = "random_item"`),
-#'   `"mml"` (built-in 21-point Gauss-Hermite MML-EM solver), `"tam"`
+#'   `"mml"` (built-in 21-point Gauss-Hermite MML-EM solver with safeguarded
+#'   acceleration and variance-boundary checks after slow EM iterations), `"tam"`
 #'   (`TAM::tam.mml(..., constraint = "cases")`), `"cpp_laplace"`, or `"lme4"`.
 #' @param assurance Required probability that a calibration study meets its
 #'   tolerance(s) (default `0.80`).

@@ -1,0 +1,36 @@
+$ operator is invalid for atomic vectors 
+Matching indices in mlpwr::addval:
+[1] 1 2
+Requested integer points:
+  V1 V2
+1  2  2
+2  2  2
+3  2  1
+4  1  2
+5  1  1
+6  3  3
+Stored design points:
+[[1]]
+i j 
+2 2 
+
+[[2]]
+i j 
+2 2 
+
+[[3]]
+i j 
+2 1 
+
+[[4]]
+i j 
+1 2 
+
+[[5]]
+i j 
+1 1 
+
+[[6]]
+i j 
+3 3 
+

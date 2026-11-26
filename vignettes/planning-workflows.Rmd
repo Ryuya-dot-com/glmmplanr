@@ -294,12 +294,16 @@ check <- validate_design_point(target, n_subj = 54L, n_item = 30L,
                                nsim = 16L, seed = 731L)
 check[c("condition", "true_target", "nsim", "n_valid",
         "detection", "detection_lo", "detection_hi", "coverage")]
+plot(check)
 ```
 
 The lower Monte Carlo bound for power is
 `r sprintf("%.1f%%", 100 * check$detection_lo[check$condition == "planned"])`.
 Compare it with the `.80` target. Because each row uses only `16` simulated
 studies here, the Wilson bounds are wide.
+Use `plot(check, type = "patterns")` to see how often studies contained an
+all-correct, all-incorrect, or unobserved learner or word. The labels give the
+largest observed response count for each extreme pattern.
 
 ### If the numbers of learners and words are both flexible
 
@@ -341,6 +345,12 @@ the fewest words. An empty table means no candidate reached `pass` yet.
 
 ### Choosing starting inputs when the source paper omits `VarCorr`
 
+The [replication-planning validation example](validation-and-scope.html#l2-empirical-planning)
+compares four explicit variance/effect assumptions with equal-budget grid and
+`mlpwr` searches, followed by 512 planned and 512 null simulations per returned
+candidate. It reports both passing designs and a case where detection/width
+targets pass but nominal coverage and false-positive rates remain inadequate.
+
 Because Huang et al. (2025) did not report `VarCorr(fit)`, avoid committing to
 a single optimistic variance guess. The values below are **illustrative starting
 brackets for sensitivity analysis, not universal field-wide recommendations**
@@ -375,6 +385,12 @@ variance_scenarios <- lapply(sd_assumptions, function(sds) {
 Pass `scenarios = variance_scenarios` to `optimize_sample_size()` to evaluate
 these SD assumptions. They are illustrative, not variance estimates reported
 by Huang et al. (2025).
+
+For a plan computed across scenarios, `plot(plan, type = "scenarios")`
+compares the designs selected under the standard scenario and across all
+scenarios. Detection with its Monte Carlo interval and mean interval width
+use separate panels. A `candidates` data frame with `n_subj` and `n_item`
+selects particular verified designs.
 
 ### Confirming a candidate and analysing collected data
 
@@ -810,6 +826,76 @@ plan to fit `(1 + situ | id) + (1 | item)` in your new study. Because estimated
 random-slope SDs and correlations carry substantial estimation uncertainty,
 always pair point-estimate planning with sensitivity scenarios.
 
+## Choose a short form or a stimulus set {#item-pool}
+
+Suppose a bank contains 150 calibrated items and a shorter test is needed.
+Three decisions need separate evidence:
+
+| Decision | Evaluate | Role of glmmplanr |
+|---|---|---|
+| Which items may be retained? | Content quotas, difficulty range, language characteristics, and item dependencies | Supply candidate sets assembled before the simulated outcomes are inspected |
+| Will the short form measure the intended people adequately? | Information, conditional bias and RMSE across the ability range, with the intended scoring rule | Use known-bank IRT calculations or a measurement package; recalibration assurance alone cannot answer this |
+| How many people are needed to recalibrate each candidate? | Recovery of its fixed item difficulties, failures, and Monte Carlo uncertainty | `plan_rasch_fixed_bank()` with the native `mml` engine |
+
+This synthetic pool has three content strata with 50 items each. Select equal
+numbers per stratum while spreading difficulty over the original range:
+
+```{r short-form-pool}
+pool <- data.frame(id = sprintf("word_%03d", 1:150),
+                   domain = rep(c("A", "B", "C"), each = 50),
+                   b = rep(seq(-2.5, 2.5, length.out = 50), 3))
+candidate_ids <- function(length_out) {
+  stopifnot(length_out %% 3 == 0, length_out >= 6, length_out <= 150)
+  unlist(lapply(split(seq_len(nrow(pool)), pool$domain), function(i)
+    i[round(seq(1, length(i), length.out = length_out / 3))]), use.names = FALSE)
+}
+short30 <- candidate_ids(30)
+short60 <- candidate_ids(60)
+table(pool$domain[short30])
+```
+
+For a recalibration pilot, pass the selected difficulties and compare sample
+sizes. Increase `nsim` for a decision; these four repetitions only demonstrate
+the interface. Retain the selected IDs separately, since item-level output
+uses positions in the supplied vector.
+
+```{r short-form-calibration}
+short_plan <- plan_rasch_fixed_bank(
+  setNames(pool$b[short30], pool$id[short30]), n_subj = c(120L, 480L),
+  max_error = c(difficulty = .35, difficulty_max_abs_error = .60),
+  person_sd = .8, engine = "mml", nsim = 4L, seed = 92611001L
+)
+subset(as.data.frame(short_plan), target == "joint",
+       select = c(n_subj, n_item, n_valid_fit, n_met, nsim, mc_lo, mc_hi, decision))
+```
+
+Keeping 150 items and presenting 30 to each person is a different design:
+pass **all** 150 difficulties and `items_per_subject = 30`. With 120 people,
+that yields 24 responses per item on average, compared with 120 responses
+per item for a fixed 30-item form, despite equal total response counts.
+Inspect `item_summary$n_scheduled` for the actual uneven exposure and
+`component` for connectivity. Unobserved or constant items still count
+against whole-bank precision. The maximum-error criterion also becomes
+harder as more items must meet it simultaneously.
+
+For experimental stimulus sampling, compare candidate `n_item` values and
+`items_per_subject` in a crossed design, keeping the intended population
+effect explicit. A Latin-square allocation can expose each item to both
+conditions across people. Vary participant and item random slopes, then use
+`validate_design_point()` to examine detection, coverage, and null error.
+The standard generator samples new items each replication; changing its
+item count does not simulate the identity or covariates of a particular word
+list. Restricting a list to frequent words can also change the population
+to which the estimated effect applies. Content validity and that change in
+population are not resolved by attaining a power target.
+
+The [validation guide](validation-and-scope.html#item-pool-planning) records a
+150-item example with known-bank measurement calculations, native
+recalibration, and crossed experimental planning. Its parameters and error
+limits are examples, not recommended thresholds for all tests. Bank
+uncertainty, parameter drift, local dependence, and guessing require
+corresponding sensitivity scenarios before using the result with a real bank.
+
 ## Calibrate a fixed list of items {#fixed-bank}
 
 A tutorial refit of the **random-item Rasch model**
@@ -886,7 +972,10 @@ check shrinkage bias at the extremes of the bank.
 
 For a study sampling **new items** from a population on every replication
 (rather than calibrating one fixed operational bank), use
-`plan_rasch_precision()`. For external comparisons against `TAM`, larger
+`plan_rasch_precision()`, whose default is the built-in `cpp_laplace` engine.
+Fixed-item banks use the built-in `mml` engine by default. To reproduce older
+random-item runs made with the previous default, specify `engine = "lme4"`.
+For external comparisons against `TAM` and `mirt`, larger
 simulation runs, and Monte Carlo intervals, see the
 [validation and scope vignette](validation-and-scope.html).
 

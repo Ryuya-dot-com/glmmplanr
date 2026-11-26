@@ -1,0 +1,5 @@
+"n_subj","n_item","target","max_error","nsim","n_valid_fit","n_singular","n_evaluable","rmse","n_met","attainment","mc_lo","mc_hi","decision"
+32,12,"difficulty",0.5,6,6,0,6,0.326721102865631,6,1,0.609665712097835,1,"indeterminate"
+32,12,"joint",NA,6,6,0,6,NA,6,1,0.609665712097835,1,"indeterminate"
+48,12,"difficulty",0.5,6,6,0,6,0.303682326933373,6,1,0.609665712097835,1,"indeterminate"
+48,12,"joint",NA,6,6,0,6,NA,6,1,0.609665712097835,1,"indeterminate"

@@ -1,0 +1,13 @@
+"case","condition","n","n_both_valid","n_validity_changed","n_status_changed","max_point_difference_pp","max_se_difference_pp","n_beyond_tolerance","n_coverage_changed","n_detection_changed","n_joint_changed"
+11,"null",2048,2048,0,0,0,0,0,0,0,0
+21,"null",2048,2048,0,0,0,0,0,0,0,0
+25,"null",2048,2048,0,0,0,0,0,0,0,0
+30,"null",2048,2035,0,0,0,0,0,0,0,0
+31,"null",2048,2048,0,0,0,0,0,0,0,0
+50,"null",2048,2048,0,0,0,0,0,0,0,0
+11,"planned",2048,2048,0,0,0,0,0,0,0,0
+21,"planned",2048,2048,0,0,0,0,0,0,0,0
+25,"planned",2048,2048,0,0,0,0,0,0,0,0
+30,"planned",2048,2041,0,0,0,0,0,0,0,0
+31,"planned",2048,2048,0,0,0,0,0,0,0,0
+50,"planned",2048,2048,0,0,0,0,0,0,0,0

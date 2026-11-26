@@ -1,0 +1,12 @@
+Random-item Rasch plan | Joint assurance target 80%
+No tested design has a confirmed pass (2 indeterminate, 0 failed). 
+ n_subj n_item n_valid_fit n_evaluable n_met nsim mc_lo mc_hi      decision
+     32     12           6           6     6    6  0.61     1 indeterminate
+     48     12           6           6     6    6  0.61     1 indeterminate
+Fixed-bank Rasch plan | Joint assurance target 80%
+No tested design has a confirmed pass (0 indeterminate, 2 failed). 
+ n_subj n_item n_valid_fit n_evaluable n_met nsim  mc_lo mc_hi decision
+     32     12           6           3     0    6 0.0000 0.390     fail
+     48     12           6           6     1    6 0.0301 0.564     fail
+[1] TRUE
+Public default GLMM, confirmation, two Rasch targets, serialization, plots, reports, and worker checks passed.

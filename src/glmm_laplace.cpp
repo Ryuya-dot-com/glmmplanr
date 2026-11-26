@@ -341,6 +341,7 @@ struct FitResult {
   Eigen::MatrixXd u_subj;
   Eigen::MatrixXd u_item;
   Eigen::MatrixXd u_testlet;
+  double covariance_score_norm = NA_REAL;
   double log_lik_laplace = NA_REAL;
   double final_outer_diff = 1.0;
   double final_inner_step = 1.0;
@@ -1934,358 +1935,26 @@ struct GLMMWorkspace {
     Eigen::VectorXd rel_sum_i = Eigen::VectorXd::Zero(q_i);
     Eigen::VectorXd rel_sum_t = Eigen::VectorXd::Zero(q_t);
 
-    auto run_em_map = [&](
-        const Eigen::MatrixXd& Sig_s_in,
-        const Eigen::MatrixXd& Sig_i_in,
-        const Eigen::MatrixXd& Sig_t_in,
-        Eigen::MatrixXd& Sig_s_out,
-        Eigen::MatrixXd& Sig_i_out,
-        Eigen::MatrixXd& Sig_t_out,
-        bool update_sigma
-    ) {
-      Eigen::MatrixXd L_s = safe_chol(Sig_s_in);
-      Eigen::MatrixXd L_i = safe_chol(Sig_i_in);
-      Eigen::MatrixXd L_t = has_testlet ? safe_chol(Sig_t_in) : Eigen::MatrixXd();
-
-      update_ZL(L_s, L_i, L_t, 7);
-
-      inner_converged = false;
-      bool obs_factored = false;
-
-      for (int it = 0; it < max_pirls_iter; ++it) {
-        double ll_data = 0.0;
-        double logdet_H = 0.0;
-        double max_step = 0.0;
-        double slope = 0.0;
-        bool used_obs = false;
-
-        if (chance > 0.0 && (outer_used >= 2 || it >= 2)) {
-          ll_data = eval_trials(beta, v_s, v_2, chance, true);
-          bool ok_obs = assemble_and_factor_core(
-            beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, logdet_H
-          );
-          if (ok_obs) {
-            ldlt_b_ws.compute(H_bb_schur);
-            ok_obs = (ldlt_b_ws.info() == Eigen::Success) && (ldlt_b_ws.vectorD().minCoeff() > 1e-8);
-          }
-          if (ok_obs) {
-            apply_R_ass(rhs_s_buf, rs_tilde_buf);
-            sub_G_mul_vec(rhs_2_buf, rs_tilde_buf, r_2_tilde_buf);
-            S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
-            r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
-            d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
-            d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
-            sub_Gt_mul_vec(rs_tilde_buf, d_v2_buf, &d_beta_buf, d_vs_buf);
-            apply_Rt_ass_in_place(d_vs_buf);
-
-            max_step = std::max({
-              d_beta_buf.lpNorm<Eigen::Infinity>(),
-              d_v2_buf.lpNorm<Eigen::Infinity>(),
-              d_vs_buf.lpNorm<Eigen::Infinity>()
-            });
-            slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
-            if (std::isfinite(max_step) && (max_step < 1.5e-5 || slope > 0.0)) {
-              used_obs = true;
-            }
-          }
-        }
-
-        if (!used_obs) {
-          ll_data = eval_trials(beta, v_s, v_2, chance, false);
-          logdet_H = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, false);
-
-          apply_R_ass(rhs_s_buf, rs_tilde_buf);
-          sub_G_mul_vec(rhs_2_buf, rs_tilde_buf, r_2_tilde_buf);
-          S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
-          r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
-
-          ldlt_b_ws.compute(H_bb_schur);
-          d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
-          d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
-          sub_Gt_mul_vec(rs_tilde_buf, d_v2_buf, &d_beta_buf, d_vs_buf);
-          apply_Rt_ass_in_place(d_vs_buf);
-
-          max_step = std::max({
-            d_beta_buf.lpNorm<Eigen::Infinity>(),
-            d_v2_buf.lpNorm<Eigen::Infinity>(),
-            d_vs_buf.lpNorm<Eigen::Infinity>()
-          });
-          slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
-        }
-
-        double phi_cur = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + beta.dot(P_beta * beta));
-        final_inner_step = max_step;
-
-        if (!std::isfinite(max_step)) {
-          inner_converged = false;
-          break;
-        }
-        if (max_step < 1.5e-5 && (it >= 1 || outer_used >= 3)) {
-          log_lik_laplace = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
-          inner_converged = true;
-          obs_factored = used_obs;
-          break;
-        }
-
-        double step_scale = (max_step > 4.0) ? (4.0 / max_step) : 1.0;
-        double accepted_ll = ll_data;
-
-        compute_deta_vec(&d_beta_buf, d_vs_buf, d_v2_buf);
-        const double v_norm2 = v_s.squaredNorm() + v_2.squaredNorm();
-        const double v_dot = v_s.dot(d_vs_buf) + v_2.dot(d_v2_buf);
-        const double dv_norm2 = d_vs_buf.squaredNorm() + d_v2_buf.squaredNorm();
-
-        bool accepted_bt = false;
-        double best_scale = 0.0;
-        double best_phi = phi_cur;
-        double best_ll = ll_data;
-        for (int bt = 0; bt < 10; ++bt) {
-          b_try_buf.noalias() = beta + step_scale * d_beta_buf;
-          double ll_try = eval_data_ll_step(step_scale, chance);
-          double v_pen_try = v_norm2 + 2.0 * step_scale * v_dot + (step_scale * step_scale) * dv_norm2;
-          double phi_try = ll_try - 0.5 * (v_pen_try + b_try_buf.dot(P_beta * b_try_buf));
-          if (std::isfinite(phi_try) && phi_try > best_phi) {
-            best_phi = phi_try;
-            best_scale = step_scale;
-            best_ll = ll_try;
-          }
-          if (std::isfinite(phi_try) &&
-              (phi_try >= phi_cur + 1e-4 * step_scale * std::max(slope, 0.0) ||
-               ((step_scale * max_step) < 1e-7 && phi_try >= phi_cur))) {
-            beta = b_try_buf;
-            v_2.noalias() += step_scale * d_v2_buf;
-            v_s.noalias() += step_scale * d_vs_buf;
-            accepted_ll = ll_try;
-            accepted_bt = true;
-            break;
-          }
-          step_scale *= 0.5;
-        }
-        if (!accepted_bt) {
-          if (best_scale > 0.0) {
-            step_scale = best_scale;
-            beta.noalias() += step_scale * d_beta_buf;
-            v_2.noalias() += step_scale * d_v2_buf;
-            v_s.noalias() += step_scale * d_vs_buf;
-            accepted_ll = best_ll;
-          } else {
-            step_scale = 0.0;
-            accepted_ll = ll_data;
-            log_lik_laplace = accepted_ll - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
-            break;
-          }
-        }
-
-        log_lik_laplace = accepted_ll - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
-
-        if ((step_scale * max_step) < 1.5e-5 && max_step < 5.0e-4 && (it >= 1 || outer_used >= 3)) {
-          inner_converged = true;
-          break;
-        }
-      }
-
-      if (chance > 0.0 && inner_converged && !obs_factored) {
-        eval_trials(beta, v_s, v_2, chance, true);
-        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, true);
-      }
-
-      invert_L22_lower();
-      compute_W_mat_from_L22_inv();
-
-      rel_sum_s.setZero();
-      sum_uu_s_buf.setZero();
-      for (int s = 0; s < n_subj; ++s) {
-        const int off_s = s * q_s;
-        us_buf.noalias() = L_s * v_s.segment(off_s, q_s);
-        const auto Ws = W_mat.middleCols(off_s, q_s);
-        const auto Rs = R_ass_slab.middleCols(off_s, q_s);
-        V_tmp_s.noalias() = Ws.transpose() * Ws;
-        for (int j = 0; j < q_s; ++j) V_tmp_s(j, j) += 1.0;
-        auto V_vs = V_ss_slab.middleCols(off_s, q_s);
-        V_vs.noalias() = Rs.transpose() * V_tmp_s * Rs;
-        for (int j = 0; j < q_s; ++j) {
-          double rel = std::min(std::max(1.0 - V_vs(j, j), 0.0), 1.0);
-          rel_sum_s(j) += 2.0 * rel * rel;
-        }
-        sum_uu_s_buf.noalias() += us_buf * us_buf.transpose() + L_s * V_vs * L_s.transpose();
-      }
-
-      rel_sum_i.setZero();
-      sum_uu_i_buf.setZero();
-      for (int i = 0; i < n_item; ++i) {
-        const int off_i = i * q_i;
-        ui_buf.noalias() = L_i * v_2.segment(off_i, q_i);
-        const auto Li_sub = L22_inv.block(off_i, off_i, dim_2 - off_i, q_i);
-        V_tmp_i.noalias() = Li_sub.transpose() * Li_sub;
-        for (int j = 0; j < q_i; ++j) {
-          double rel = std::min(std::max(1.0 - V_tmp_i(j, j), 0.0), 1.0);
-          rel_sum_i(j) += 2.0 * rel * rel;
-        }
-        sum_uu_i_buf.noalias() += ui_buf * ui_buf.transpose() + L_i * V_tmp_i * L_i.transpose();
-      }
-
-      rel_sum_t.setZero();
-      if (has_testlet) {
-        sum_uu_t_buf.setZero();
-        for (int t = 0; t < n_testlet; ++t) {
-          const int off_t = dim_i + t * q_t;
-          ut_buf.noalias() = L_t * v_2.segment(off_t, q_t);
-          const auto Lt_sub = L22_inv.block(off_t, off_t, dim_2 - off_t, q_t);
-          V_tmp_t.noalias() = Lt_sub.transpose() * Lt_sub;
-          for (int j = 0; j < q_t; ++j) {
-            double rel = std::min(std::max(1.0 - V_tmp_t(j, j), 0.0), 1.0);
-            rel_sum_t(j) += 2.0 * rel * rel;
-          }
-          sum_uu_t_buf.noalias() += ut_buf * ut_buf.transpose() + L_t * V_tmp_t * L_t.transpose();
-        }
-      }
-
-      if (!update_sigma) {
-        Sig_s_out = Sig_s_in;
-        Sig_i_out = Sig_i_in;
-        if (has_testlet) Sig_t_out = Sig_t_in;
-        return;
-      }
-
-      Sig_s_out = update_cov_matrix(sum_uu_s_buf, Sig_s_in, n_subj, corr_mode, regularized, lkj_eta, prior_tau_sd);
-      Sig_i_out = update_cov_matrix(sum_uu_i_buf, Sig_i_in, n_item, corr_mode, regularized, lkj_eta, prior_tau_sd);
-      if (has_testlet) {
-        Sig_t_out = update_cov_matrix(sum_uu_t_buf, Sig_t_in, n_testlet, corr_mode, regularized, lkj_eta, prior_tau_sd);
-      }
-
-      Eigen::MatrixXd map_s = safe_chol(Sig_s_out).triangularView<Eigen::Lower>().solve(L_s);
-      Eigen::MatrixXd map_i = safe_chol(Sig_i_out).triangularView<Eigen::Lower>().solve(L_i);
-      for (int s = 0; s < n_subj; ++s) v_s.segment(s * q_s, q_s) = map_s * v_s.segment(s * q_s, q_s);
-      for (int i = 0; i < n_item; ++i) v_2.segment(i * q_i, q_i) = map_i * v_2.segment(i * q_i, q_i);
-      if (has_testlet) {
-        Eigen::MatrixXd map_t = safe_chol(Sig_t_out).triangularView<Eigen::Lower>().solve(L_t);
-        for (int t = 0; t < n_testlet; ++t) {
-          v_2.segment(dim_i + t * q_t, q_t) = map_t * v_2.segment(dim_i + t * q_t, q_t);
-        }
-      }
-    };
-
-    if (fix_cov) {
-      Eigen::MatrixXd S_s1, S_i1, S_t1;
-      outer_used = 3;
-      run_em_map(Sigma_s, Sigma_i, Sigma_t, S_s1, S_i1, S_t1, false);
-      outer_used = 1;
-      final_outer_diff = 0.0;
-      outer_converged = inner_converged;
-    } else {
-      while (outer_used < max_em_iter) {
-        if ((outer_used & 7) == 0) Rcpp::checkUserInterrupt();
-        Eigen::VectorXd beta_prev = beta;
-        Eigen::MatrixXd S_s1, S_i1, S_t1;
-        outer_used++;
-        run_em_map(Sigma_s, Sigma_i, Sigma_t, S_s1, S_i1, S_t1, true);
-
-        double d1 = std::max(
-          (S_s1 - Sigma_s).lpNorm<Eigen::Infinity>(),
-          (S_i1 - Sigma_i).lpNorm<Eigen::Infinity>()
-        );
-        if (has_testlet) d1 = std::max(d1, (S_t1 - Sigma_t).lpNorm<Eigen::Infinity>());
-        final_outer_diff = std::max(d1, (beta - beta_prev).lpNorm<Eigen::Infinity>());
-
-        if (final_outer_diff < tol && outer_used >= 3 && inner_converged) {
-          Sigma_s = S_s1; Sigma_i = S_i1; if (has_testlet) Sigma_t = S_t1;
-          outer_converged = true; break;
-        }
-        if (outer_used >= max_em_iter) {
-          Sigma_s = S_s1; Sigma_i = S_i1; if (has_testlet) Sigma_t = S_t1; break;
-        }
-
-        beta_prev = beta;
-        Eigen::MatrixXd S_s2, S_i2, S_t2;
-        outer_used++;
-        run_em_map(S_s1, S_i1, S_t1, S_s2, S_i2, S_t2, true);
-
-        double d2 = std::max(
-          (S_s2 - S_s1).lpNorm<Eigen::Infinity>(),
-          (S_i2 - S_i1).lpNorm<Eigen::Infinity>()
-        );
-        if (has_testlet) d2 = std::max(d2, (S_t2 - S_t1).lpNorm<Eigen::Infinity>());
-        final_outer_diff = std::max(d2, (beta - beta_prev).lpNorm<Eigen::Infinity>());
-
-        if (final_outer_diff < tol && outer_used >= 3 && inner_converged) {
-          Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2;
-          outer_converged = true; break;
-        }
-        if (outer_used >= max_em_iter) {
-          Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2; break;
-        }
-
-        Eigen::MatrixXd L_s0 = safe_chol(Sigma_s), L_s1 = safe_chol(S_s1), L_s2 = safe_chol(S_s2);
-        Eigen::MatrixXd L_i0 = safe_chol(Sigma_i), L_i1 = safe_chol(S_i1), L_i2 = safe_chol(S_i2);
-        double r_norm2 = (L_s1 - L_s0).squaredNorm() + (L_i1 - L_i0).squaredNorm();
-        double v_norm2 = ((L_s2 - L_s1) - (L_s1 - L_s0)).squaredNorm() +
-          ((L_i2 - L_i1) - (L_i1 - L_i0)).squaredNorm();
-        if (has_testlet) {
-          Eigen::MatrixXd L_t0 = safe_chol(Sigma_t), L_t1 = safe_chol(S_t1), L_t2 = safe_chol(S_t2);
-          r_norm2 += (L_t1 - L_t0).squaredNorm();
-          v_norm2 += ((L_t2 - L_t1) - (L_t1 - L_t0)).squaredNorm();
-        }
-
-        if (v_norm2 > 1e-16 && r_norm2 > 1e-16 && outer_used < max_em_iter) {
-          double alpha_sq = std::max(std::min(-std::sqrt(r_norm2 / v_norm2), -1.0), -20.0);
-          if (alpha_sq < -1.05) {
-            Eigen::VectorXd v_s_bak = v_s, v_2_bak = v_2, beta_bak = beta;
-            Eigen::MatrixXd Sp_s = squarem_extrapolate_cov(Sigma_s, S_s1, S_s2, alpha_sq, corr_mode);
-            Eigen::MatrixXd Sp_i = squarem_extrapolate_cov(Sigma_i, S_i1, S_i2, alpha_sq, corr_mode);
-            Eigen::MatrixXd Sp_t = has_testlet ?
-              squarem_extrapolate_cov(Sigma_t, S_t1, S_t2, alpha_sq, corr_mode) : Eigen::MatrixXd();
-
-            Eigen::MatrixXd map_s = safe_chol(Sp_s).triangularView<Eigen::Lower>().solve(L_s2);
-            Eigen::MatrixXd map_i = safe_chol(Sp_i).triangularView<Eigen::Lower>().solve(L_i2);
-            for (int s = 0; s < n_subj; ++s) v_s.segment(s * q_s, q_s) = map_s * v_s.segment(s * q_s, q_s);
-            for (int i = 0; i < n_item; ++i) v_2.segment(i * q_i, q_i) = map_i * v_2.segment(i * q_i, q_i);
-            if (has_testlet) {
-              Eigen::MatrixXd L_t2 = safe_chol(S_t2);
-              Eigen::MatrixXd map_t = safe_chol(Sp_t).triangularView<Eigen::Lower>().solve(L_t2);
-              for (int t = 0; t < n_testlet; ++t) {
-                v_2.segment(dim_i + t * q_t, q_t) = map_t * v_2.segment(dim_i + t * q_t, q_t);
-              }
-            }
-
-            Eigen::MatrixXd S_s3, S_i3, S_t3;
-            outer_used++;
-            run_em_map(Sp_s, Sp_i, Sp_t, S_s3, S_i3, S_t3, true);
-
-            double d3 = std::max(
-              (S_s3 - Sp_s).lpNorm<Eigen::Infinity>(),
-              (S_i3 - Sp_i).lpNorm<Eigen::Infinity>()
-            );
-            if (has_testlet) d3 = std::max(d3, (S_t3 - Sp_t).lpNorm<Eigen::Infinity>());
-
-            if (d3 <= 4.0 * std::max(d1, d2) || d3 < 5e-3) {
-              final_outer_diff = d3;
-              Sigma_s = S_s3; Sigma_i = S_i3; if (has_testlet) Sigma_t = S_t3;
-              if (d3 < 0.5 * tol && inner_converged) {
-                outer_converged = true; break;
-              }
-              continue;
-            } else {
-              v_s = v_s_bak; v_2 = v_2_bak; beta = beta_bak;
-            }
-          }
-        }
-
-        Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2;
-      }
-    }
-
-    Eigen::MatrixXd L_s_fin = safe_chol(Sigma_s);
-    Eigen::MatrixXd L_i_fin = safe_chol(Sigma_i);
-    Eigen::MatrixXd L_t_fin = has_testlet ? safe_chol(Sigma_t) : Eigen::MatrixXd();
-
     bool fin_obs_ready = false;
-
-    // Post-convergence Observed-Hessian Laplace Polish (up to 3 iterations)
-    if (inner_converged && outer_converged) {
+    const bool profile_covariance = (chance == 0.0 && corr_mode == 0);
+    double covariance_score_norm = profile_covariance && !fix_cov ? INFINITY : 0.0;
+    auto covariance_stationary = [&]() {
+      // A score below 0.5% of the local information scale is numerically
+      // negligible relative to sampling uncertainty; verify against direct
+      // profile optimization rather than tightening EM iterations indefinitely.
+      return !profile_covariance || covariance_score_norm < 5e-3;
+    };
+    // Reuse the Laplace beta/mode refinement inside covariance updates so
+    // covariance and beta solve the same approximate marginal objective.
+    auto polish_laplace = [&](const Eigen::MatrixXd& L_s_fin,
+                              const Eigen::MatrixXd& L_i_fin,
+                              const Eigen::MatrixXd& L_t_fin, bool covariance_step = false) {
+      fin_obs_ready = false;
       update_ZL(L_s_fin, L_i_fin, L_t_fin, 7);
 
       Eigen::VectorXd S22_inv_r2(dim_2);
-      for (int polish = 0; polish < 3; ++polish) {
+      const int beta_steps = covariance_step ? 1 : 3;
+      for (int polish = 0; polish < beta_steps; ++polish) {
         eval_trials(beta, v_s, v_2, chance, true);
         assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
         Eigen::VectorXd grad_lap_b = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, &S22_inv_r2);
@@ -2293,6 +1962,18 @@ struct GLMMWorkspace {
         ldlt_b_ws.compute(H_bb_schur);
         d_beta_buf.noalias() = ldlt_b_ws.solve(grad_lap_b);
         double lap_norm = d_beta_buf.lpNorm<Eigen::Infinity>();
+        if (covariance_step) {
+          if (!std::isfinite(lap_norm)) {
+            inner_converged = false;
+            return;
+          }
+          // This is a primary beta update, not only a final local polish.
+          // Bound a large step instead of silently leaving beta unchanged.
+          if (lap_norm >= 1.5) {
+            d_beta_buf /= lap_norm;
+            lap_norm = 1.0;
+          }
+        }
         if (lap_norm < 1.5) {
           d_v2_buf.noalias() = S22_inv_r2 - S22_inv_S2b_saved * d_beta_buf;
           sub_Gt_mul_vec(rs_tilde_buf, d_v2_buf, &d_beta_buf, d_vs_buf);
@@ -2381,7 +2062,410 @@ struct GLMMWorkspace {
           }
         }
       }
+    };
+
+    auto run_em_map = [&](
+        const Eigen::MatrixXd& Sig_s_in,
+        const Eigen::MatrixXd& Sig_i_in,
+        const Eigen::MatrixXd& Sig_t_in,
+        Eigen::MatrixXd& Sig_s_out,
+        Eigen::MatrixXd& Sig_i_out,
+        Eigen::MatrixXd& Sig_t_out,
+        bool update_sigma
+    ) {
+      Eigen::MatrixXd L_s = safe_chol(Sig_s_in);
+      Eigen::MatrixXd L_i = safe_chol(Sig_i_in);
+      Eigen::MatrixXd L_t = has_testlet ? safe_chol(Sig_t_in) : Eigen::MatrixXd();
+
+      update_ZL(L_s, L_i, L_t, 7);
+
+      inner_converged = false;
+      bool obs_factored = false;
+
+      for (int it = 0; it < max_pirls_iter; ++it) {
+        double ll_data = 0.0;
+        double logdet_H = 0.0;
+        double max_step = 0.0;
+        double slope = 0.0;
+        bool used_obs = false;
+
+        if (chance > 0.0 && (outer_used >= 2 || it >= 2)) {
+          ll_data = eval_trials(beta, v_s, v_2, chance, true);
+          bool ok_obs = assemble_and_factor_core(
+            beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, logdet_H
+          );
+          if (ok_obs) {
+            ldlt_b_ws.compute(H_bb_schur);
+            ok_obs = (ldlt_b_ws.info() == Eigen::Success) && (ldlt_b_ws.vectorD().minCoeff() > 1e-8);
+          }
+          if (ok_obs) {
+            apply_R_ass(rhs_s_buf, rs_tilde_buf);
+            sub_G_mul_vec(rhs_2_buf, rs_tilde_buf, r_2_tilde_buf);
+            S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
+            r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
+            d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
+          if (profile_covariance && update_sigma) d_beta_buf.setZero();
+            d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
+            sub_Gt_mul_vec(rs_tilde_buf, d_v2_buf, &d_beta_buf, d_vs_buf);
+            apply_Rt_ass_in_place(d_vs_buf);
+
+            max_step = std::max({
+              d_beta_buf.lpNorm<Eigen::Infinity>(),
+              d_v2_buf.lpNorm<Eigen::Infinity>(),
+              d_vs_buf.lpNorm<Eigen::Infinity>()
+            });
+            slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
+            if (std::isfinite(max_step) && (max_step < 1.5e-5 || slope > 0.0)) {
+              used_obs = true;
+            }
+          }
+        }
+
+        if (!used_obs) {
+          ll_data = eval_trials(beta, v_s, v_2, chance, false);
+          logdet_H = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, false);
+
+          apply_R_ass(rhs_s_buf, rs_tilde_buf);
+          sub_G_mul_vec(rhs_2_buf, rs_tilde_buf, r_2_tilde_buf);
+          S22_inv_r2_buf.noalias() = llt_22_ws.solve(r_2_tilde_buf);
+          r_b_tilde_buf.noalias() = rhs_b_buf - C_bs * rs_tilde_buf - S_2b_saved.transpose() * S22_inv_r2_buf;
+
+          ldlt_b_ws.compute(H_bb_schur);
+          d_beta_buf.noalias() = ldlt_b_ws.solve(r_b_tilde_buf);
+          if (profile_covariance && update_sigma) d_beta_buf.setZero();
+          d_v2_buf.noalias() = S22_inv_r2_buf - S22_inv_S2b_saved * d_beta_buf;
+          sub_Gt_mul_vec(rs_tilde_buf, d_v2_buf, &d_beta_buf, d_vs_buf);
+          apply_Rt_ass_in_place(d_vs_buf);
+
+          max_step = std::max({
+            d_beta_buf.lpNorm<Eigen::Infinity>(),
+            d_v2_buf.lpNorm<Eigen::Infinity>(),
+            d_vs_buf.lpNorm<Eigen::Infinity>()
+          });
+          slope = rhs_b_buf.dot(d_beta_buf) + rhs_s_buf.dot(d_vs_buf) + rhs_2_buf.dot(d_v2_buf);
+        }
+
+        double phi_cur = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + beta.dot(P_beta * beta));
+        final_inner_step = max_step;
+
+        if (!std::isfinite(max_step)) {
+          inner_converged = false;
+          break;
+        }
+        if (max_step < 1.5e-5 && (it >= 1 || outer_used >= 3)) {
+          log_lik_laplace = ll_data - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
+          inner_converged = true;
+          obs_factored = used_obs;
+          break;
+        }
+
+        double step_scale = (max_step > 4.0) ? (4.0 / max_step) : 1.0;
+        double accepted_ll = ll_data;
+
+        compute_deta_vec(&d_beta_buf, d_vs_buf, d_v2_buf);
+        const double v_norm2 = v_s.squaredNorm() + v_2.squaredNorm();
+        const double v_dot = v_s.dot(d_vs_buf) + v_2.dot(d_v2_buf);
+        const double dv_norm2 = d_vs_buf.squaredNorm() + d_v2_buf.squaredNorm();
+
+        bool accepted_bt = false;
+        double best_scale = 0.0;
+        double best_phi = phi_cur;
+        double best_ll = ll_data;
+        for (int bt = 0; bt < 10; ++bt) {
+          b_try_buf.noalias() = beta + step_scale * d_beta_buf;
+          double ll_try = eval_data_ll_step(step_scale, chance);
+          double v_pen_try = v_norm2 + 2.0 * step_scale * v_dot + (step_scale * step_scale) * dv_norm2;
+          double phi_try = ll_try - 0.5 * (v_pen_try + b_try_buf.dot(P_beta * b_try_buf));
+          if (std::isfinite(phi_try) && phi_try > best_phi) {
+            best_phi = phi_try;
+            best_scale = step_scale;
+            best_ll = ll_try;
+          }
+          if (std::isfinite(phi_try) &&
+              (phi_try >= phi_cur + 1e-4 * step_scale * std::max(slope, 0.0) ||
+               ((step_scale * max_step) < 1e-7 && phi_try >= phi_cur))) {
+            beta = b_try_buf;
+            v_2.noalias() += step_scale * d_v2_buf;
+            v_s.noalias() += step_scale * d_vs_buf;
+            accepted_ll = ll_try;
+            accepted_bt = true;
+            break;
+          }
+          step_scale *= 0.5;
+        }
+        if (!accepted_bt) {
+          if (best_scale > 0.0) {
+            step_scale = best_scale;
+            beta.noalias() += step_scale * d_beta_buf;
+            v_2.noalias() += step_scale * d_v2_buf;
+            v_s.noalias() += step_scale * d_vs_buf;
+            accepted_ll = best_ll;
+          } else {
+            step_scale = 0.0;
+            accepted_ll = ll_data;
+            log_lik_laplace = accepted_ll - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
+            break;
+          }
+        }
+
+        log_lik_laplace = accepted_ll - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_H);
+
+        if ((step_scale * max_step) < 1.5e-5 && max_step < 5.0e-4 && (it >= 1 || outer_used >= 3)) {
+          inner_converged = true;
+          break;
+        }
+      }
+
+      if (profile_covariance && update_sigma && inner_converged) {
+        polish_laplace(L_s, L_i, L_t, true);
+        obs_factored = fin_obs_ready;
+      }
+
+      if (chance > 0.0 && inner_converged && !obs_factored) {
+        eval_trials(beta, v_s, v_2, chance, true);
+        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_ws, true);
+      }
+
+      Eigen::VectorXd mean_shift_s = Eigen::VectorXd::Zero(dim_s);
+      Eigen::VectorXd mean_shift_2 = Eigen::VectorXd::Zero(dim_2);
+      if (profile_covariance && update_sigma && inner_converged && fin_obs_ready) {
+        // Include movement of the conditional mode in the Laplace determinant
+        // derivative: u * mean_shift' + mean_shift * u' in E(uu').
+        compute_c_lap_fast();
+        apply_R_ass(cs_vec, cs_tilde_buf);
+        sub_G_mul_vec(c2_vec, cs_tilde_buf, r_2_tilde_buf);
+        mean_shift_2.noalias() = llt_22_fin_ws.solve(r_2_tilde_buf);
+        sub_Gt_mul_vec(cs_tilde_buf, mean_shift_2, nullptr, mean_shift_s);
+        apply_Rt_ass_in_place(mean_shift_s);
+      } else {
+        invert_L22_lower();
+        compute_W_mat_from_L22_inv();
+      }
+
+      rel_sum_s.setZero();
+      sum_uu_s_buf.setZero();
+      for (int s = 0; s < n_subj; ++s) {
+        const int off_s = s * q_s;
+        us_buf.noalias() = L_s * v_s.segment(off_s, q_s);
+        const auto Ws = W_mat.middleCols(off_s, q_s);
+        const auto Rs = R_ass_slab.middleCols(off_s, q_s);
+        V_tmp_s.noalias() = Ws.transpose() * Ws;
+        for (int j = 0; j < q_s; ++j) V_tmp_s(j, j) += 1.0;
+        auto V_vs = V_ss_slab.middleCols(off_s, q_s);
+        V_vs.noalias() = Rs.transpose() * V_tmp_s * Rs;
+        for (int j = 0; j < q_s; ++j) {
+          double rel = std::min(std::max(1.0 - V_vs(j, j), 0.0), 1.0);
+          rel_sum_s(j) += 2.0 * rel * rel;
+        }
+        sum_uu_s_buf.noalias() += us_buf * us_buf.transpose() + L_s * V_vs * L_s.transpose();
+        if (profile_covariance && update_sigma) {
+          Eigen::VectorXd shift = L_s * mean_shift_s.segment(off_s, q_s);
+          sum_uu_s_buf.noalias() += us_buf * shift.transpose() + shift * us_buf.transpose();
+        }
+      }
+
+      rel_sum_i.setZero();
+      sum_uu_i_buf.setZero();
+      for (int i = 0; i < n_item; ++i) {
+        const int off_i = i * q_i;
+        ui_buf.noalias() = L_i * v_2.segment(off_i, q_i);
+        const auto Li_sub = L22_inv.block(off_i, off_i, dim_2 - off_i, q_i);
+        V_tmp_i.noalias() = Li_sub.transpose() * Li_sub;
+        for (int j = 0; j < q_i; ++j) {
+          double rel = std::min(std::max(1.0 - V_tmp_i(j, j), 0.0), 1.0);
+          rel_sum_i(j) += 2.0 * rel * rel;
+        }
+        sum_uu_i_buf.noalias() += ui_buf * ui_buf.transpose() + L_i * V_tmp_i * L_i.transpose();
+        if (profile_covariance && update_sigma) {
+          Eigen::VectorXd shift = L_i * mean_shift_2.segment(off_i, q_i);
+          sum_uu_i_buf.noalias() += ui_buf * shift.transpose() + shift * ui_buf.transpose();
+        }
+      }
+
+      rel_sum_t.setZero();
+      if (has_testlet) {
+        sum_uu_t_buf.setZero();
+        for (int t = 0; t < n_testlet; ++t) {
+          const int off_t = dim_i + t * q_t;
+          ut_buf.noalias() = L_t * v_2.segment(off_t, q_t);
+          const auto Lt_sub = L22_inv.block(off_t, off_t, dim_2 - off_t, q_t);
+          V_tmp_t.noalias() = Lt_sub.transpose() * Lt_sub;
+          for (int j = 0; j < q_t; ++j) {
+            double rel = std::min(std::max(1.0 - V_tmp_t(j, j), 0.0), 1.0);
+            rel_sum_t(j) += 2.0 * rel * rel;
+          }
+          sum_uu_t_buf.noalias() += ut_buf * ut_buf.transpose() + L_t * V_tmp_t * L_t.transpose();
+          if (profile_covariance && update_sigma) {
+            Eigen::VectorXd shift = L_t * mean_shift_2.segment(off_t, q_t);
+            sum_uu_t_buf.noalias() += ut_buf * shift.transpose() + shift * ut_buf.transpose();
+          }
+        }
+      }
+
+      if (profile_covariance && update_sigma) {
+        covariance_score_norm = 0.0;
+        auto check_score = [&](const Eigen::MatrixXd& moment, const Eigen::MatrixXd& Sigma,
+                               const Eigen::VectorXd& rel_sum, int n) {
+          for (int j = 0; j < Sigma.rows(); ++j) {
+            double tau2 = std::max(Sigma(j, j), 1e-10);
+            double score = moment(j, j) / tau2 - n;
+            double info_prior = 0.0;
+            if (regularized) {
+              double r = tau2 / (3.0 * prior_tau_sd * prior_tau_sd);
+              score += 1.0 - 4.0 * r / (1.0 + r);
+              info_prior = 8.0 * r / ((1.0 + r) * (1.0 + r));
+            }
+            // Unpenalized zero-variance solutions use a one-sided boundary score.
+            if (!regularized && tau2 <= 1e-10 && score < 0.0) score = 0.0;
+            covariance_score_norm = std::max(covariance_score_norm,
+              std::abs(score) / std::sqrt(std::max(rel_sum(j) + info_prior, 0.75)));
+          }
+        };
+        check_score(sum_uu_s_buf, Sig_s_in, rel_sum_s, n_subj);
+        check_score(sum_uu_i_buf, Sig_i_in, rel_sum_i, n_item);
+        if (has_testlet) check_score(sum_uu_t_buf, Sig_t_in, rel_sum_t, n_testlet);
+      }
+
+      if (!update_sigma) {
+        Sig_s_out = Sig_s_in;
+        Sig_i_out = Sig_i_in;
+        if (has_testlet) Sig_t_out = Sig_t_in;
+        return;
+      }
+
+      Sig_s_out = update_cov_matrix(sum_uu_s_buf, Sig_s_in, n_subj, corr_mode, regularized, lkj_eta, prior_tau_sd);
+      Sig_i_out = update_cov_matrix(sum_uu_i_buf, Sig_i_in, n_item, corr_mode, regularized, lkj_eta, prior_tau_sd);
+      if (has_testlet) {
+        Sig_t_out = update_cov_matrix(sum_uu_t_buf, Sig_t_in, n_testlet, corr_mode, regularized, lkj_eta, prior_tau_sd);
+      }
+
+      Eigen::MatrixXd map_s = safe_chol(Sig_s_out).triangularView<Eigen::Lower>().solve(L_s);
+      Eigen::MatrixXd map_i = safe_chol(Sig_i_out).triangularView<Eigen::Lower>().solve(L_i);
+      for (int s = 0; s < n_subj; ++s) v_s.segment(s * q_s, q_s) = map_s * v_s.segment(s * q_s, q_s);
+      for (int i = 0; i < n_item; ++i) v_2.segment(i * q_i, q_i) = map_i * v_2.segment(i * q_i, q_i);
+      if (has_testlet) {
+        Eigen::MatrixXd map_t = safe_chol(Sig_t_out).triangularView<Eigen::Lower>().solve(L_t);
+        for (int t = 0; t < n_testlet; ++t) {
+          v_2.segment(dim_i + t * q_t, q_t) = map_t * v_2.segment(dim_i + t * q_t, q_t);
+        }
+      }
+    };
+
+    if (fix_cov) {
+      Eigen::MatrixXd S_s1, S_i1, S_t1;
+      outer_used = 3;
+      run_em_map(Sigma_s, Sigma_i, Sigma_t, S_s1, S_i1, S_t1, false);
+      outer_used = 1;
+      final_outer_diff = 0.0;
+      outer_converged = inner_converged;
+    } else {
+      while (outer_used < max_em_iter) {
+        if ((outer_used & 7) == 0) Rcpp::checkUserInterrupt();
+        Eigen::VectorXd beta_prev = beta;
+        Eigen::MatrixXd S_s1, S_i1, S_t1;
+        outer_used++;
+        run_em_map(Sigma_s, Sigma_i, Sigma_t, S_s1, S_i1, S_t1, true);
+
+        double d1 = std::max(
+          (S_s1 - Sigma_s).lpNorm<Eigen::Infinity>(),
+          (S_i1 - Sigma_i).lpNorm<Eigen::Infinity>()
+        );
+        if (has_testlet) d1 = std::max(d1, (S_t1 - Sigma_t).lpNorm<Eigen::Infinity>());
+        final_outer_diff = std::max(d1, (beta - beta_prev).lpNorm<Eigen::Infinity>());
+
+        if (final_outer_diff < tol && outer_used >= 3 && inner_converged && covariance_stationary()) {
+          Sigma_s = S_s1; Sigma_i = S_i1; if (has_testlet) Sigma_t = S_t1;
+          outer_converged = true; break;
+        }
+        if (outer_used >= max_em_iter) {
+          Sigma_s = S_s1; Sigma_i = S_i1; if (has_testlet) Sigma_t = S_t1; break;
+        }
+
+        beta_prev = beta;
+        Eigen::MatrixXd S_s2, S_i2, S_t2;
+        outer_used++;
+        run_em_map(S_s1, S_i1, S_t1, S_s2, S_i2, S_t2, true);
+
+        double d2 = std::max(
+          (S_s2 - S_s1).lpNorm<Eigen::Infinity>(),
+          (S_i2 - S_i1).lpNorm<Eigen::Infinity>()
+        );
+        if (has_testlet) d2 = std::max(d2, (S_t2 - S_t1).lpNorm<Eigen::Infinity>());
+        final_outer_diff = std::max(d2, (beta - beta_prev).lpNorm<Eigen::Infinity>());
+
+        if (final_outer_diff < tol && outer_used >= 3 && inner_converged && covariance_stationary()) {
+          Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2;
+          outer_converged = true; break;
+        }
+        if (outer_used >= max_em_iter) {
+          Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2; break;
+        }
+
+        Eigen::MatrixXd L_s0 = safe_chol(Sigma_s), L_s1 = safe_chol(S_s1), L_s2 = safe_chol(S_s2);
+        Eigen::MatrixXd L_i0 = safe_chol(Sigma_i), L_i1 = safe_chol(S_i1), L_i2 = safe_chol(S_i2);
+        double r_norm2 = (L_s1 - L_s0).squaredNorm() + (L_i1 - L_i0).squaredNorm();
+        double v_norm2 = ((L_s2 - L_s1) - (L_s1 - L_s0)).squaredNorm() +
+          ((L_i2 - L_i1) - (L_i1 - L_i0)).squaredNorm();
+        if (has_testlet) {
+          Eigen::MatrixXd L_t0 = safe_chol(Sigma_t), L_t1 = safe_chol(S_t1), L_t2 = safe_chol(S_t2);
+          r_norm2 += (L_t1 - L_t0).squaredNorm();
+          v_norm2 += ((L_t2 - L_t1) - (L_t1 - L_t0)).squaredNorm();
+        }
+
+        if (v_norm2 > 1e-16 && r_norm2 > 1e-16 && outer_used < max_em_iter) {
+          double alpha_sq = std::max(std::min(-std::sqrt(r_norm2 / v_norm2), -1.0), -20.0);
+          if (alpha_sq < -1.05) {
+            Eigen::VectorXd v_s_bak = v_s, v_2_bak = v_2, beta_bak = beta;
+            Eigen::MatrixXd Sp_s = squarem_extrapolate_cov(Sigma_s, S_s1, S_s2, alpha_sq, corr_mode);
+            Eigen::MatrixXd Sp_i = squarem_extrapolate_cov(Sigma_i, S_i1, S_i2, alpha_sq, corr_mode);
+            Eigen::MatrixXd Sp_t = has_testlet ?
+              squarem_extrapolate_cov(Sigma_t, S_t1, S_t2, alpha_sq, corr_mode) : Eigen::MatrixXd();
+
+            Eigen::MatrixXd map_s = safe_chol(Sp_s).triangularView<Eigen::Lower>().solve(L_s2);
+            Eigen::MatrixXd map_i = safe_chol(Sp_i).triangularView<Eigen::Lower>().solve(L_i2);
+            for (int s = 0; s < n_subj; ++s) v_s.segment(s * q_s, q_s) = map_s * v_s.segment(s * q_s, q_s);
+            for (int i = 0; i < n_item; ++i) v_2.segment(i * q_i, q_i) = map_i * v_2.segment(i * q_i, q_i);
+            if (has_testlet) {
+              Eigen::MatrixXd L_t2 = safe_chol(S_t2);
+              Eigen::MatrixXd map_t = safe_chol(Sp_t).triangularView<Eigen::Lower>().solve(L_t2);
+              for (int t = 0; t < n_testlet; ++t) {
+                v_2.segment(dim_i + t * q_t, q_t) = map_t * v_2.segment(dim_i + t * q_t, q_t);
+              }
+            }
+
+            Eigen::MatrixXd S_s3, S_i3, S_t3;
+            outer_used++;
+            run_em_map(Sp_s, Sp_i, Sp_t, S_s3, S_i3, S_t3, true);
+
+            double d3 = std::max(
+              (S_s3 - Sp_s).lpNorm<Eigen::Infinity>(),
+              (S_i3 - Sp_i).lpNorm<Eigen::Infinity>()
+            );
+            if (has_testlet) d3 = std::max(d3, (S_t3 - Sp_t).lpNorm<Eigen::Infinity>());
+          if (profile_covariance) d3 = std::max(d3, (beta - beta_bak).lpNorm<Eigen::Infinity>());
+
+            if (d3 <= 4.0 * std::max(d1, d2) || d3 < 5e-3) {
+              final_outer_diff = d3;
+              Sigma_s = S_s3; Sigma_i = S_i3; if (has_testlet) Sigma_t = S_t3;
+              if (d3 < 0.5 * tol && inner_converged && covariance_stationary()) {
+                outer_converged = true; break;
+              }
+              continue;
+            } else {
+              v_s = v_s_bak; v_2 = v_2_bak; beta = beta_bak;
+            }
+          }
+        }
+
+        Sigma_s = S_s2; Sigma_i = S_i2; if (has_testlet) Sigma_t = S_t2;
+      }
     }
+
+    Eigen::MatrixXd L_s_fin = safe_chol(Sigma_s);
+    Eigen::MatrixXd L_i_fin = safe_chol(Sigma_i);
+    Eigen::MatrixXd L_t_fin = has_testlet ? safe_chol(Sigma_t) : Eigen::MatrixXd();
+
+    if (inner_converged && outer_converged) polish_laplace(L_s_fin, L_i_fin, L_t_fin);
 
     Eigen::MatrixXd H_bb_saved = H_bb_schur;
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es_cond(0.5 * (H_bb_saved + H_bb_saved.transpose()));
@@ -2624,6 +2708,7 @@ struct GLMMWorkspace {
     res.Sigma_s = Sigma_s;
     res.Sigma_i = Sigma_i;
     res.Sigma_t = Sigma_t;
+    res.covariance_score_norm = covariance_score_norm;
     res.log_lik_laplace = log_lik_laplace;
     res.final_outer_diff = final_outer_diff;
     res.final_inner_step = final_inner_step;
@@ -2733,6 +2818,7 @@ Rcpp::List wrap_fit_result(const FitResult& res, bool has_testlet, bool regulari
     Rcpp::Named("u_item") = return_ranef ? Rcpp::wrap(res.u_item) : R_NilValue,
     Rcpp::Named("u_testlet") = (return_ranef && has_testlet) ? Rcpp::wrap(res.u_testlet) : R_NilValue,
     Rcpp::Named("logLik") = res.log_lik_laplace,
+    Rcpp::Named("covariance_score_norm") = res.covariance_score_norm,
     Rcpp::Named("singular") = (regularized || fix_cov)
       ? Rcpp::LogicalVector::create(NA_LOGICAL)
       : Rcpp::LogicalVector::create(res.singular),
@@ -3316,6 +3402,7 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
   }
 
   auto e_step = [&]() {
+    double log_likelihood = all_obs ? -s_sub.dot(b) : 0.0;
     theta_q = sigma * gh_nodes;
     for (int q = 0; q < Q; ++q) {
       double sp_sum = 0.0;
@@ -3349,6 +3436,7 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
         }
         const double inv_rsum = 1.0 / rsum;
         const double mult = score_counts[idx_s];
+        log_likelihood += mult * (mx + std::log(rsum));
         for (int q = 0; q < Q; ++q) {
           R_sq(idx_s, q) *= inv_rsum;
           col_R[q] += mult * R_sq(idx_s, q);
@@ -3371,18 +3459,17 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
           rsum += w;
         }
         const double inv_rsum = 1.0 / rsum;
+        log_likelihood += mx + std::log(rsum);
         for (int q = 0; q < Q; ++q) {
           R_iq(i, q) *= inv_rsum;
           col_R[q] += R_iq(i, q);
         }
       }
     }
+    return log_likelihood;
   };
 
-  for (int it = 1; it <= max_iter; ++it) {
-    const Eigen::VectorXd b_old = b;
-    const double sig_old = sigma;
-
+  auto em_step = [&]() {
     e_step();
 
     if (!all_obs) {
@@ -3427,11 +3514,97 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
       var_new += col_R[q] * d * d;
     }
     sigma = std::sqrt(std::max(var_new * inv_S, 1e-10));
+  };
 
+  for (int it = 1; it <= max_iter; ++it) {
+    const Eigen::VectorXd b_old = b;
+    const double sig_old = sigma;
+    em_step();
     const double diff_max = std::max((b - b_old).lpNorm<Eigen::Infinity>(), std::abs(sigma - sig_old));
     if (diff_max < tol && it >= 3) {
       converged = true;
       break;
+    }
+  }
+
+  if (!converged) {
+    // At variance zero the item MLEs are available exactly. A nonpositive
+    // profile right derivative and no loss of likelihood are both required;
+    // a small positive variance alone is not evidence for a boundary solution.
+    Eigen::VectorXd b_zero(J), p_zero(J), bern_var(J);
+    for (int j = 0; j < J; ++j) {
+      p_zero[j] = s_sub[j] / n_sub[j];
+      b_zero[j] = -std::log(p_zero[j] / (1.0 - p_zero[j]));
+      bern_var[j] = p_zero[j] * (1.0 - p_zero[j]);
+    }
+    double boundary_score = 0.0;
+    for (int i = 0; i < S_obs; ++i) {
+      const double mean = all_obs ? p_zero.sum() : M_sub.row(i).dot(p_zero);
+      const double variance = all_obs ? bern_var.sum() : M_sub.row(i).dot(bern_var);
+      const double residual = subj_raw_score[obs_s[i]] - mean;
+      boundary_score += 0.5 * (residual * residual - variance);
+    }
+    double boundary_ll = -s_sub.dot(b_zero);
+    for (int j = 0; j < J; ++j) boundary_ll -= n_sub[j] * softplus(-b_zero[j]);
+
+    // Safeguarded squared extrapolation of the EM map (Varadhan & Roland,
+    // 2008). Work in variance coordinates, then check the ordinary EM
+    // residual. Backtracking cannot itself declare convergence.
+    for (int it = 0; it < max_iter && !converged; ++it) {
+      const double current_ll = e_step();
+      if (boundary_score <= 0.0 && boundary_ll >= current_ll - 1e-9) {
+        b = b_zero;
+        sigma = 0.0;
+        converged = true;
+        break;
+      }
+      Eigen::VectorXd x0(J + 1), x1(J + 1), x2(J + 1);
+      x0.head(J) = b;
+      x0[J] = sigma * sigma;
+      const double sig_old = sigma;
+      em_step();
+      x1.head(J) = b;
+      x1[J] = sigma * sigma;
+      // Near zero an EM SD step can be tiny far from the likelihood optimum.
+      // The posterior second moment gives the variance score per participant.
+      e_step();
+      const double variance = sigma * sigma;
+      const double variance_score = (col_R.dot(theta_q.array().square().matrix()) /
+        static_cast<double>(S_obs) - variance) / (2.0 * variance * variance);
+      if ((b - x0.head(J)).lpNorm<Eigen::Infinity>() < tol &&
+          std::abs(sigma - sig_old) < tol && std::abs(variance_score) < tol) {
+        converged = true;
+        break;
+      }
+      em_step();
+      x2.head(J) = b;
+      x2[J] = sigma * sigma;
+      const double baseline_ll = e_step();
+      const Eigen::VectorXd r = x1 - x0;
+      const Eigen::VectorXd v = x2 - 2.0 * x1 + x0;
+      double alpha = v.squaredNorm() > 0.0 ?
+        -std::sqrt(r.squaredNorm() / v.squaredNorm()) : -1.0;
+      alpha = std::isfinite(alpha) ? std::min(-1.0, alpha) : -1.0;
+      bool accepted = false;
+      for (int bt = 0; bt < 12; ++bt) {
+        const Eigen::VectorXd candidate = x0 - 2.0 * alpha * r + alpha * alpha * v;
+        if (candidate.allFinite() && candidate[J] > 0.0) {
+          b = candidate.head(J);
+          sigma = std::sqrt(candidate[J]);
+          em_step();
+          const double candidate_ll = e_step();
+          if (b.allFinite() && std::isfinite(sigma) && std::isfinite(candidate_ll) &&
+              candidate_ll >= baseline_ll - 1e-9) {
+            accepted = true;
+            break;
+          }
+        }
+        alpha = 0.5 * (alpha - 1.0);
+      }
+      if (!accepted) {
+        b = x2.head(J);
+        sigma = std::sqrt(x2[J]);
+      }
     }
   }
 

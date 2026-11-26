@@ -344,11 +344,13 @@ run_cpp_glmm_core <- function(
   chance, corr_mode, regularized, spec, fast_stage, eff_idx,
   warm = NULL, ws_ptr = NULL
 ) {
-  # The observed-curvature covariance update can approach the stopping
-  # tolerance slowly for m-AFC. Allow more iterations at final verification.
-  max_em <- if (fast_stage) 85L else if (chance > 0) 400L else 160L
-  max_inner <- if (fast_stage) 15L else if (chance > 0) 44L else 22L
-  tol_em <- if (fast_stage) 6.0e-4 else 1.5e-4
+  # The corrected diagonal-covariance path uses the same numerical accuracy
+  # when screening and confirming: an 85-iteration cap can discard otherwise
+  # valid designs. Screening still uses fewer simulations and skips bootstrap.
+  coarse_fit <- fast_stage && !(chance == 0 && corr_mode == 0L)
+  max_em <- if (coarse_fit) 85L else if (chance > 0) 400L else 160L
+  max_inner <- if (coarse_fit) 15L else if (chance > 0) 44L else 22L
+  tol_em <- if (coarse_fit) 6.0e-4 else 1.5e-4
 
   err_msg <- ""
   fit <- tryCatch(
@@ -416,7 +418,12 @@ run_cpp_glmm_core <- function(
   reason_txt <- if (conv) {
     ""
   } else if (identical(st, "max_iter_finite")) {
-    sprintf("max_em_iter (%d) reached before tol (diff=%.2e)", max_em, fit$outer_diff)
+    score <- fit$covariance_score_norm
+    detail <- if (length(score) == 1L && is.finite(score) && score > 0) {
+      sprintf(", scaled covariance score=%.2e", score)
+    } else ""
+    sprintf("max_em_iter (%d) reached before convergence (diff=%.2e%s)",
+      max_em, fit$outer_diff, detail)
   } else {
     st
   }
@@ -1418,14 +1425,16 @@ null_target_spec <- function(spec) {
 #' structure fixed. On the logit scale it sets the focal coefficient to zero.
 #' @inheritParams evaluate_design_point
 #' @param seed Integer seed for this independent fixed-size validation.
-#' @return A data frame with two rows (`"null"` and `"planned"`) for contrasts
+#' @return A data frame of class `glmmplanr_validation` with two rows
+#'   (`"null"` and `"planned"`) for contrasts
 #'   or logit targets, or one `"planned"` row when `spec` targets an absolute
 #'   probability (e.g., a single-condition design on `scale = "pp"` or `"prob"`
 #'   where no zero-difference null exists), including the true target, detection and
 #'   its Wilson interval under the chosen failure policy, valid-fit coverage
 #'   and its Wilson interval, and the valid-fit count. Null detection is the
 #'   Type I error. Response-pattern counts follow [evaluate_design_point()].
-#'   Prespecify validation tolerances and replication counts.
+#'   Use [plot.glmmplanr_validation()] to display these results. Prespecify
+#'   validation tolerances and replication counts.
 #' @examples
 #' des <- design_crossed(list(condition = c("a", "b")))
 #' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
@@ -1444,7 +1453,8 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
   if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) ||
       nsim < 1 || nsim != floor(nsim)) cli::cli_abort("{.arg nsim} must be a positive integer.")
   bases_pair <- allocate_stage_point_streams(seed, stage_slot = 1L, grid_ids = 1:2, stride = 2L)
-  if (can_define_null_target(spec)) {
+  has_null <- can_define_null_target(spec)
+  if (has_null) {
     specs <- list(null = null_target_spec(spec), planned = spec)
     bases <- bases_pair
   } else {
@@ -1471,7 +1481,13 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
       coverage = ev$coverage, coverage_lo = unname(cover["lo"]), coverage_hi = unname(cover["hi"]),
       width_attainment = ev$aipe_prob, joint_attainment = ev$joint_prob, ev[pattern_columns])
   })
-  do.call(rbind, rows)
+  design <- spec$dgp$design
+  structure(do.call(rbind, rows), class = c("glmmplanr_validation", "data.frame"),
+    validation_settings = list(n_subj = n_subj, n_item = n_item,
+      items_per_subject = if (is.null(design$items_per_subject)) n_item else design$items_per_subject,
+      has_null = has_null, alpha = spec$alpha, mc_conf_level = spec$mc_conf_level,
+      failure_policy = spec$failure_policy, criterion = spec$criterion, power_min = spec$power_min,
+      ci_width = spec$ci_width, ci_assurance = spec$ci_assurance))
 }
 
 #' Stress-Test Analysis Models Under Maximal DGP Mismatch

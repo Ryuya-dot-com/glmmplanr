@@ -68,7 +68,8 @@ bank mean can be substantial for extreme items.
 
 \item{engine}{Estimation engine: \code{"auto"} (default; selects \code{"mml"} for
 \code{method = "fixed_item"} and \code{"cpp_laplace"} for \code{method = "random_item"}),
-\code{"mml"} (built-in 21-point Gauss-Hermite MML-EM solver), \code{"tam"}
+\code{"mml"} (built-in 21-point Gauss-Hermite MML-EM solver with safeguarded
+acceleration and variance-boundary checks after slow EM iterations), \code{"tam"}
 (\code{TAM::tam.mml(..., constraint = "cases")}), \code{"cpp_laplace"}, or \code{"lme4"}.}
 
 \item{assurance}{Required probability that a calibration study meets its
