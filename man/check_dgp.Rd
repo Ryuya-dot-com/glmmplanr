@@ -4,7 +4,13 @@
 \alias{check_dgp}
 \title{Inspect and Plot Prior-Predictive Diagnostics of a Calibrated DGP}
 \usage{
-check_dgp(dgp, plot = TRUE, n_draws = 3000L, seed = 42L)
+check_dgp(
+  dgp,
+  plot = TRUE,
+  n_draws = 3000L,
+  seed = 42L,
+  show_annotations = FALSE
+)
 }
 \arguments{
 \item{dgp}{A \code{"glmmplanr_dgp"} object (or \code{"glmmplanr_spec"} / \code{"glmmplanr_result"}).}
@@ -17,6 +23,10 @@ cell-level probability distributions and guessing floor.}
 
 \item{seed}{Integer seed for the plot draws. Use \code{NULL} to draw a master seed
 from the caller's random stream. Ignored when \code{plot = FALSE}.}
+
+\item{show_annotations}{Logical; show automatic titles, subtitles and
+captions (default \code{FALSE}). Axis labels, legends, facets, and data labels
+remain visible.}
 }
 \value{
 A visible S3 list of class \code{glmmplanr_dgp_check} with the data frames
@@ -29,6 +39,8 @@ Its print method displays the tables and, interactively, the plot.
 In \code{cell_diagnostics}, \code{quad_prob} averages over the random effects and
 \code{conditional_prob} gives the response probability with all random effects
 set to zero. Both include the specified guessing floor.
+The plot uses \code{\link[ggplot2:theme_bw]{ggplot2::theme_bw()}}. Add \code{\link[ggplot2:labs]{ggplot2::labs()}} to supply
+your own title or caption.
 }
 \description{
 Displays how marginal cell probabilities map onto conditional fixed effects,

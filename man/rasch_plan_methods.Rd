@@ -19,7 +19,8 @@
   type = c("design", "items"),
   target = "joint",
   metric = c("rmse", "bias"),
-  ...
+  ...,
+  show_annotations = FALSE
 )
 }
 \arguments{
@@ -37,12 +38,18 @@ item-level errors and finite-estimate counts in a fixed bank.}
 the same replication. Applies to the default plot.}
 
 \item{metric}{Error measure for the item plot, in logits.}
+
+\item{show_annotations}{Logical; show automatic titles, subtitles and
+captions (default \code{FALSE}). Axis labels, legends, facets, and data labels
+remain visible.}
 }
 \value{
 \code{summary()} and \code{as.data.frame()} return the full unrounded table,
 one row per candidate and target. \code{print()} returns the plan invisibly.
 \code{plot()} returns an editable ggplot. Item errors use finite estimates
 only. The count panel retains every item, including those with no estimate.
+Figures use \code{\link[ggplot2:theme_bw]{ggplot2::theme_bw()}}. Add \code{\link[ggplot2:labs]{ggplot2::labs()}} to supply your
+own title or caption.
 }
 \description{
 Inspect and plot Rasch planning results

@@ -445,6 +445,15 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
     gt::sub_missing(missing_text = "-")
 }
 
+style_plot_annotations <- function(p, show_annotations) {
+  if (!is.logical(show_annotations) || length(show_annotations) != 1L || is.na(show_annotations)) {
+    cli::cli_abort("{.arg show_annotations} must be TRUE or FALSE.")
+  }
+  if (show_annotations) return(p)
+  if (inherits(p, "plotly")) return(plotly::layout(p, title = list(text = "")))
+  p + ggplot2::labs(title = NULL, subtitle = NULL, caption = NULL)
+}
+
 #' Plot Sample Size Trade-offs and Scenario Comparisons
 #'
 #' @param x A `"glmmplanr_result"` object.
@@ -471,6 +480,12 @@ as_gt.glmmplanr_stress_test <- function(x, ...) {
 #'   default, show the designs selected under the standard scenario and
 #'   across all scenarios, with one row of panels if the selections coincide.
 #'   Increase the saved figure height when showing many designs.
+#' @param show_annotations Logical; show automatic titles, subtitles and
+#'   captions (default `FALSE`). Axis labels, legends, facets, and data labels
+#'   remain visible.
+#' @details Static figures use [ggplot2::theme_bw()]; add [ggplot2::labs()]
+#'   to supply your own title or caption. The 3D plot uses a white background
+#'   and can be edited with [plotly::layout()].
 #' @return A `ggplot` object or `plotly` htmlwidget.
 #' @examples
 #' # Create the five-replication demonstration plan from the optimizer help.
@@ -483,19 +498,20 @@ plot.glmmplanr_result <- function(
   metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
   ...,
-  candidates = NULL
+  candidates = NULL,
+  show_annotations = FALSE
 ) {
   type <- match.arg(type)
-  if (type == "scenarios") return(plot_scenario_comparison(x, candidates))
-  metric <- match.arg(metric)
-
-  if (type == "contour") {
-    return(plot_contour_2d(x, metric = metric, show_pareto_frontier = show_pareto_frontier))
+  if (type == "scenarios") {
+    p <- plot_scenario_comparison(x, candidates)
+  } else {
+    metric <- match.arg(metric)
+    p <- switch(type,
+      contour = plot_contour_2d(x, metric = metric, show_pareto_frontier = show_pareto_frontier),
+      surface3d = plot_surface_3d(x, metric = metric),
+      pareto = plot_pareto_curve(x))
   }
-  if (type == "surface3d") {
-    return(plot_surface_3d(x, metric = metric))
-  }
-  plot_pareto_curve(x)
+  style_plot_annotations(p, show_annotations)
 }
 
 plot_scenario_comparison <- function(x, candidates) {
@@ -561,7 +577,7 @@ plot_scenario_comparison <- function(x, candidates) {
       caption = sprintf(paste("Bars show stored Monte Carlo intervals for rates among %s.",
                               "Mean widths use valid fits. Shapes show the plan's criterion decision.", sep = "\n"),
                         rate_sample)) +
-    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme_bw(base_size = 11) +
     ggplot2::theme(strip.placement = "outside", strip.text.y.left = ggplot2::element_text(angle = 0),
       legend.position = "bottom", plot.title.position = "plot",
       plot.caption.position = "plot", plot.caption = ggplot2::element_text(hjust = 0))
@@ -579,10 +595,14 @@ plot_scenario_comparison <- function(x, candidates) {
 #'   a unit with that pattern. Use [response_patterns()] for counts by unit
 #'   in a single dataset.
 #' @param ... Additional arguments (unused).
+#' @inheritParams plot.glmmplanr_result
 #' @return An editable `ggplot` object. Dashed lines in the rate plot show
 #'   nominal or planning targets. These lines are reference values.
+#'   The default theme is [ggplot2::theme_bw()]. Add [ggplot2::labs()] to
+#'   supply your own title or caption.
 #' @export
-plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...) {
+plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...,
+                                      show_annotations = FALSE) {
   type <- match.arg(type)
   settings <- attr(x, "validation_settings")
   cols <- c("condition", "nsim", "n_valid", "detection", "detection_lo", "detection_hi",
@@ -592,7 +612,7 @@ plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...) {
   }
   subtitle <- sprintf("%s participants / %s items in bank / %s items per participant",
     settings$n_subj, settings$n_item, settings$items_per_subject)
-  if (type == "patterns") return(plot_validation_patterns(x, subtitle))
+  if (type == "patterns") return(style_plot_annotations(plot_validation_patterns(x, subtitle), show_annotations))
 
   condition <- ifelse(x$condition == "null", "Null", "Planned")
   studies <- sprintf("%s\n%s/%s valid fits", condition, x$n_valid, x$nsim)
@@ -625,7 +645,7 @@ plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...) {
   if (settings$has_null || !is.null(settings$ci_width)) {
     caption <- paste(caption, sprintf("%s uses %s.", rate_label, rate_denom), sep = "\n")
   }
-  ggplot2::ggplot(points, ggplot2::aes(x = .data$rate, y = .data$studies)) +
+  p <- ggplot2::ggplot(points, ggplot2::aes(x = .data$rate, y = .data$studies)) +
     ggplot2::geom_vline(data = targets, ggplot2::aes(xintercept = .data$target),
       linetype = "dashed", color = "grey55") +
     ggplot2::geom_segment(data = ranges,
@@ -636,9 +656,10 @@ plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...) {
     ggplot2::scale_x_continuous(limits = c(0, 1), labels = function(v) paste0(100 * v, "%")) +
     ggplot2::labs(title = "Fixed-design validation", subtitle = subtitle, x = "Share of studies", y = NULL,
       caption = paste(caption, "Dashed lines show nominal or planning targets.")) +
-    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme_bw(base_size = 11) +
     ggplot2::theme(plot.title.position = "plot", plot.caption.position = "plot",
       plot.caption = ggplot2::element_text(hjust = 0))
+  style_plot_annotations(p, show_annotations)
 }
 
 plot_validation_patterns <- function(x, subtitle) {
@@ -665,7 +686,7 @@ plot_validation_patterns <- function(x, subtitle) {
     ggplot2::labs(title = "Response patterns in validation studies", subtitle = subtitle,
       x = "Share of diagnosed studies with at least one such unit", y = NULL,
       caption = "Max responses is the largest observation count in an extreme-scoring unit.") +
-    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme_bw(base_size = 11) +
     ggplot2::theme(plot.title.position = "plot", plot.caption.position = "plot",
       plot.caption = ggplot2::element_text(hjust = 0))
 }
@@ -893,7 +914,7 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
         "Cyan nodes = non-dominated Pareto designs | Red diamond = selected candidate"
       )
     ) +
-    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme_bw(base_size = 11) +
     ggplot2::theme(
       panel.grid = ggplot2::element_blank(),
       plot.title = ggplot2::element_text(face = "bold"),
@@ -1012,13 +1033,17 @@ plot_surface_3d <- function(x, metric = "power") {
       )
   }
 
+  axis_style <- list(showbackground = TRUE, backgroundcolor = "white",
+    gridcolor = "#EBEBEB", zerolinecolor = "#B3B3B3", showline = TRUE, linecolor = "black")
   fig |>
     plotly::layout(
       title = sprintf("Interactive 3D GLMM Response Surface (%s)", x$spec$effect_input),
+      paper_bgcolor = "white", plot_bgcolor = "white", font = list(color = "black"),
       scene = list(
-        xaxis = list(title = "N_subj (Subjects)"),
-        yaxis = list(title = "N_item (Items)"),
-        zaxis = list(title = z_title)
+        bgcolor = "white",
+        xaxis = c(list(title = "N_subj (Subjects)"), axis_style),
+        yaxis = c(list(title = "N_item (Items)"), axis_style),
+        zaxis = c(list(title = z_title), axis_style)
       )
     )
 }
@@ -1061,7 +1086,7 @@ plot_pareto_curve <- function(x) {
       x = "Participants",
       y = "Items"
     ) +
-    ggplot2::theme_minimal(base_size = 11)
+    ggplot2::theme_bw(base_size = 11)
 }
 
 #' Write a Sample Size Justification

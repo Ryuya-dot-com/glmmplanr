@@ -4,7 +4,7 @@
 \alias{plot.glmmplanr_validation}
 \title{Plot Fixed-design Validation Results}
 \usage{
-\method{plot}{glmmplanr_validation}(x, type = c("rates", "patterns"), ...)
+\method{plot}{glmmplanr_validation}(x, type = c("rates", "patterns"), ..., show_annotations = FALSE)
 }
 \arguments{
 \item{x}{A result from \code{\link[=validate_design_point]{validate_design_point()}}.}
@@ -19,10 +19,16 @@ a unit with that pattern. Use \code{\link[=response_patterns]{response_patterns(
 in a single dataset.}
 
 \item{...}{Additional arguments (unused).}
+
+\item{show_annotations}{Logical; show automatic titles, subtitles and
+captions (default \code{FALSE}). Axis labels, legends, facets, and data labels
+remain visible.}
 }
 \value{
 An editable \code{ggplot} object. Dashed lines in the rate plot show
 nominal or planning targets. These lines are reference values.
+The default theme is \code{\link[ggplot2:theme_bw]{ggplot2::theme_bw()}}. Add \code{\link[ggplot2:labs]{ggplot2::labs()}} to
+supply your own title or caption.
 }
 \description{
 Plot Fixed-design Validation Results

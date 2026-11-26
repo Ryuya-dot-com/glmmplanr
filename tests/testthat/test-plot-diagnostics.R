@@ -47,9 +47,10 @@ test_that("validation plots carry stored intervals, denominators and extreme sco
   expect_s3_class(check, c("glmmplanr_validation", "data.frame"))
   expect_identical(check$condition, c("null", "planned"))
   rates <- plot(check)
-  expect_match(rates$labels$subtitle, "8 items in bank / 4 items per participant")
-  expect_match(rates$labels$caption, "90% Wilson")
-  expect_match(rates$labels$caption, "Detection uses all scheduled studies")
+  annotated <- plot(check, show_annotations = TRUE)
+  expect_match(annotated$labels$subtitle, "8 items in bank / 4 items per participant")
+  expect_match(annotated$labels$caption, "90% Wilson")
+  expect_match(annotated$labels$caption, "Detection uses all scheduled studies")
   expect_equal(rates$data$rate, c(check$detection, check$coverage))
   expect_equal(rates$data$lo, c(check$detection_lo, check$coverage_lo))
   expect_equal(rates$data$hi, c(check$detection_hi, check$coverage_hi))
@@ -68,7 +69,7 @@ test_that("validation plots carry stored intervals, denominators and extreme sco
   spec$failure_policy <- "conditional"
   spec$dgp$design$participant_dropout <- 1 - 1e-12
   empty <- validate_design_point(spec, 16L, 8L, nsim = 2L, seed = 43L)
-  missing <- plot(empty)
+  missing <- plot(empty, show_annotations = TRUE)
   expect_true(all(grepl("0/2 valid fits", missing$data$studies, fixed = TRUE)))
   expect_true(all(is.na(missing$data$rate)))
   expect_match(missing$labels$caption, "Detection uses valid fits")

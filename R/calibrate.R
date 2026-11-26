@@ -530,6 +530,7 @@ compute_prior_predictive_check <- function(dgp, n_draws = 4000L, seed = 1L) {
 #'   (default `3000L`).
 #' @param seed Integer seed for the plot draws. Use `NULL` to draw a master seed
 #'   from the caller's random stream. Ignored when `plot = FALSE`.
+#' @inheritParams plot.glmmplanr_result
 #' @return A visible S3 list of class `glmmplanr_dgp_check` with the data frames
 #'   `coefficients`, `cell_diagnostics`, `marginal_effects`, and `plot` (a ggplot
 #'   or `NULL`). `marginal_effects` gives each non-intercept model-matrix
@@ -540,12 +541,15 @@ compute_prior_predictive_check <- function(dgp, n_draws = 4000L, seed = 1L) {
 #'   In `cell_diagnostics`, `quad_prob` averages over the random effects and
 #'   `conditional_prob` gives the response probability with all random effects
 #'   set to zero. Both include the specified guessing floor.
+#'   The plot uses [ggplot2::theme_bw()]. Add [ggplot2::labs()] to supply
+#'   your own title or caption.
 #' @examples
 #' des <- design_crossed(list(condition = c("a", "b")))
 #' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
 #' check_dgp(dgp, plot = FALSE)$cell_diagnostics[c("cell", "quad_prob", "conditional_prob")]
 #' @export
-check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L, seed = 42L) {
+check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L, seed = 42L,
+                      show_annotations = FALSE) {
   if (isTRUE(plot) && uses_box_muller()) {
     if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
     return(isolated_seeded_call("check_dgp", environment(), match.call()))
@@ -626,7 +630,7 @@ check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L, seed = 42L) {
         x = "Response Probability P(Y = 1 | subj, item)",
         y = "Prior-Predictive Density"
       ) +
-      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme_bw(base_size = 11) +
       ggplot2::theme(legend.position = "none")
 
     if (dgp$chance > 0) {
@@ -637,6 +641,7 @@ check_dgp <- function(dgp, plot = TRUE, n_draws = 3000L, seed = 42L) {
         linewidth = 0.7
       )
     }
+    p_out <- style_plot_annotations(p_out, show_annotations)
   }
 
   out <- list(

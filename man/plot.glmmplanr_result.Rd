@@ -10,7 +10,8 @@
   metric = c("power", "ci_width", "prob_ci_width_pp"),
   show_pareto_frontier = TRUE,
   ...,
-  candidates = NULL
+  candidates = NULL,
+  show_annotations = FALSE
 )
 }
 \arguments{
@@ -45,12 +46,21 @@ and \code{n_item} columns giving the verified design pairs to display. By
 default, show the designs selected under the standard scenario and
 across all scenarios, with one row of panels if the selections coincide.
 Increase the saved figure height when showing many designs.}
+
+\item{show_annotations}{Logical; show automatic titles, subtitles and
+captions (default \code{FALSE}). Axis labels, legends, facets, and data labels
+remain visible.}
 }
 \value{
 A \code{ggplot} object or \code{plotly} htmlwidget.
 }
 \description{
 Plot Sample Size Trade-offs and Scenario Comparisons
+}
+\details{
+Static figures use \code{\link[ggplot2:theme_bw]{ggplot2::theme_bw()}}; add \code{\link[ggplot2:labs]{ggplot2::labs()}}
+to supply your own title or caption. The 3D plot uses a white background
+and can be edited with \code{\link[plotly:layout]{plotly::layout()}}.
 }
 \examples{
 # Create the five-replication demonstration plan from the optimizer help.

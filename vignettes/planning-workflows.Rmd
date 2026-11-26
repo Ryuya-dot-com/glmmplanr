@@ -305,6 +305,20 @@ Use `plot(check, type = "patterns")` to see how often studies contained an
 all-correct, all-incorrect, or unobserved learner or word. The labels give the
 largest observed response count for each extreme pattern.
 
+Plots use `ggplot2::theme_bw()` with automatic titles, subtitles and captions
+hidden. Keep these descriptions in your manuscript's figure caption, or use
+`plot(check, show_annotations = TRUE)` to restore them. To add custom text:
+
+```{r plot-labels, eval=FALSE}
+plot(check) + ggplot2::labs(title = "Replication plan", caption = "My caption")
+```
+
+The points, Monte Carlo intervals, reference lines, panel labels and
+valid-fit counts remain visible. A Monte Carlo interval describes uncertainty
+in a simulated performance rate; it is different from the analysis interval
+whose coverage or width is being evaluated. Report the DGP, number of
+replications, interval level and failure denominator alongside exported figures.
+
 ### If the numbers of learners and words are both flexible
 
 Evaluate a `3 x 3` grid of learner counts and word-bank sizes to see the

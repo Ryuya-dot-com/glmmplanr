@@ -24,6 +24,50 @@ below retain their original implementation and should not be read as a fresh
 validation of every old design under the correction. Fixed-bank MML is
 unchanged by this update and retains its existing calibration evidence.
 
+<a id="visualization"></a>
+
+## Reading and Customizing Simulation Figures
+
+Static plots use `ggplot2::theme_bw()` with automatic titles, subtitles and
+captions hidden by default. This styling choice follows the package user's
+preference; the papers below do not prescribe this ggplot theme. Axis names,
+legends, scenario panels, interval bars and diagnostic counts remain visible.
+`show_annotations = TRUE` restores the generated explanations in GLMM/Rasch
+`plot()` methods and `check_dgp()`. Add `ggplot2::labs()` for custom text.
+The optional 3D display uses a white background and no default title;
+customize it with `plotly::layout()`.
+
+[Morris, White and Crowther (2019)](https://doi.org/10.1002/sim.8086)
+organize simulation reporting by estimand, generating mechanism, method and
+performance measure, and show performance estimates with Monte Carlo
+uncertainty. Accordingly, our validation and scenario figures retain their
+stored Monte Carlo intervals and separate rates from interval widths.
+These bars quantify simulation uncertainty in a performance estimate;
+they are not the analysis intervals whose coverage is being evaluated.
+
+[Rücker and Schwarzer (2014)](https://doi.org/10.1186/1471-2288-14-129)
+use nested-loop and Trellis displays to organize many simulation conditions.
+Their work informs our emphasis on explicit scenario labels and panels.
+The current API retains small-multiple comparisons of selected designs;
+it does not implement their nested-loop method or imply that a few selected
+designs represent an entire parameter grid.
+
+[Gasparini's rsimsum (2018)](https://doi.org/10.21105/joss.00739) and its
+[visualization documentation](https://ellessenne.github.io/rsimsum/articles/C-plotting.html)
+provide related examples of performance plots grouped by method and
+generating conditions. These are presentation references, not new estimator
+benchmarks or dependencies. There is no new simulation performance claim.
+
+When exporting an unannotated figure, describe the DGP, sample/exposure
+schedule, replication count, interval level and failure denominator in the
+surrounding text or manuscript caption. Coverage and mean widths use valid
+fits; detection denominators follow the selected failure policy. Mean-width
+panels do not gain an uncertainty interval when none was stored. Plotting
+does not change simulated outcomes, denominators or pass/indeterminate/fail
+decisions. The selected marker on a contour or Pareto plot can represent an
+indeterminate or failed candidate: consult `summary()`/`report_plan()` or
+enable annotations for its status before describing it as recommended.
+
 <a id="item-pool-planning"></a>
 
 ## Practical Pilot: Short Forms and Stimulus Pools

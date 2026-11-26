@@ -23,11 +23,14 @@ as.data.frame.glmmplanr_result <- function(x, row.names = NULL, optional = FALSE
 #' @param target Name of a recovery target, or `"joint"` for all tolerances in
 #'   the same replication. Applies to the default plot.
 #' @param metric Error measure for the item plot, in logits.
+#' @inheritParams plot.glmmplanr_result
 #' @param ... Additional arguments passed to data frame coercion, otherwise unused.
 #' @return `summary()` and `as.data.frame()` return the full unrounded table,
 #'   one row per candidate and target. `print()` returns the plan invisibly.
 #'   `plot()` returns an editable ggplot. Item errors use finite estimates
 #'   only. The count panel retains every item, including those with no estimate.
+#'   Figures use [ggplot2::theme_bw()]. Add [ggplot2::labs()] to supply your
+#'   own title or caption.
 #' @examples
 #' bank <- plan_rasch_fixed_bank(c(-1, 0, 1), 20L, c(difficulty = .5), nsim = 4L)
 #' subset(as.data.frame(bank), target == "joint")
@@ -106,7 +109,7 @@ rasch_report <- function(x) {
 #' @rdname rasch_plan_methods
 #' @export
 plot.glmmplanr_rasch <- function(x, type = c("design", "items"), target = "joint",
-                                 metric = c("rmse", "bias"), ...) {
+                                 metric = c("rmse", "bias"), ..., show_annotations = FALSE) {
   type <- match.arg(type)
   if (type == "items") {
     if (is.null(x$item_summary)) cli::cli_abort("Item-level errors require a fixed bank.")
@@ -120,13 +123,14 @@ plot.glmmplanr_rasch <- function(x, type = c("design", "items"), target = "joint
     items$value <- items$n_finite
     items$measure <- "Finite estimates (studies)"
     df <- rbind(errors, items)
-    return(ggplot2::ggplot(df, ggplot2::aes(.data$true_difficulty, .data$value)) +
+    p <- ggplot2::ggplot(df, ggplot2::aes(.data$true_difficulty, .data$value)) +
       ggplot2::geom_point(na.rm = TRUE) +
       ggplot2::facet_grid(measure ~ sample, scales = "free_y") +
       ggplot2::labs(x = "True item difficulty (logits)", y = NULL,
         title = "Item recovery across the fixed bank",
         subtitle = sprintf("Errors use finite estimates. Counts include every item (%d studies per design).",
-                           x$summary$nsim[1L])) + ggplot2::theme_minimal())
+                           x$summary$nsim[1L])) + ggplot2::theme_bw()
+    return(style_plot_annotations(p, show_annotations))
   }
   target <- match.arg(target, unique(x$summary$target))
   df <- x$summary[x$summary$target == target, , drop = FALSE]
@@ -146,10 +150,11 @@ plot.glmmplanr_rasch <- function(x, type = c("design", "items"), target = "joint
         ggplot2::labs(subtitle = "Rings mark non-dominated passing designs.")
     }
   }
-  p + ggplot2::geom_point(ggplot2::aes(shape = .data$decision), size = 3) +
+  p <- p + ggplot2::geom_point(ggplot2::aes(shape = .data$decision), size = 3) +
     ggplot2::scale_shape_manual(values = c(pass = 16, indeterminate = 17, fail = 4)) +
     ggplot2::labs(title = paste("Rasch recovery for", target), x = "Examinees", shape = "Decision") +
-    ggplot2::theme_minimal()
+    ggplot2::theme_bw()
+  style_plot_annotations(p, show_annotations)
 }
 
 #' @rdname as_gt

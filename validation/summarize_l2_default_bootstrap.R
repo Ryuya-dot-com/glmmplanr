@@ -110,11 +110,8 @@ p <- ggplot(pd, aes(rate, design, color = method)) +
   facet_wrap(~metric, scales = "free_x") +
   scale_x_continuous(labels = function(x) paste0(round(100 * x), "%")) +
   scale_color_manual(values = c("Joint delta" = "#6D7784", "Default bootstrap (99)" = "#B74627")) +
-  labs(x = NULL, y = NULL, color = NULL, title = "Default interval method after the native covariance correction",
-    subtitle = sprintf("Same responses; %d datasets per condition; 30 words per person", m$nsim),
-    caption = "Pointwise 95% Wilson intervals. Coverage uses valid fits; rejection and joint attainment use every attempted dataset.\nDashed lines are nominal or planning targets. Selected profiles, not a minimum-sample-size search.") +
-  theme_minimal(base_size = 11) + theme(legend.position = "bottom", panel.grid.minor = element_blank(),
-    plot.caption = element_text(hjust = 0))
+  labs(x = NULL, y = NULL, color = NULL) +
+  theme_bw(base_size = 11) + theme(legend.position = "bottom", panel.grid.minor = element_blank())
 ggsave(file.path(out, "comparison.png"), p, width = 12, height = 5.5, dpi = 150)
 print(summary[c("case", "condition", "method", "n_valid", "coverage", "detection", "joint",
   "coverage_floor", "null_ceiling", "joint_decision")], row.names = FALSE)

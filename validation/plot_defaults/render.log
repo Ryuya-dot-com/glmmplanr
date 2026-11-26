@@ -1,0 +1,12 @@
+contour : white panel/border, annotations optional, plotted values unchanged
+pareto : white panel/border, annotations optional, plotted values unchanged
+scenarios : white panel/border, annotations optional, plotted values unchanged
+rates : white panel/border, annotations optional, plotted values unchanged
+patterns : white panel/border, annotations optional, plotted values unchanged
+rasch_fixed : white panel/border, annotations optional, plotted values unchanged
+rasch_rmse : white panel/border, annotations optional, plotted values unchanged
+rasch_bias : white panel/border, annotations optional, plotted values unchanged
+rasch_random : white panel/border, annotations optional, plotted values unchanged
+dgp : white panel/border, annotations optional, plotted values unchanged
+surface3d: white background, optional title, trace values unchanged
+Saved plan and validation objects were not modified.

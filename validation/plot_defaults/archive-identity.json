@@ -1,0 +1,14 @@
+{
+  "archive": "/private/tmp/glmmplanr-plot-check/glmmplanr_0.1.0.tar.gz",
+  "bytes": 1240738,
+  "sha256": "5a80fc0b2858a5479ef166f90428e218dacb5cade833218324e58989cce63c5f",
+  "source_matches": 37,
+  "readme_links": 13,
+  "checked_archive_sha256": "649b428ab2129e642e3e3310de18191bfe042e63e8f90659a54e7a90fff1f3bc",
+  "changed_since_check": [
+    "glmmplanr/DESCRIPTION",
+    "glmmplanr/inst/doc/planning-workflows.html",
+    "glmmplanr/inst/doc/validation-and-scope.html",
+    "glmmplanr/inst/validation-guide.md"
+  ]
+}

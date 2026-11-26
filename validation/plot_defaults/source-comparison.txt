@@ -1,0 +1,7 @@
+R/calibrate.R : changed functions: check_dgp 
+Unchanged function definitions: 15 
+R/plan_methods.R : changed functions: plot.glmmplanr_rasch 
+Unchanged function definitions: 11 
+R/reporting.R : changed functions: style_plot_annotations, plot.glmmplanr_result, plot_scenario_comparison, plot.glmmplanr_validation, plot_validation_patterns, plot_contour_2d, plot_surface_3d, plot_pareto_curve 
+Unchanged function definitions: 10 
+Native kernels, estimators, optimization and uncertainty calculations are unchanged.

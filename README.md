@@ -291,6 +291,17 @@ Monte Carlo intervals for power, Type I error, and coverage with the valid-fit
 counts. The pattern plot reports the frequency of extreme scores and
 unobserved units by participant and item.
 
+Static figures use `ggplot2::theme_bw()` and hide automatic titles,
+subtitles and captions by default. Axis labels, legends, scenario labels,
+Monte Carlo intervals and valid-fit counts remain visible. Use
+`plot(check, show_annotations = TRUE)` to include the generated explanations,
+or `plot(check) + ggplot2::labs(title = "My study", caption = "My caption")`
+to supply your own. The same option applies to GLMM and Rasch plans and
+`check_dgp()`; interactive 3D plots use a white background.
+
+The [visualization rationale](inst/validation-guide.md#visualization)
+connects the plots to research on presenting simulation results.
+
 ---
 
 ## Key Capabilities

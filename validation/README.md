@@ -1179,6 +1179,39 @@ external outcomes are not inferred from successful upload.
 [final difference check](release_candidate/package-check.log) ·
 [preceding example/vignette check](release_candidate/pre-link-fix-check.log).
 
+## Plot defaults and presentation checks
+
+GLMM/Rasch plotting and `check_dgp()` now use `theme_bw()` and omit automatic
+titles, subtitles and captions by default. `show_annotations = TRUE` restores
+them; axis/legend/facet labels and data remain present. The 3D plot uses a
+white background. The [presentation rationale and references](../inst/validation-guide.md#visualization)
+draw on Morris et al. (2019), Rücker and Schwarzer (2014), and rsimsum's
+documentation; no estimator or simulation criterion changes.
+
+[Display checks](plot_defaults.R) reuse the saved release-workflow objects.
+A four-replication scenario fixture is for display checks only. Ten static
+plot variants render with and without generated annotations, with identical
+built layer data; custom titles can be added with `labs()`. The Plotly layout
+and trace data are also checked. Saved input objects remain unchanged.
+The current default-bootstrap figure is regenerated from the same saved
+trials and summaries; its numerical results are unchanged. Earlier archived
+figures retain their original presentation.
+[Targeted test log](plot_defaults/tests.log) · [render checks](plot_defaults/render.log) ·
+[validation example](plot_defaults/rates.png) · [scenario example](plot_defaults/scenarios.png) ·
+[Rasch example](plot_defaults/rasch_rmse.png).
+
+The targeted plot/plan-method tests pass 79 assertions without failures,
+warnings or skips. The local `--as-cran --no-manual --no-tests` check passes
+installation, examples, help and vignette reconstruction with 0 errors,
+0 warnings and the known incoming NOTE (new submission / optional `cmdstanr`).
+After that check, one section anchor was moved to its correct heading and
+the archive rebuilt; code, tests and help are identical to the checked archive.
+All 13 README-relative links resolve in the final archive. These are combined
+stage results; the preceding three-platform CI and pending Win-builder requests
+do not include the new plot defaults. See the [package check](plot_defaults/package-check.log),
+[build log](plot_defaults/build.log), [archive identity](plot_defaults/archive-identity.json)
+and [source comparison](plot_defaults/source-comparison.txt).
+
 ## Reference Environment & Isolated Reproduction
 
 All recent `glmmplanr 0.1.0` confirmation runs were executed under:
