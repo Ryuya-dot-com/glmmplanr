@@ -1,0 +1,44 @@
+Package: glmmplanr
+Title: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs
+Version: 0.1.0
+Authors@R: 
+    person("Ryuya", "Komuro", , "ryuya.komuro.c4@tohoku.ac.jp", role = c("aut", "cre"))
+Description: Plans numbers of participants and items for studies with one binary
+    response per trial, including correct or incorrect answers in forced-choice
+    tasks and yes or no judgments. Uses crossed generalized linear mixed models
+    (GLMMs) and explanatory item response models in behavioral science,
+    psycholinguistics, and language assessment (Westfall et al., 2014,
+    <doi:10.1037/xge0000014>; De Boeck et al., 2011,
+    <doi:10.18637/jss.v039.i12>). Generates balanced Latin-square,
+    between-within, incomplete-block, and testlet-nested designs with
+    configurable factor contrasts; numerically inverts marginal cell
+    probabilities and guessing probabilities in multiple-alternative
+    forced-choice tasks into conditional GLMM parameters by Gaussian
+    quadrature; evaluates power, accuracy in parameter estimation through
+    interval widths, exclusion of a region of practical equivalence,
+    convergence, coverage, magnitude and sign errors, and Monte Carlo
+    uncertainty intervals (Morris et al., 2019, <doi:10.1002/sim.8086>); and
+    identifies non-dominated Pareto-optimal (N_subj x N_item) designs using
+    Universal Kriging monotone Gaussian process surrogates and multi-stage
+    parallel 'C++' estimation. Supports both random-item and fixed-bank Rasch
+    parameter recovery planning.
+License: MIT + file LICENSE
+URL: https://github.com/Ryuya-dot-com/glmmplanr
+BugReports: https://github.com/Ryuya-dot-com/glmmplanr/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+VignetteBuilder: knitr
+Depends: R (>= 4.1.0)
+Imports: callr, cli, ggplot2, gt, lme4, mirai, nleqslv, Rcpp, rlang,
+        stats
+LinkingTo: Rcpp, RcppEigen
+Suggests: cmdstanr, glmmTMB, instantiate, knitr, pkgload, plotly,
+        posterior, rmarkdown, rstan, TAM, testthat (>= 3.0.0)
+Additional_repositories: https://stan-dev.r-universe.dev/
+Config/roxygen2/version: 8.1.1
+NeedsCompilation: yes
+Packaged: 2026-11-26 09:41:17 UTC; tohokusla
+Author: Ryuya Komuro [aut, cre]
+Maintainer: Ryuya Komuro <ryuya.komuro.c4@tohoku.ac.jp>
+Built: R 4.7.0; x86_64-w64-mingw32; 2026-11-26 10:04:04 UTC; windows
+Archs: x64

@@ -1173,8 +1173,8 @@ preceding archive; the final build also reconstructed vignettes. The final
 archive changes only packaging metadata, four validation-guide URLs and
 their HTML, and three printed environment addresses in the otherwise
 identical workflow HTML. This is combined stage evidence, not one full
-check command. Win-builder uploads are recorded separately from results;
-external outcomes are not inferred from successful upload.
+check command. Win-builder results for this source and the preceding
+pre-link-fix archive have now been retrieved; see the results below.
 [Archive identity](release_candidate/archive-identity.json) ·
 [final difference check](release_candidate/package-check.log) ·
 [preceding example/vignette check](release_candidate/pre-link-fix-check.log).
@@ -1207,10 +1207,42 @@ installation, examples, help and vignette reconstruction with 0 errors,
 After that check, one section anchor was moved to its correct heading and
 the archive rebuilt; code, tests and help are identical to the checked archive.
 All 13 README-relative links resolve in the final archive. These are combined
-stage results; the preceding three-platform CI and pending Win-builder requests
+stage results; the preceding three-platform CI and completed Win-builder checks
 do not include the new plot defaults. See the [package check](plot_defaults/package-check.log),
 [build log](plot_defaults/build.log), [archive identity](plot_defaults/archive-identity.json)
 and [source comparison](plot_defaults/source-comparison.txt).
+
+## Win-builder results received on 2026-11-26
+
+These checks predate the plot-default changes. Both use Windows Server 2022,
+x86_64-w64-mingw32, and GCC 14.3.0.
+
+| Environment | Submitted archive SHA-256 prefix | Result | Tests |
+| --- | --- | --- | --- |
+| R-devel, 2026-11-17 r90926 ucrt | `b9b025ca...` | 0 errors / 0 warnings / 1 NOTE | 675 pass / 0 fail / 0 warn / 3 skip |
+| R-release, 4.6.2 (2026-10-29 ucrt) | `219ebc6c...` | 0 errors / 0 warnings / 1 NOTE | 675 pass / 0 fail / 0 warn / 3 skip |
+
+The skips are two CRAN-only exclusions and the opt-in Stan fit. Examples,
+vignette reconstruction, and PDF/HTML manuals pass on both. The common incoming
+NOTE concerns the new submission, spelling candidates (author names and
+statistical terms), and the optional `cmdstanr` additional repository. That
+repository is available, but `cmdstanr` was not installed for checking (INFO).
+R-release also flags four URLs: two noncanonical CRAN links and two unpublished
+figure links. These were already corrected in the R-devel and current
+archives; R-devel and the current local check have no URL findings.
+
+The logs were retrieved before expiry. Submitted archive hashes, binary
+DESCRIPTION fields and the bundled guide were matched, allowing newline and
+installation metadata differences. Raw installation logs are losslessly
+compressed; their warnings come from RcppEigen headers, with no compiler errors.
+This is package-operation evidence, not additional simulation calibration.
+No tests or simulations were rerun solely to record these results.
+
+[R-devel check](release_candidate/win-builder/devel/00check.log) ·
+[R-devel tests](release_candidate/win-builder/devel/testthat.Rout) ·
+[R-release check](release_candidate/win-builder/release/00check.log) ·
+[R-release tests](release_candidate/win-builder/release/testthat.Rout) ·
+[URLs, archive identities and file hashes](release_candidate/win-builder/results.json).
 
 ## Reference Environment & Isolated Reproduction
 

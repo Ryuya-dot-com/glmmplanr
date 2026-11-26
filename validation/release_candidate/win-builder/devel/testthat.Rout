@@ -1,0 +1,36 @@
+
+R Under development (unstable) (2026-11-17 r90926 ucrt) -- "Unsuffered Consequences"
+Copyright (C) 2026 The R Foundation for Statistical Computing
+Platform: x86_64-w64-mingw32/x64
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(testthat)
+> library(glmmplanr)
+> 
+> test_check("glmmplanr")
+        Term Calibrated_Beta Naive_mAFC_Beta Naive_Std_Logit
+ (Intercept)         -0.2353         -0.2041          0.5726
+   learning1          1.2194          1.0537          0.7438
+[ FAIL 0 | WARN 0 | SKIP 3 | PASS 675 ]
+
+══ Skipped tests (3) ═══════════════════════════════════════════════════════════
+• On CRAN (2): 'test-core-workflows.R:236:3', 'test-core-workflows.R:366:3'
+• Set GLMMPLANR_TEST_STAN=true to run the independent Stan fit (1):
+  'test-stan-reference.R:2:3'
+
+[ FAIL 0 | WARN 0 | SKIP 3 | PASS 675 ]
+> 
+> proc.time()
+   user  system elapsed 
+  59.09    2.42   70.68 

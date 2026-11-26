@@ -1,0 +1,164 @@
+{
+  "retrieved_at_utc": "2026-11-26T10:35:33.898008+00:00",
+  "scope": "Both requests predate plot-default changes. Source identity is supported by upload records and binary metadata/document checks.",
+  "results": [
+    {
+      "variant": "devel",
+      "result_url": "https://win-builder.r-project.org/3Fc9dF76WdFw/",
+      "source_archive_sha256": "b9b025ca54039867b32795661b63c20f02f9f50631b72c98e19002eb07b31087",
+      "status": "0 errors | 0 warnings | 1 NOTE",
+      "tests": {
+        "pass": 675,
+        "fail": 0,
+        "warn": 0,
+        "skip": 3,
+        "skip_reasons": [
+          "On CRAN (2)",
+          "Opt-in Stan fit (1)"
+        ]
+      },
+      "email_seconds": {
+        "installation": 73,
+        "check": 334
+      },
+      "url_notes": 0,
+      "cmdstanr": "Additional repository available; package not installed for checks (INFO)",
+      "binary": {
+        "temporary_path": "/private/tmp/glmmplanr-winbuilder-results/devel/glmmplanr_0.1.0.zip",
+        "bytes": 2328932,
+        "sha256": "b836dd9942cf590feb0a8115dbd48692527ded717517970152bfce017d280ca1",
+        "identity": "Submitted archive hash verified; DESCRIPTION excluding Built/Archs and bundled validation guide match after newline normalization."
+      },
+      "compiler_warnings": {
+        "origin": "RcppEigen headers",
+        "count": 1172,
+        "classes": {
+          "[-Wignored-attributes]": 1170,
+          "[-Wmaybe-uninitialized]": 2
+        }
+      },
+      "saved_files": {
+        "00check.log": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/00check.log",
+          "bytes": 3715,
+          "sha256": "1ceb1c23cea96a8e7be0519ce9e07175a17626ffb6377c3ece2f0f7bd73d3058"
+        },
+        "glmmplanr-Ex.R": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/glmmplanr-Ex.R",
+          "bytes": 29708,
+          "sha256": "26a7d7a9b825159c99dadcd3aba2bdd3ef7005ef951981e4da008ab2715cfab9"
+        },
+        "glmmplanr-Ex.Rout": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/glmmplanr-Ex.Rout",
+          "bytes": 41401,
+          "sha256": "0821d9bc9c93d40d12c9d9db6d959c86fad8a6331a336462d51e2590daa6fa12"
+        },
+        "glmmplanr-Ex.timings": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/glmmplanr-Ex.timings",
+          "bytes": 1107,
+          "sha256": "f47e35cf357eb8f5fae17d52c86148f2f7c94ad3f440d2f6979e2384b9df1379"
+        },
+        "testthat.Rout": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/tests/testthat.Rout",
+          "bytes": 1478,
+          "sha256": "f037ac72487faba4a83db8803e89a46a77bb5a66c4bacbda4c184a568880d6cc"
+        },
+        "testthat.R": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/tests/testthat.R",
+          "bytes": 62,
+          "sha256": "302a639b2b51f6286fa590fd6bd295cc42c9a7d51a80acae5650f23dcfb91f70"
+        },
+        "startup.Rs": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/examples_and_tests/tests/startup.Rs",
+          "bytes": 131,
+          "sha256": "fed9cfb12d26f8f863e56bef227d03225c75e2129cc8e5a0495ec651e7c51fb3"
+        },
+        "00install.out.gz": {
+          "url": "https://win-builder.r-project.org/3Fc9dF76WdFw/00install.out",
+          "original_bytes": 4688942,
+          "original_sha256": "f7955fccc1cdc1066f784a8f7dda713208dfa42f91c012dba1995dfaaa5ef27a",
+          "gzip_sha256": "b6de6513a501106947e712ccdd73a94e2a55ae4de441b5f70ebf7c3f6869e3ea"
+        }
+      }
+    },
+    {
+      "variant": "release",
+      "result_url": "https://win-builder.r-project.org/ky8xE18Xk67k/",
+      "source_archive_sha256": "219ebc6c952997324b19c1804b381b901846bece80c6ac35f28ccc94af94c0c6",
+      "status": "0 errors | 0 warnings | 1 NOTE",
+      "tests": {
+        "pass": 675,
+        "fail": 0,
+        "warn": 0,
+        "skip": 3,
+        "skip_reasons": [
+          "On CRAN (2)",
+          "Opt-in Stan fit (1)"
+        ]
+      },
+      "email_seconds": {
+        "installation": 82,
+        "check": 353
+      },
+      "url_notes": 4,
+      "cmdstanr": "Additional repository available; package not installed for checks (INFO)",
+      "binary": {
+        "temporary_path": "/private/tmp/glmmplanr-winbuilder-results/release/glmmplanr_0.1.0.zip",
+        "bytes": 2329458,
+        "sha256": "19458af398adcde51f6b3fd5ec4c2c72f65bf0f05511a5592ab28e10eaba2240",
+        "identity": "Submitted archive hash verified; DESCRIPTION excluding Built/Archs and bundled validation guide match after newline normalization."
+      },
+      "compiler_warnings": {
+        "origin": "RcppEigen headers",
+        "count": 1172,
+        "classes": {
+          "[-Wignored-attributes]": 1170,
+          "[-Wmaybe-uninitialized]": 2
+        }
+      },
+      "saved_files": {
+        "00check.log": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/00check.log",
+          "bytes": 4598,
+          "sha256": "414c7b71a5ef0019ba9d872d4363d2a48fb311576e63cb01bc6e10beb1cb696b"
+        },
+        "glmmplanr-Ex.R": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/glmmplanr-Ex.R",
+          "bytes": 29708,
+          "sha256": "26a7d7a9b825159c99dadcd3aba2bdd3ef7005ef951981e4da008ab2715cfab9"
+        },
+        "glmmplanr-Ex.Rout": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/glmmplanr-Ex.Rout",
+          "bytes": 41380,
+          "sha256": "b0b6c4fc2fcebe646266cf65a225f43335f5df8525bebe512ffdeddae529c544"
+        },
+        "glmmplanr-Ex.timings": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/glmmplanr-Ex.timings",
+          "bytes": 1125,
+          "sha256": "0f5de88ea3c94c9bef5d4a4d9278c3697bd99aec890ef175d86891bdba54dbdd"
+        },
+        "testthat.Rout": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/tests/testthat.Rout",
+          "bytes": 1454,
+          "sha256": "d2e65ce1614a1e26689969941f6dada9d1c43ff8a0ea961a0f1b04787a188124"
+        },
+        "testthat.R": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/tests/testthat.R",
+          "bytes": 62,
+          "sha256": "302a639b2b51f6286fa590fd6bd295cc42c9a7d51a80acae5650f23dcfb91f70"
+        },
+        "startup.Rs": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/examples_and_tests/tests/startup.Rs",
+          "bytes": 131,
+          "sha256": "fed9cfb12d26f8f863e56bef227d03225c75e2129cc8e5a0495ec651e7c51fb3"
+        },
+        "00install.out.gz": {
+          "url": "https://win-builder.r-project.org/ky8xE18Xk67k/00install.out",
+          "original_bytes": 4688962,
+          "original_sha256": "8ccfb7fdf479f54d67255aa705668439b186ffc6acd316c59c4105a9a2049904",
+          "gzip_sha256": "d4a113f98e4c781157e5ef508a3926bbfaa07fc4540ca29abcddba346ed288f7"
+        }
+      }
+    }
+  ]
+}

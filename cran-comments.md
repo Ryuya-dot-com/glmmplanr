@@ -1,10 +1,12 @@
 ## Submission status
 
 Preparation for the first CRAN submission; no formal CRAN submission has
-been made. Win-builder R-release and R-devel uploads were acknowledged;
-results are pending. The preceding source passed three-platform GitHub
-Actions. The current candidate adds plot styling and annotation controls;
-its local checks are recorded separately below.
+been made. The pre-plot-change source completed Win-builder R-release and
+R-devel checks with 0 errors, 0 warnings and 1 incoming NOTE each. R-release
+also flagged four URLs already corrected in the R-devel and current archives.
+The preceding source passed three-platform GitHub Actions. The current
+candidate adds plot styling and annotation controls; its local checks are
+recorded separately below.
 
 The post-correction default-bootstrap confirmation completed 3,072 outer
 datasets and 361,728 retained inner fits, all valid. The validation guide
@@ -51,12 +53,32 @@ SHA-256: `5a80fc0b2858a5479ef166f90428e218dacb5cade833218324e58989cce63c5f`.
   `validation/release_candidate/` and `validation/l2_uncertainty_comparison/`
   (all excluded from the CRAN tarball).
 
-## Current external check requests
+## External results for the source before the plot changes
 
-* Win-builder R-release: acknowledged upload of the pre-link-fix archive
-  `219ebc6c...`; results pending.
-* Win-builder R-devel: acknowledged upload of the preceding archive `b9b025ca...`;
-  results pending. Upload acknowledgment is not a passing check.
+* Win-builder R-release, R 4.6.2 (2026-10-29 ucrt), Windows Server 2022:
+  0 errors, 0 warnings, 1 NOTE. Pre-link-fix archive `219ebc6c...`.
+  Result: https://win-builder.r-project.org/ky8xE18Xk67k/00check.log
+* Win-builder R-devel, 2026-11-17 r90926 ucrt, Windows Server 2022:
+  0 errors, 0 warnings, 1 NOTE. Link-corrected archive `b9b025ca...`.
+  Result: https://win-builder.r-project.org/3Fc9dF76WdFw/00check.log
+* Both report 675 passed assertions, zero failures or test warnings, and
+  three skips (two `skip_on_cran()` sections and one opt-in Stan fit).
+  Installation, compiled-code checks, examples, vignette reconstruction,
+  and PDF/HTML manuals passed. The two CRAN skips are explicitly enabled
+  in the separate GitHub Actions checks described below.
+* The incoming NOTE contains new-submission status, recognized author names
+  and statistical terms, and the optional `cmdstanr` additional repository.
+  The repository was reachable; `cmdstanr` itself was not installed for these
+  checks (dependency INFO). Its optional execution path was not verified here.
+* R-release additionally flags two noncanonical CRAN links and two unpublished
+  figure links (404). All four were corrected before the R-devel upload;
+  R-devel and the current local candidate check contain no URL findings.
+* Logs were retrieved on 2026-11-26 and retained in
+  `validation/release_candidate/win-builder/`. Upload archive hashes and
+  the generated binaries' DESCRIPTION and bundled guide match the recorded
+  submitted versions (allowing line endings and installation metadata).
+  Installation logs include RcppEigen-header compiler warnings; installation
+  and R CMD check still pass. These are distinct from check/test warnings.
   Neither upload includes the new plot defaults; no duplicate request was sent.
 * GitHub Actions: preceding-source macOS, Windows and Linux, R 4.6.2, all
   `Status: OK`. Each platform reports 706 passed assertions, zero failures
