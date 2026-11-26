@@ -57,6 +57,9 @@ interval width criterion (\code{ci_width}), assessed separately.
 in the same replication must reach \code{power_min}.
 \item \code{"rope"}: Probability that the \code{(1 - alpha)} interval excludes \code{rope}
 is \eqn{\ge} \code{power_min}.
+Probability-scale targets with weights of only one sign do not define a
+zero-difference null; use \code{"ci_width"} or an explicit \code{"rope"} for these
+targets. \code{"power"}, \code{"both"} and \code{"joint"} require both signs.
 }}
 
 \item{power_min}{Minimum target power (or ROPE exclusion probability),

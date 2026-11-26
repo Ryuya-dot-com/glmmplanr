@@ -1,10 +1,23 @@
 ## Submission status
 
 External checks are on hold at the maintainer's request until the feature set
-is finalized. The working source adds an observed-curvature contract repair
-after the archived candidate described below. That archive and its earlier
-checks do not include this repair. No new Win-builder upload, GitHub Actions
-run, push or formal CRAN submission is part of this correction.
+is finalized. The working source adds curvature-contract, planning-decision,
+input-validation and reporting repairs after the archived candidate below.
+That archive and its earlier checks do not include these repairs. No new
+Win-builder upload, GitHub Actions run, push or formal CRAN submission is part
+of this correction.
+
+The latest isolated macOS/R 4.6.1 installation passes the full test suite in
+one invocation with NOT_CRAN=true: 824 assertions, zero failures/warnings and
+one opt-in Stan skip. Bonferroni-adjusted decisions now precede follow-up
+checks; scenario confirmation uses fresh streams; zero-slope sensitivity is
+skipped. Custom IDs, passage mappings and fixed-bank MML inputs are validated.
+Absolute probability targets no longer report zero-difference power.
+Saved-response comparison against e5149b8 retains all 2,048 native fits and
+84 profiles, with zero point/SE or decision differences and no failed profile
+evaluations. See `validation/README.md#planning-contract-repair` and
+`validation/review_contract_replay/`. The earlier split-run evidence below is
+historical; these checks do not establish nominal inference in new designs.
 
 The repair rejects a reproduced 3AFC conditional saddle and requires unclamped
 observed curvature for final mode acceptance and derivative evaluation. On

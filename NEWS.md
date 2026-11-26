@@ -1,6 +1,20 @@
 # glmmplanr 0.1.0
 
 * Initial public release of `glmmplanr`.
+* Skip random-slope sensitivity simulations when every slope SD is zero.
+  Bonferroni-adjusted decisions now precede step-up, ceiling and top-up checks;
+  multi-scenario confirmation uses fresh streams after selecting candidates.
+  Subsequent top-ups refresh their replication-count and power metadata.
+* Validate custom response IDs and recover omitted testlet IDs from the
+  scheduled item-to-passage mapping. Fixed-bank MML rejects duplicate
+  person-item responses and constant items incorrectly marked estimable.
+* Absolute probability targets report precision and coverage without
+  zero-difference power or joint detection claims. Probability-scale power
+  criteria require contrast weights of both signs. Fix joint-attainment
+  output being joined to the next console bullet.
+* Failed observed-curvature checks during polishing or finite-difference
+  derivatives now return an invalid-fit status and missing likelihood, rather
+  than retaining a working likelihood or throwing a derivative exception.
 * Native GLMM fits reject conditional saddles even when a Fisher step is small.
   Final mode checks and derivative evaluations require unclamped observed
   curvature; failed checks cannot return a converged, finite Laplace likelihood.

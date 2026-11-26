@@ -690,18 +690,47 @@ validate_custom_data <- function(df_b, schedule) {
   if (!("item_id" %in% names(df_b)) && ("item" %in% names(df_b))) {
     df_b$item_id <- as.integer(as.factor(df_b$item))
   }
-  if (!("subj" %in% names(df_b)) && ("subj_id" %in% names(df_b))) {
-    df_b$subj <- factor(sprintf("S%04d", as.integer(df_b$subj_id)))
-  }
-  if (!("item" %in% names(df_b)) && ("item_id" %in% names(df_b))) {
-    df_b$item <- factor(sprintf("I%04d", as.integer(df_b$item_id)))
-  }
   req_cols <- c("subj_id", "item_id", "cell_id")
   missing_cols <- setdiff(req_cols, names(df_b))
   if (length(missing_cols) > 0L) {
     cli::cli_abort(
       "{.arg data_fn} output is missing required column(s): {.val {missing_cols}}. Start from {.code schedule$trials} or {.fn simulate_dgp_data}."
     )
+  }
+  check_id <- function(name, upper) {
+    id <- df_b[[name]]
+    if (!is.numeric(id) || any(!is.finite(id)) ||
+        any(id != floor(id) | id < 1 | id > upper)) {
+      cli::cli_abort("{.field {name}} returned by {.arg data_fn} must contain integer IDs in 1..{upper}.")
+    }
+    as.integer(id)
+  }
+  df_b$subj_id <- check_id("subj_id", schedule$n_subj)
+  df_b$item_id <- check_id("item_id", schedule$n_item)
+  n_cells <- if (is.null(schedule$n_cells)) max(schedule$trials$cell_id) else schedule$n_cells
+  df_b$cell_id <- check_id("cell_id", n_cells)
+  if (!("subj" %in% names(df_b)) && ("subj_id" %in% names(df_b))) {
+    df_b$subj <- factor(sprintf("S%04d", as.integer(df_b$subj_id)))
+  }
+  if (!("item" %in% names(df_b)) && ("item_id" %in% names(df_b))) {
+    df_b$item <- factor(sprintf("I%04d", as.integer(df_b$item_id)))
+  }
+  if (isTRUE(schedule$n_testlet > 0L)) {
+    expected <- schedule$trials$testlet_id[match(df_b$item_id, schedule$trials$item_id)]
+    if (anyNA(expected)) cli::cli_abort("Custom items must have a passage assignment in {.code schedule$trials}.")
+    if (!is.null(df_b$testlet)) {
+      labels <- as.character(schedule$trials$testlet)
+      supplied <- schedule$trials$testlet_id[match(as.character(df_b$testlet), labels)]
+      if (anyNA(supplied) || any(supplied != expected)) {
+        cli::cli_abort("{.field testlet} must match the scheduled item-to-passage assignments.")
+      }
+    }
+    if (is.null(df_b$testlet_id)) df_b$testlet_id <- expected
+    df_b$testlet_id <- check_id("testlet_id", schedule$n_testlet)
+    if (any(df_b$testlet_id != expected)) {
+      cli::cli_abort("{.field testlet_id} must match the scheduled item-to-passage assignments.")
+    }
+    df_b$testlet <- factor(df_b$testlet_id, levels = seq_len(schedule$n_testlet))
   }
   df_b
 }
@@ -831,12 +860,19 @@ execute_single_replication <- function(
 #'   for evaluating structural misspecification such as ability-dependent
 #'   dropout, item-specific guessing, or non-normal random effects. Default
 #'   `NULL` uses the built-in parametric DGP in `spec$dgp`.
+#'   IDs must be positive integers within the scheduled subject, item and cell
+#'   ranges. For testlet designs, omitted `testlet_id` values are recovered from
+#'   the scheduled item-to-passage mapping; supplied `testlet_id` or `testlet`
+#'   columns must agree with that mapping.
 #' @param verbose Logical; display a live `cli` progress bar with ETA across
 #'   replications (default `FALSE`).
 #' @return A single-row `data.frame` summarizing all evaluation and diagnostic
 #'   layers. `power` concerns the target-scale interval excluding zero.
 #'   `effective_logit_power` counts significant conditional coefficients among all
 #'   replications. Error counts are in `attr(res, "error_summary")`.
+#'   Absolute probability targets without a zero-difference null have `NA`
+#'   detection-power and joint detection/width fields; precision and coverage
+#'   remain available.
 #'   `pattern_nsim` and `pattern_n_invalid` count diagnosed replications and
 #'   invalid target fits. For each subject/item pattern (all correct, all
 #'   incorrect, unobserved), `n_rep_*` counts replications with any such unit
@@ -1124,7 +1160,7 @@ summarize_mc_metrics <- function(
       stringsAsFactors = FALSE
     )
     attr(out0, "error_summary") <- err_tab
-    return(out0)
+    return(mask_undefined_detection(out0, spec))
   }
 
   e_v <- est[valid]
@@ -1326,11 +1362,11 @@ summarize_mc_metrics <- function(
     stringsAsFactors = FALSE
   )
   attr(out, "error_summary") <- err_tab
-  out
+  mask_undefined_detection(out, spec)
 }
 
 check_criterion_met <- function(spec, power, aipe_prob, rope_excl_prob, joint_prob = NA_real_) {
-  if (is.na(power)) return(FALSE)
+  if (is.na(power) && spec$criterion %in% c("power", "both", "joint")) return(FALSE)
   switch(
     spec$criterion,
     power = (power >= spec$power_min),
@@ -1361,6 +1397,17 @@ compute_decision_status <- function(spec, valid_gate_ok, mc_pow, mc_aipe, mc_rop
     joint = classify_mc_threshold(mc_joint["lo"], mc_joint["hi"], spec$power_min),
     rope = classify_mc_threshold(mc_rope["lo"], mc_rope["hi"], spec$power_min)
   )
+}
+
+mask_undefined_detection <- function(out, spec) {
+  if (!can_define_null_target(spec)) {
+    cols <- c("power", "effective_power", "effective_logit_power", "conditional_power",
+      "power_mcse", "power_mc_lo", "power_mc_hi", "power_nonsingular",
+      "joint_prob", "joint_mc_lo", "joint_mc_hi", "type_m_error", "type_s_error")
+    out[cols] <- NA_real_
+    out$k_joint <- NA_integer_
+  }
+  out
 }
 
 can_define_null_target <- function(spec) {

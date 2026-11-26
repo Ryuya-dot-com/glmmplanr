@@ -199,7 +199,9 @@ target_control <- function(
 #'   Bonferroni split) or `"pooled"` (exploratory, emits warning).
 #' @param mc_adjustment Multiplicity adjustment applied to Stage-2 Wilson Monte
 #'   Carlo intervals across verified candidates: `"none"` (default) or
-#'   `"bonferroni"`.
+#'   `"bonferroni"`. Adjusted decisions are used before step-up, ceiling and
+#'   top-up checks; adding candidates also updates earlier decisions. In
+#'   multi-scenario planning the family comprises candidate-by-scenario pairs.
 #' @param n_verify Number of Pareto-frontier candidate designs verified at
 #'   `nsim_final` replications in Stage 2 (default `4L`).
 #' @param early_stop Logical; when `TRUE` (default) and `nsim_final >= 200L`,
@@ -207,6 +209,8 @@ target_control <- function(
 #' @param nsim_sensitivity Number of Monte Carlo simulations per level used to
 #'   build the 3-level random-slope sensitivity table at the recommended design
 #'   (default `200L`; set to `0L` to skip).
+#'   Skipped automatically when all participant, item and testlet slope SDs
+#'   are zero or no random-slope columns exist.
 #' @param parallel_backend Parallel execution engine: `"auto"` (default),
 #'   `"mirai"`, `"multicore"`, or `"sequential"`.
 #' @export

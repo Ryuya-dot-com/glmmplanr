@@ -46,7 +46,9 @@ normalized distance from \verb{(min_subj, min_item)}.
 \code{\link[=scenario_dgps]{scenario_dgps()}} or \code{\link[=sensitivity_dgps]{sensitivity_dgps()}}) for \strong{robust multi-scenario
 planning}. When supplied, identifies both the standard-scenario design and
 the all-scenario robust design along with the sample-size increments
-(\code{+delta_subj}, \code{+delta_item}, \code{+delta_trials}).}
+(\code{+delta_subj}, \code{+delta_item}, \code{+delta_trials}).
+Exploratory searches first select a common candidate set. Fresh verification
+streams then evaluate every candidate-by-scenario pair before any top-up.}
 
 \item{standard_scenario}{Optional character name selecting the reference
 \code{"standard"} scenario inside \code{scenarios}.}

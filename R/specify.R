@@ -47,6 +47,9 @@
 #'     in the same replication must reach `power_min`.
 #'   * `"rope"`: Probability that the `(1 - alpha)` interval excludes `rope`
 #'     is \eqn{\ge} `power_min`.
+#'   Probability-scale targets with weights of only one sign do not define a
+#'   zero-difference null; use `"ci_width"` or an explicit `"rope"` for these
+#'   targets. `"power"`, `"both"` and `"joint"` require both signs.
 #' @param power_min Minimum target power (or ROPE exclusion probability),
 #'   default `0.80`.
 #' @param ci_width Maximum target `(1 - alpha)` confidence/credible interval
@@ -150,12 +153,12 @@ specify_target <- function(
   }
 
   effect_col <- resolve_effect_column(dgp$design, effect)
-  if (!length(dgp$design$factor_names) && scale != "logit" &&
-      criterion %in% c("power", "both", "joint")) {
-    cli::cli_abort("The single cell gives an absolute probability. Use {.code criterion = 'ci_width'} for precision or {.code scale = 'logit'} to test a zero conditional intercept.")
-  }
   true_beta <- unname(dgp$beta[[effect_col]])
   c_weights <- cell_contrast_weights(dgp$design, effect_col, custom_weights = contrast_weights)
+  if (scale != "logit" && !(any(c_weights > 0) && any(c_weights < 0)) &&
+      criterion %in% c("power", "both", "joint")) {
+    cli::cli_abort("An absolute probability target has no between-condition null difference. Use {.code criterion = 'ci_width'} for precision or {.code scale = 'logit'} to test a zero conditional coefficient.")
+  }
   true_prob_diff <- true_prob_effect(dgp, weights = c_weights, estimand = prob_estimand)
   true_effect_target <- switch(
     scale,
@@ -388,8 +391,10 @@ print.glmmplanr_spec <- function(x, ...) {
   } else {
     x$analysis_re
   }
+  probability_label <- if (can_define_null_target(x)) "difference" else "absolute probability"
+  probability_value <- if (can_define_null_target(x)) sprintf("%+.2f pp", x$true_prob_diff_pp) else sprintf("%.2f%%", x$true_prob_diff_pp)
   cli::cli_ul(c(
-    "Focal effect: {.val {x$effect_input}} (true beta = {round(x$true_beta, 4)} logit | {x$prob_estimand} diff = {sprintf('%+.2f pp', x$true_prob_diff_pp)})",
+    "Focal effect: {.val {x$effect_input}} (true beta = {round(x$true_beta, 4)} logit | {x$prob_estimand} {probability_label} = {probability_value})",
     "Target scale: {.val {x$scale}} | Criterion ({.val {x$criterion}}): {crit_desc}",
     "Failure accounting: {.val {x$failure_policy}} | MC confidence level: {round(x$mc_conf_level * 100, 1)}%",
     "Engine: Stage 1 = {.val {x$stage1_engine}} -> Final = {.val {x$engine}} | Analysis RE: {.val {re_lbl}}"

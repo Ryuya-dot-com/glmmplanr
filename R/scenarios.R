@@ -111,7 +111,7 @@ run_multi_scenario_analysis <- function(
     }
     run_single_spec_search(
       sp, grid_df, n_grid_stride, prefer, method, n_eval_init, n_eval_adapt,
-      nsim_init, nsim_final, nsim_topup, topup_policy, "none", n_verify, early_stop, workers,
+      nsim_init, nsim_final, 0L, topup_policy, "none", n_verify, early_stop, workers,
       parallel_backend, seed, stage_offset = 7L + 3L * (i - 1L), verbose = verbose)
   })
   names(searches) <- scen_names
@@ -135,11 +135,10 @@ run_multi_scenario_analysis <- function(
 
   verify_scenario <- function(sub_grid, snm, s_i) {
     sp <- scen_specs[[snm]]
-    if (seq_two_stage) {
-      sp$mc_conf_level <- sequential_topup_conf_level(
-        sp$mc_conf_level, round_num = 1L, n_decisions = 1L, mode = "two_stage"
-      )
-    }
+    sp$mc_conf_level <- sequential_topup_conf_level(
+      sp$mc_conf_level, round_num = 1L,
+      n_decisions = if (identical(mc_adjustment, "bonferroni")) nrow(cand_grid) * length(scenarios) else 1L,
+      mode = if (seq_two_stage) "two_stage" else "none")
     streams <- function(slot) allocate_stage_point_streams(
       seed, stage_slot = slot, grid_ids = sub_grid$orig_grid_id, stride = n_grid_stride)
     verification_offset <- 7L + 3L * length(scenarios)
@@ -161,23 +160,9 @@ run_multi_scenario_analysis <- function(
 
   for (s_i in seq_along(scenarios)) {
     snm <- scen_names[s_i]
-    pre_df <- searches[[snm]]$verified
-    pre_keys <- paste(pre_df$n_subj, pre_df$n_item)
-    hit_idx <- match(cand_keys, pre_keys)
-    miss_mask <- is.na(hit_idx)
-    reused_part <- if (any(!miss_mask)) {
-      pre_df[hit_idx[!miss_mask], , drop = FALSE]
-    } else {
-      NULL
-    }
-    new_part <- if (any(miss_mask)) {
-      verify_scenario(cand_grid[miss_mask, , drop = FALSE], snm, s_i)
-    } else {
-      NULL
-    }
-    comb <- align_and_bind_rows(list(reused_part, new_part))
-    ord_back <- match(cand_keys, paste(comb$n_subj, comb$n_item))
-    ev_s <- attach_grid_meta(comb[ord_back, , drop = FALSE], cand_grid)
+    # Confirm the selected family on fresh streams, with its multiplicity
+    # fixed before decisions or optional top-up. Search outcomes are exploratory.
+    ev_s <- verify_scenario(cand_grid, snm, s_i)
     ev_s$scenario <- snm
     rownames(ev_s) <- NULL
     scen_evals[[snm]] <- ev_s
@@ -286,6 +271,11 @@ rank_scenarios <- function(all_scen_df, standard_scenario, toughest_name, spec) 
   )
 }
 
+has_random_slopes <- function(dgp) {
+  any(dgp$tau_subj[-1L] > 0) || any(dgp$tau_item[-1L] > 0) ||
+    (isTRUE(dgp$design$has_testlet) && any(dgp$tau_testlet[-1L] > 0))
+}
+
 compute_sensitivity_table <- function(
   spec,
   n_subj,
@@ -299,6 +289,7 @@ compute_sensitivity_table <- function(
   verbose = FALSE
 ) {
   mults <- c(optimistic = 0.70, standard = 1.00, conservative = 1.35)
+  if (!has_random_slopes(spec$dgp)) return(NULL)
   dgps <- sensitivity_dgps(spec$dgp, slope_multipliers = mults)
   grid_one <- data.frame(n_subj = n_subj, n_item = n_item, grid_id = 1L)
 

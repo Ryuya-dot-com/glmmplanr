@@ -331,7 +331,7 @@ as_gt.glmmplanr_result <- function(
     gt::tab_header(
       title = "Two-Dimensional GLMM Sample Size Plan & Trustworthiness Summary",
       subtitle = sprintf(
-        "Focal effect: %s (%s diff = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s)",
+        if (can_define_null_target(x$spec)) "Focal effect: %s (%s diff = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s)" else "Focal target: %s (%s absolute probability = %.1f%% | cond. beta = %.3f logit | scale = %s | prefer = %s)",
         x$spec$effect_input, x$spec$prob_estimand, x$spec$true_prob_diff_pp,
         x$spec$true_beta, x$spec$scale, x$prefer
       )
@@ -349,7 +349,7 @@ as_gt.glmmplanr_result <- function(
       validity_status = "Inferential Validity",
       valid_rate = "Valid",
       singular_rate = "Singular",
-      coverage = "H1 Coverage"
+      coverage = if (can_define_null_target(x$spec)) "H1 Coverage" else "Coverage"
     ) |>
     gt::tab_spanner(
       label = "Balanced Sample Size",
@@ -377,17 +377,20 @@ as_gt.glmmplanr_result <- function(
       gt::cols_label(aipe_prob = "Width attainment", joint_prob = "Detect and meet width") |>
       gt::fmt_percent(columns = c("aipe_prob", "joint_prob"), decimals = 1) |>
       gt::tab_spanner(
-        label = "Power, Precision & MC Decision",
+        label = if (can_define_null_target(x$spec)) "Power, Precision & MC Decision" else "Precision & MC Decision",
         columns = c("decision", "eff_power_ci", "conditional_power", "prob_ci_width_pp", "logit_ci_width", "aipe_prob", "joint_prob")
       )
   } else {
     gt_obj <- gt_obj |>
       gt::tab_spanner(
-        label = "Power, Precision & MC Decision",
+        label = if (can_define_null_target(x$spec)) "Power, Precision & MC Decision" else "Precision & MC Decision",
         columns = c("decision", "eff_power_ci", "conditional_power", "prob_ci_width_pp", "logit_ci_width")
       )
   }
 
+  if (!can_define_null_target(x$spec)) {
+    gt_obj <- gt::cols_hide(gt_obj, columns = intersect(c("eff_power_ci", "conditional_power", "joint_prob"), names(tbl_df)))
+  }
   sing_note <- if (any(is.na(tbl_df$singular_rate))) {
     " Boundary singularity ('Singular') is not applicable ('-') under regularized/Bayesian estimation."
   } else {
@@ -1132,7 +1135,8 @@ report_plan <- function(x, print_output = TRUE) {
   unit_lbl <- switch(sp$scale, logit = "logit", pp = "percentage points", prob = "probability units")
 
   one_cell <- des$n_cells == 1L
-  prob_label <- if (one_cell) "accuracy" else "accuracy difference"
+  absolute_target <- !can_define_null_target(sp)
+  prob_label <- if (one_cell || absolute_target) "accuracy" else "accuracy difference"
   details <- character()
   if (!is.null(x$search_meta$n_grid_verified)) {
     total <- x$search_meta$n_grid_total
@@ -1349,6 +1353,11 @@ report_plan <- function(x, print_output = TRUE) {
     )
   }
 
+  if (absolute_target && !is.null(x$sensitivity)) {
+    sens_txt <- sprintf(" Across three random-slope sensitivity levels, mean CI width ranged from %.2f to %.2f percentage points.",
+      min(w_opt, w_con), max(w_opt, w_con))
+  }
+
   rob_txt <- ""
   if (!is.null(x$robust)) {
     rc <- x$robust
@@ -1407,6 +1416,7 @@ report_plan <- function(x, print_output = TRUE) {
   } else {
     sprintf("singular-fit rate = %.1f%%", opt$singular_rate * 100)
   }
+  if (absolute_target) crit_att <- sub(" [(]power = [^)]*[)]", "", crit_att)
   mc_clause <- sprintf(
     "Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (valid-fit conditional power = %s across %.1f%% strictly converged replications; %s).",
     sp$mc_conf_level * 100, toupper(opt$decision_status),
@@ -1414,6 +1424,11 @@ report_plan <- function(x, print_output = TRUE) {
     fmt_pct_or_na(opt$conditional_power),
     opt$valid_rate * 100, sing_clause
   )
+
+  if (absolute_target) {
+    mc_clause <- sprintf("Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (%.1f%% strictly converged replications; %s).",
+      sp$mc_conf_level * 100, toupper(opt$decision_status), crit_att, opt$valid_rate * 100, sing_clause)
+  }
 
   txt <- paste0(
     "### Sample Size Justification (glmmplanr)\n\n",
@@ -1425,7 +1440,7 @@ report_plan <- function(x, print_output = TRUE) {
     sprintf(
       "Expected marginal cell accuracies (%s) corresponded to a focal `%s` %s %s of %s (calibrated conditional beta = %.3f logit via %d-node Gauss-Hermite quadrature%s). Random-effect SDs were %s for participants and %s for items.\n\n",
       cell_str, sp$effect_input, sp$prob_estimand, prob_label,
-      if (one_cell) sprintf("%.2f%%", sp$true_prob_diff_pp) else sprintf("%+.2f percentage points", sp$true_prob_diff_pp),
+      if (one_cell || absolute_target) sprintf("%.2f%%", sp$true_prob_diff_pp) else sprintf("%+.2f percentage points", sp$true_prob_diff_pp),
       sp$true_beta, dgp$n_quad, chance,
       fmt_re_sds(dgp$tau_subj),
       fmt_re_sds(dgp$tau_item)

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <numeric>
 #include <limits>
+#include <unordered_set>
+#include <cstdint>
 
 // [[Rcpp::depends(RcppEigen)]]
 
@@ -1780,7 +1782,7 @@ struct GLMMWorkspace {
       C_bs * (rs_tilde_buf + cs_tilde_buf) - S_2b_saved.transpose() * (S22_inv_r2_buf + S22_inv_c2_buf);
   }
 
-  Eigen::VectorXd compute_laplace_grad_beta(
+  bool compute_laplace_grad_beta(
       const Eigen::VectorXd& beta_eval,
       const Eigen::MatrixXd& L_s_eval,
       const Eigen::MatrixXd& L_i_eval,
@@ -1789,6 +1791,7 @@ struct GLMMWorkspace {
       double chance,
       Eigen::VectorXd v_s_cur,
       Eigen::VectorXd v_2_cur,
+      Eigen::VectorXd& gradient,
       int update_zl_mask = 7
   ) {
     if (update_zl_mask != 0) {
@@ -1820,7 +1823,8 @@ struct GLMMWorkspace {
       }
       if (!ok_obs || !(slope > 0.0)) {
         ll_cur = eval_trials(beta_eval, v_s_cur, v_2_cur, chance, false);
-        assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, true);
+        if (!assemble_and_factor_core(beta_eval, v_s_cur, v_2_cur, P_beta,
+            rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, logdet_tmp)) return false;
         apply_R_ass(rhs_s_buf, rs_tilde_buf);
         sub_G_mul_vec(rhs_2_buf, rs_tilde_buf, r_2_tilde_buf);
         step_2_buf.noalias() = llt_22_grad_ws.solve(r_2_tilde_buf);
@@ -1866,9 +1870,12 @@ struct GLMMWorkspace {
     if (!obs_factored) {
       eval_trials(beta_eval, v_s_cur, v_2_cur, chance, true);
       // Derivatives require observed curvature, not a clamped search metric.
-      assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, false);
+      double logdet_tmp = 0.0;
+      if (!assemble_and_factor_core(beta_eval, v_s_cur, v_2_cur, P_beta,
+          rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, logdet_tmp)) return false;
     }
-    return grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws);
+    gradient = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws);
+    return gradient.allFinite();
   }
 
   FitResult fit(
@@ -1953,6 +1960,7 @@ struct GLMMWorkspace {
     Eigen::VectorXd rel_sum_t = Eigen::VectorXd::Zero(q_t);
 
     bool fin_obs_ready = false;
+    bool curvature_failed = false;
     const bool profile_covariance = (chance == 0.0 && corr_mode == 0);
     double covariance_score_norm = profile_covariance && !fix_cov ? INFINITY : NA_REAL;
     auto covariance_stationary = [&]() {
@@ -1967,13 +1975,17 @@ struct GLMMWorkspace {
                               const Eigen::MatrixXd& L_i_fin,
                               const Eigen::MatrixXd& L_t_fin, bool covariance_step = false) {
       fin_obs_ready = false;
+      log_lik_laplace = NA_REAL;
+      curvature_failed = false;
       update_ZL(L_s_fin, L_i_fin, L_t_fin, 7);
 
       Eigen::VectorXd S22_inv_r2(dim_2);
       const int beta_steps = covariance_step ? 1 : 3;
       for (int polish = 0; polish < beta_steps; ++polish) {
         eval_trials(beta, v_s, v_2, chance, true);
-        assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
+        double ld_polish = 0.0;
+        if (!assemble_and_factor_core(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf,
+            rhs_b_buf, llt_22_fin_ws, ld_polish)) break;
         Eigen::VectorXd grad_lap_b = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, &S22_inv_r2);
 
         ldlt_b_ws.compute(H_bb_schur);
@@ -2010,6 +2022,7 @@ struct GLMMWorkspace {
         bool ok_obs = assemble_and_factor_core(
           beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, logdet_obs
         );
+        curvature_failed = !ok_obs;
         double slope = 0.0;
         if (ok_obs) {
           apply_R_ass(rhs_s_buf, rs_tilde_buf);
@@ -2484,7 +2497,7 @@ struct GLMMWorkspace {
 
     Eigen::MatrixXd H_bb_saved = H_bb_schur;
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es_cond(0.5 * (H_bb_saved + H_bb_saved.transpose()));
-    bool pos_def_b = (es_cond.eigenvalues().minCoeff() > 1e-8) && std::isfinite(log_lik_laplace);
+    bool pos_def_b = es_cond.eigenvalues().minCoeff() > 1e-8;
     Eigen::VectorXd ev_cond = es_cond.eigenvalues().cwiseMax(1e-8);
     Eigen::MatrixXd vcov_cond = es_cond.eigenvectors() * ev_cond.cwiseInverse().asDiagonal() *
       es_cond.eigenvectors().transpose();
@@ -2518,160 +2531,173 @@ struct GLMMWorkspace {
     if (compute_joint_vcov && inner_converged && outer_converged && pos_def_b) {
       const Eigen::VectorXd v_s_opt = v_s;
       const Eigen::VectorXd v_2_opt = v_2;
-      const double eps_b = 5e-4;
+      auto compute_uncertainty = [&]() -> bool {
+        const double eps_b = 5e-4;
 
-      // Precompute exact Newton mode tangents wrt beta from the already-factored base Schur system
-      Eigen::MatrixXd dv2_dbeta(dim_2, P);
-      Eigen::MatrixXd dvs_dbeta(dim_s, P);
-      Eigen::VectorXd g_base;
-      if (fin_obs_ready) {
-        dv2_dbeta = -S22_inv_S2b_saved;
-        for (int p = 0; p < P; ++p) {
-          d_beta_buf.setZero();
-          d_beta_buf[p] = 1.0;
-          sub_Gt_mul_vec(Eigen::VectorXd::Zero(dim_s), dv2_dbeta.col(p), &d_beta_buf, step_s_buf);
-          apply_Rt_ass_in_place(step_s_buf);
-          dvs_dbeta.col(p) = step_s_buf;
-        }
-        g_base = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws);
-      } else {
-        dv2_dbeta.setZero();
-        dvs_dbeta.setZero();
-        g_base = compute_laplace_grad_beta(
-          beta, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, 7
-        );
-      }
-
-      Eigen::MatrixXd H_lap_bb(P, P);
-      for (int p = 0; p < P; ++p) {
-        Eigen::VectorXd b_hi = beta;
-        b_hi(p) += eps_b;
-        Eigen::VectorXd vs_init = v_s_opt + eps_b * dvs_dbeta.col(p);
-        Eigen::VectorXd v2_init = v_2_opt + eps_b * dv2_dbeta.col(p);
-        Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-          b_hi, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, vs_init, v2_init, 0
-        );
-        H_lap_bb.col(p) = -(g_hi - g_base) / eps_b;
-      }
-      H_lap_bb = 0.5 * (H_lap_bb + H_lap_bb.transpose());
-
-      double min_floor = std::max(0.25 * ev_cond.minCoeff(), 1e-6);
-      Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es_lap(H_lap_bb);
-      Eigen::VectorXd ev_lap = es_lap.eigenvalues().cwiseMax(min_floor);
-      Eigen::MatrixXd vcov_lap_fixed = es_lap.eigenvectors() * ev_lap.cwiseInverse().asDiagonal() *
-        es_lap.eigenvectors().transpose();
-
-      if (fix_cov) {
-        vcov_beta = vcov_lap_fixed;
-      } else {
-        // Restore base Schur system once to warm-start covariance perturbations via 1-step Schur tangent
+        // Precompute exact Newton mode tangents wrt beta from the already-factored base Schur system
+        Eigen::MatrixXd dv2_dbeta(dim_2, P);
+        Eigen::MatrixXd dvs_dbeta(dim_s, P);
+        Eigen::VectorXd g_base;
         if (fin_obs_ready) {
-          eval_trials(beta, v_s_opt, v_2_opt, chance, true);
-          double ld_tmp = 0.0;
-          fin_obs_ready = assemble_and_factor_core(
-            beta, v_s_opt, v_2_opt, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, ld_tmp
-          );
-        }
-        const Eigen::MatrixXd R_ass_base = R_ass_slab;
-        const std::vector<ScheduleGroup> groups_base = groups;
-        const Eigen::MatrixXd G_mat_base = G_mat;
-
-        auto schur_solve_base = [&](const Eigen::VectorXd& r_s_in, const Eigen::VectorXd& r_2_in,
-                                    Eigen::VectorXd& dv_s_out, Eigen::VectorXd& dv_2_out) {
-          R_ass_slab = R_ass_base;
-          if (use_group_rank1) groups = groups_base; else G_mat = G_mat_base;
-          apply_R_ass(r_s_in, rs_tilde_buf);
-          sub_G_mul_vec(r_2_in, rs_tilde_buf, r_2_tilde_buf);
-          dv_2_out.noalias() = llt_22_fin_ws.solve(r_2_tilde_buf);
-          sub_Gt_mul_vec(rs_tilde_buf, dv_2_out, nullptr, dv_s_out);
-          apply_Rt_ass_in_place(dv_s_out);
-        };
-
-        const double eps_t = 1e-3;
-        const double mult_hi = std::exp(eps_t);
-        Eigen::VectorXd var_theta_all(n_theta);
-        int col_k = 0;
-
-        for (int j = 0; j < q_s; ++j, ++col_k) {
-          var_theta_all(col_k) = res.var_log_tau_s(j);
-          Eigen::MatrixXd Ls_hi = safe_chol(scale_cov_single_sd(Sigma_s, j, mult_hi));
-          Eigen::VectorXd vs_init = v_s_opt;
-          Eigen::VectorXd v2_init = v_2_opt;
-          if (fin_obs_ready) {
-            Eigen::MatrixXd map_inv = Ls_hi.triangularView<Eigen::Lower>().solve(L_s_fin);
-            Eigen::MatrixXd map_tr = Ls_hi.transpose() * L_s_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_s, q_s));
-            Eigen::VectorXd r_s_pert(dim_s);
-            for (int s = 0; s < n_subj; ++s) {
-              const auto vs_seg = v_s_opt.segment(s * q_s, q_s);
-              vs_init.segment(s * q_s, q_s).noalias() = map_inv * vs_seg;
-              r_s_pert.segment(s * q_s, q_s).noalias() = map_tr * vs_seg - vs_init.segment(s * q_s, q_s);
-            }
-            Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
-            schur_solve_base(r_s_pert, Eigen::VectorXd::Zero(dim_2), dvs_t, dv2_t);
-            vs_init += dvs_t;
-            v2_init += dv2_t;
+          dv2_dbeta = -S22_inv_S2b_saved;
+          for (int p = 0; p < P; ++p) {
+            d_beta_buf.setZero();
+            d_beta_buf[p] = 1.0;
+            sub_Gt_mul_vec(Eigen::VectorXd::Zero(dim_s), dv2_dbeta.col(p), &d_beta_buf, step_s_buf);
+            apply_Rt_ass_in_place(step_s_buf);
+            dvs_dbeta.col(p) = step_s_buf;
           }
-          Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            beta, Ls_hi, L_i_fin, L_t_fin, P_beta, chance, vs_init, v2_init, 1
-          );
-          res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
+          g_base = grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws);
+        } else {
+          dv2_dbeta.setZero();
+          dvs_dbeta.setZero();
+          if (!compute_laplace_grad_beta(
+            beta, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, v_s_opt, v_2_opt, g_base, 7
+          )) return false;
         }
-        if (q_s > 0 && (q_i > 0 || q_t > 0)) update_ZL(L_s_fin, L_i_fin, L_t_fin, 1);
 
-        for (int j = 0; j < q_i; ++j, ++col_k) {
-          var_theta_all(col_k) = res.var_log_tau_i(j);
-          Eigen::MatrixXd Li_hi = safe_chol(scale_cov_single_sd(Sigma_i, j, mult_hi));
-          Eigen::VectorXd vs_init = v_s_opt;
-          Eigen::VectorXd v2_init = v_2_opt;
+        Eigen::MatrixXd H_lap_bb(P, P);
+        for (int p = 0; p < P; ++p) {
+          Eigen::VectorXd b_hi = beta;
+          b_hi(p) += eps_b;
+          Eigen::VectorXd vs_init = v_s_opt + eps_b * dvs_dbeta.col(p);
+          Eigen::VectorXd v2_init = v_2_opt + eps_b * dv2_dbeta.col(p);
+          Eigen::VectorXd g_hi;
+          if (!compute_laplace_grad_beta(
+            b_hi, L_s_fin, L_i_fin, L_t_fin, P_beta, chance, vs_init, v2_init, g_hi, 0
+          )) return false;
+          H_lap_bb.col(p) = -(g_hi - g_base) / eps_b;
+        }
+        H_lap_bb = 0.5 * (H_lap_bb + H_lap_bb.transpose());
+
+        double min_floor = std::max(0.25 * ev_cond.minCoeff(), 1e-6);
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es_lap(H_lap_bb);
+        Eigen::VectorXd ev_lap = es_lap.eigenvalues().cwiseMax(min_floor);
+        Eigen::MatrixXd vcov_lap_fixed = es_lap.eigenvectors() * ev_lap.cwiseInverse().asDiagonal() *
+          es_lap.eigenvectors().transpose();
+
+        if (fix_cov) {
+          vcov_beta = vcov_lap_fixed;
+        } else {
+          // Restore base Schur system once to warm-start covariance perturbations via 1-step Schur tangent
           if (fin_obs_ready) {
-            Eigen::MatrixXd map_inv = Li_hi.triangularView<Eigen::Lower>().solve(L_i_fin);
-            Eigen::MatrixXd map_tr = Li_hi.transpose() * L_i_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_i, q_i));
-            Eigen::VectorXd r_2_pert = Eigen::VectorXd::Zero(dim_2);
-            for (int i = 0; i < n_item; ++i) {
-              const auto vi_seg = v_2_opt.segment(i * q_i, q_i);
-              v2_init.segment(i * q_i, q_i).noalias() = map_inv * vi_seg;
-              r_2_pert.segment(i * q_i, q_i).noalias() = map_tr * vi_seg - v2_init.segment(i * q_i, q_i);
-            }
-            Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
-            schur_solve_base(Eigen::VectorXd::Zero(dim_s), r_2_pert, dvs_t, dv2_t);
-            vs_init += dvs_t;
-            v2_init += dv2_t;
+            eval_trials(beta, v_s_opt, v_2_opt, chance, true);
+            double ld_tmp = 0.0;
+            fin_obs_ready = assemble_and_factor_core(
+              beta, v_s_opt, v_2_opt, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, ld_tmp
+            );
           }
-          Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            beta, L_s_fin, Li_hi, L_t_fin, P_beta, chance, vs_init, v2_init, 2
-          );
-          res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
-        }
-        if (q_i > 0 && q_t > 0) update_ZL(L_s_fin, L_i_fin, L_t_fin, 2);
+          if (!fin_obs_ready) return false;
+          const Eigen::MatrixXd R_ass_base = R_ass_slab;
+          const std::vector<ScheduleGroup> groups_base = groups;
+          const Eigen::MatrixXd G_mat_base = G_mat;
 
-        for (int j = 0; j < q_t; ++j, ++col_k) {
-          var_theta_all(col_k) = res.var_log_tau_t(j);
-          Eigen::MatrixXd Lt_hi = safe_chol(scale_cov_single_sd(Sigma_t, j, mult_hi));
-          Eigen::VectorXd vs_init = v_s_opt;
-          Eigen::VectorXd v2_init = v_2_opt;
-          if (fin_obs_ready) {
-            Eigen::MatrixXd map_inv = Lt_hi.triangularView<Eigen::Lower>().solve(L_t_fin);
-            Eigen::MatrixXd map_tr = Lt_hi.transpose() * L_t_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_t, q_t));
-            Eigen::VectorXd r_2_pert = Eigen::VectorXd::Zero(dim_2);
-            for (int t = 0; t < n_testlet; ++t) {
-              const int off_t = dim_i + t * q_t;
-              const auto vt_seg = v_2_opt.segment(off_t, q_t);
-              v2_init.segment(off_t, q_t).noalias() = map_inv * vt_seg;
-              r_2_pert.segment(off_t, q_t).noalias() = map_tr * vt_seg - v2_init.segment(off_t, q_t);
+          auto schur_solve_base = [&](const Eigen::VectorXd& r_s_in, const Eigen::VectorXd& r_2_in,
+                                      Eigen::VectorXd& dv_s_out, Eigen::VectorXd& dv_2_out) {
+            R_ass_slab = R_ass_base;
+            if (use_group_rank1) groups = groups_base; else G_mat = G_mat_base;
+            apply_R_ass(r_s_in, rs_tilde_buf);
+            sub_G_mul_vec(r_2_in, rs_tilde_buf, r_2_tilde_buf);
+            dv_2_out.noalias() = llt_22_fin_ws.solve(r_2_tilde_buf);
+            sub_Gt_mul_vec(rs_tilde_buf, dv_2_out, nullptr, dv_s_out);
+            apply_Rt_ass_in_place(dv_s_out);
+          };
+
+          const double eps_t = 1e-3;
+          const double mult_hi = std::exp(eps_t);
+          Eigen::VectorXd var_theta_all(n_theta);
+          int col_k = 0;
+
+          for (int j = 0; j < q_s; ++j, ++col_k) {
+            var_theta_all(col_k) = res.var_log_tau_s(j);
+            Eigen::MatrixXd Ls_hi = safe_chol(scale_cov_single_sd(Sigma_s, j, mult_hi));
+            Eigen::VectorXd vs_init = v_s_opt;
+            Eigen::VectorXd v2_init = v_2_opt;
+            if (fin_obs_ready) {
+              Eigen::MatrixXd map_inv = Ls_hi.triangularView<Eigen::Lower>().solve(L_s_fin);
+              Eigen::MatrixXd map_tr = Ls_hi.transpose() * L_s_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_s, q_s));
+              Eigen::VectorXd r_s_pert(dim_s);
+              for (int s = 0; s < n_subj; ++s) {
+                const auto vs_seg = v_s_opt.segment(s * q_s, q_s);
+                vs_init.segment(s * q_s, q_s).noalias() = map_inv * vs_seg;
+                r_s_pert.segment(s * q_s, q_s).noalias() = map_tr * vs_seg - vs_init.segment(s * q_s, q_s);
+              }
+              Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
+              schur_solve_base(r_s_pert, Eigen::VectorXd::Zero(dim_2), dvs_t, dv2_t);
+              vs_init += dvs_t;
+              v2_init += dv2_t;
             }
-            Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
-            schur_solve_base(Eigen::VectorXd::Zero(dim_s), r_2_pert, dvs_t, dv2_t);
-            vs_init += dvs_t;
-            v2_init += dv2_t;
+            Eigen::VectorXd g_hi;
+            if (!compute_laplace_grad_beta(
+              beta, Ls_hi, L_i_fin, L_t_fin, P_beta, chance, vs_init, v2_init, g_hi, 1
+            )) return false;
+            res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
           }
-          Eigen::VectorXd g_hi = compute_laplace_grad_beta(
-            beta, L_s_fin, L_i_fin, Lt_hi, P_beta, chance, vs_init, v2_init, 4
-          );
-          res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
-        }
+          if (q_s > 0 && (q_i > 0 || q_t > 0)) update_ZL(L_s_fin, L_i_fin, L_t_fin, 1);
 
-        vcov_beta = vcov_lap_fixed +
-          res.J_beta_theta * var_theta_all.asDiagonal() * res.J_beta_theta.transpose();
+          for (int j = 0; j < q_i; ++j, ++col_k) {
+            var_theta_all(col_k) = res.var_log_tau_i(j);
+            Eigen::MatrixXd Li_hi = safe_chol(scale_cov_single_sd(Sigma_i, j, mult_hi));
+            Eigen::VectorXd vs_init = v_s_opt;
+            Eigen::VectorXd v2_init = v_2_opt;
+            if (fin_obs_ready) {
+              Eigen::MatrixXd map_inv = Li_hi.triangularView<Eigen::Lower>().solve(L_i_fin);
+              Eigen::MatrixXd map_tr = Li_hi.transpose() * L_i_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_i, q_i));
+              Eigen::VectorXd r_2_pert = Eigen::VectorXd::Zero(dim_2);
+              for (int i = 0; i < n_item; ++i) {
+                const auto vi_seg = v_2_opt.segment(i * q_i, q_i);
+                v2_init.segment(i * q_i, q_i).noalias() = map_inv * vi_seg;
+                r_2_pert.segment(i * q_i, q_i).noalias() = map_tr * vi_seg - v2_init.segment(i * q_i, q_i);
+              }
+              Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
+              schur_solve_base(Eigen::VectorXd::Zero(dim_s), r_2_pert, dvs_t, dv2_t);
+              vs_init += dvs_t;
+              v2_init += dv2_t;
+            }
+            Eigen::VectorXd g_hi;
+            if (!compute_laplace_grad_beta(
+              beta, L_s_fin, Li_hi, L_t_fin, P_beta, chance, vs_init, v2_init, g_hi, 2
+            )) return false;
+            res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
+          }
+          if (q_i > 0 && q_t > 0) update_ZL(L_s_fin, L_i_fin, L_t_fin, 2);
+
+          for (int j = 0; j < q_t; ++j, ++col_k) {
+            var_theta_all(col_k) = res.var_log_tau_t(j);
+            Eigen::MatrixXd Lt_hi = safe_chol(scale_cov_single_sd(Sigma_t, j, mult_hi));
+            Eigen::VectorXd vs_init = v_s_opt;
+            Eigen::VectorXd v2_init = v_2_opt;
+            if (fin_obs_ready) {
+              Eigen::MatrixXd map_inv = Lt_hi.triangularView<Eigen::Lower>().solve(L_t_fin);
+              Eigen::MatrixXd map_tr = Lt_hi.transpose() * L_t_fin.triangularView<Eigen::Lower>().transpose().solve(Eigen::MatrixXd::Identity(q_t, q_t));
+              Eigen::VectorXd r_2_pert = Eigen::VectorXd::Zero(dim_2);
+              for (int t = 0; t < n_testlet; ++t) {
+                const int off_t = dim_i + t * q_t;
+                const auto vt_seg = v_2_opt.segment(off_t, q_t);
+                v2_init.segment(off_t, q_t).noalias() = map_inv * vt_seg;
+                r_2_pert.segment(off_t, q_t).noalias() = map_tr * vt_seg - v2_init.segment(off_t, q_t);
+              }
+              Eigen::VectorXd dvs_t(dim_s), dv2_t(dim_2);
+              schur_solve_base(Eigen::VectorXd::Zero(dim_s), r_2_pert, dvs_t, dv2_t);
+              vs_init += dvs_t;
+              v2_init += dv2_t;
+            }
+            Eigen::VectorXd g_hi;
+            if (!compute_laplace_grad_beta(
+              beta, L_s_fin, L_i_fin, Lt_hi, P_beta, chance, vs_init, v2_init, g_hi, 4
+            )) return false;
+            res.J_beta_theta.col(col_k) = vcov_lap_fixed * ((g_hi - g_base) / eps_t);
+          }
+
+          vcov_beta = vcov_lap_fixed +
+            res.J_beta_theta * var_theta_all.asDiagonal() * res.J_beta_theta.transpose();
+        }
+        return true;
+      };
+      if (!compute_uncertainty()) {
+        curvature_failed = true;
+        fin_obs_ready = false;
+        log_lik_laplace = NA_REAL;
       }
       v_s = v_s_opt;
       v_2 = v_2_opt;
@@ -2685,8 +2711,8 @@ struct GLMMWorkspace {
       (has_testlet && is_cov_singular(Sigma_t, corr_mode))
     );
 
-    if (!pos_def_b || !beta.allFinite() || !se_beta.allFinite() ||
-        (inner_converged && outer_converged && !fin_obs_ready)) {
+    if (curvature_failed || !pos_def_b || !beta.allFinite() || !se_beta.allFinite() ||
+        (inner_converged && outer_converged && (!fin_obs_ready || !std::isfinite(log_lik_laplace)))) {
       res.status = "non_pd_hessian";
       res.strictly_converged = false;
     } else if (!inner_converged) {
@@ -3307,6 +3333,22 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
     int max_iter = 200,
     double tol = 1e-6
 ) {
+  if (n_subj < 1 || n_item < 1 || estimable.size() != n_item ||
+      subj_id.size() != y.size() || item_id.size() != y.size()) {
+    return Rcpp::List::create(Rcpp::Named("error") = "Invalid fixed-bank dimensions");
+  }
+  std::unordered_set<std::uint64_t> seen;
+  seen.reserve(y.size());
+  for (int k = 0; k < y.size(); ++k) {
+    if (subj_id[k] < 1 || subj_id[k] > n_subj || item_id[k] < 1 || item_id[k] > n_item ||
+        (y[k] != 0 && y[k] != 1)) {
+      return Rcpp::List::create(Rcpp::Named("error") = "Invalid fixed-bank IDs or binary responses");
+    }
+    const auto key = static_cast<std::uint64_t>(subj_id[k] - 1) * n_item + item_id[k] - 1;
+    if (!seen.insert(key).second) {
+      return Rcpp::List::create(Rcpp::Named("error") = "Duplicate participant-item responses");
+    }
+  }
   std::vector<int> est_j;
   est_j.reserve(n_item);
   std::vector<int> item_to_col(n_item, -1);
@@ -3378,10 +3420,9 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
     n_sub.setConstant(static_cast<double>(S_obs));
   }
 
-  // double check all_obs in case of duplicate rows in trials
-  if (all_obs) {
-    for (int j = 0; j < J; ++j) {
-      if (s_sub[j] < 0.0 || s_sub[j] > static_cast<double>(S_obs)) all_obs = false;
+  for (int j = 0; j < J; ++j) {
+    if (n_sub[j] == 0 || s_sub[j] == 0 || s_sub[j] == n_sub[j]) {
+      return Rcpp::List::create(Rcpp::Named("error") = "Estimable items must have both response categories");
     }
   }
 

@@ -1,0 +1,71 @@
+review-regressions: 1234W56789.a..bc.defg.hijklm.nopqrstuvw.xyzA
+
+══ Warnings ════════════════════════════════════════════════════════════════════
+1. custom data validates IDs and recovers the scheduled passages ('test-review-regressions.R:27:3') - no non-missing arguments to max; returning -Inf
+
+══ Failed ══════════════════════════════════════════════════════════════════════
+── 1. Failure ('test-review-regressions.R:7:3'): slope sensitivity requires a po
+Expected `plan$sensitivity` to be NULL.
+Differences:
+`actual` is an S3 object of class <data.frame>, a list
+`expected` is NULL
+
+
+── 2. Error ('test-review-regressions.R:8:3'): slope sensitivity requires a posi
+Error in `has_random_slopes(g)`: could not find function "has_random_slopes"
+Backtrace:
+    ▆
+ 1. └─testthat::expect_false(has_random_slopes(g)) at test-review-regressions.R:8:3
+ 2.   └─testthat::quasi_label(enquo(object), label)
+ 3.     └─rlang::eval_bare(expr, quo_get_env(quo))
+
+── 3. Failure ('test-review-regressions.R:25:3'): custom data validates IDs and 
+Expected `fixed$testlet_id` to be identical to `schedule$trials$testlet_id`.
+Differences:
+target is NULL, current is numeric
+
+── 4. Failure ('test-review-regressions.R:26:3'): custom data validates IDs and 
+Expected `as.integer(fixed$testlet)` to be identical to `fixed$testlet_id`.
+Differences:
+Types not compatible: integer is not NULL
+
+── 5. Error ('test-review-regressions.R:27:3'): custom data validates IDs and re
+Error in `logical(mx)`: vector size cannot be infinite
+Backtrace:
+    ▆
+ 1. └─glmmplanr::evaluate_design_point(...) at test-review-regressions.R:27:3
+ 2.   ├─glmmplanr:::with_rng_stream(...)
+ 3.   │ └─base::force(expr)
+ 4.   └─glmmplanr:::execute_single_replication(...)
+ 5.     └─glmmplanr:::fit_single_dataset(...)
+ 6.       └─glmmplanr:::compact_idx0(df$testlet_id)
+ 7.         └─base::logical(mx)
+
+── 6. Failure ('test-review-regressions.R:46:5'): absolute probability targets h
+Expected `specify_target(...)` to throw a error.
+
+── 7. Failure ('test-review-regressions.R:46:5'): absolute probability targets h
+Expected `specify_target(...)` to throw a error.
+
+── 8. Failure ('test-review-regressions.R:46:5'): absolute probability targets h
+Expected `specify_target(...)` to throw a error.
+
+── 9. Failure ('test-review-regressions.R:55:5'): absolute probability targets h
+Expected `all(...)` to be TRUE.
+Differences:
+`actual`:   FALSE
+`expected`: TRUE 
+
+
+── 10. Failure ('test-review-regressions.R:55:5'): absolute probability targets 
+Expected `all(...)` to be TRUE.
+Differences:
+`actual`:   FALSE
+`expected`: TRUE 
+
+  ... and 26 more
+
+
+Maximum number of 10 failures reached, some test results may be missing.
+
+══ DONE ════════════════════════════════════════════════════════════════════════

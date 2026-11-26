@@ -63,6 +63,43 @@ replay is not an independent confirmation of nominal inference.
 
 <a id="covariance-review-medium"></a>
 
+## Planning and Input Contracts
+
+Random-slope sensitivity is skipped when all participant, item and testlet
+slope SDs are zero. Multiplying zero by the sensitivity factors would repeat
+the same DGP and turn Monte Carlo noise into apparent sensitivity.
+
+With `mc_adjustment = "bonferroni"`, adjusted Wilson decisions govern whether
+to evaluate larger candidates or run the requested top-up. Adding verified
+candidates updates earlier decisions. Multi-scenario searches select a common
+candidate set before a fresh confirmation of every candidate-by-scenario pair;
+this also fixes the multiplicity used for that confirmation. Search draws are
+not reused as confirmation. This can add computation relative to earlier
+versions. Wilson coverage remains approximate, and these changes do not make
+an adaptively searched design a guarantee of nominal model-based inference.
+
+A single-cell probability or positive-weight mean probability has no
+between-condition zero-difference null. Use `criterion = "ci_width"` (or an
+explicit ROPE). Its detection-power and joint detection/width fields are `NA`;
+coverage and precision remain meaningful. Reports distinguish accuracy from
+an accuracy difference, rather than interpreting an interval above 0% as power.
+
+Custom `data_fn` responses must use positive integer subject, item and cell IDs
+within the schedule. For testlets, omitted passage IDs are recovered from the
+scheduled item mapping; supplied labels/IDs must agree with it. Fixed-bank MML
+requires unique person-item rows and nonconstant responses for items marked
+estimable. Public fixed-bank planning still diagnoses constant/unobserved items
+and retains them as failures of a full-bank precision requirement.
+
+Native GLMM polishing and derivative calculations require unmodified observed
+curvature. Failed checks return `non_pd_hessian`, `converged = FALSE` and
+`logLik = NA`; ordinary iteration nonconvergence remains a separate diagnosis.
+The additional repair leaves all 2,048 saved native fits and 84 selected
+profiles numerically unchanged from the preceding curvature repair (point/SE
+differences zero, no decision changes). This is a regression check, not new
+evidence of nominal coverage or null rejection. Details and reproduction are in
+the repository's `validation/README.md`, section `planning-contract-repair`.
+
 ## Focused Check of Covariance Paths
 
 A paired study used a single two-level experimental factor in 16 simulation

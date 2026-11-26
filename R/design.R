@@ -555,6 +555,7 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diag
     n_subj = n_subj,
     n_item = n_item,
     n_testlet = if (design$has_testlet) n_passages else 0L,
+    n_cells = design$n_cells,
     n_trials_full = nrow(trials),
     n_trials_scheduled = nrow(trials),
     n_trials_expected = compute_expected_trials(design, n_subj, n_item)

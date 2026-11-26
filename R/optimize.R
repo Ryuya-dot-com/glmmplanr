@@ -31,6 +31,8 @@
 #'   planning**. When supplied, identifies both the standard-scenario design and
 #'   the all-scenario robust design along with the sample-size increments
 #'   (`+delta_subj`, `+delta_item`, `+delta_trials`).
+#'   Exploratory searches first select a common candidate set. Fresh verification
+#'   streams then evaluate every candidate-by-scenario pair before any top-up.
 #' @param standard_scenario Optional character name selecting the reference
 #'   `"standard"` scenario inside `scenarios`.
 #' @param method Search strategy: `"surrogate_gp"` (default) or `"grid"`.
@@ -181,7 +183,7 @@ optimize_sample_size <- function(
       n_eval_adapt = as.integer(n_eval_adapt),
       nsim_init = as.integer(nsim_init),
       nsim_final = as.integer(nsim_final),
-      nsim_topup = nsim_topup,
+      nsim_topup = if (is.null(scenarios)) nsim_topup else 0L,
       topup_policy = topup_policy,
       mc_adjustment = if (is.null(scenarios)) mc_adjustment else "none",
       n_verify = as.integer(n_verify),
@@ -247,7 +249,7 @@ optimize_sample_size <- function(
     spec
   }
 
-  sens_df <- if (as.integer(nsim_sensitivity) > 0L && length(sens_spec$dgp$design$factor_names) > 0L) {
+  sens_df <- if (as.integer(nsim_sensitivity) > 0L && has_random_slopes(sens_spec$dgp)) {
     if (verbose) {
       scen_lbl <- if (!is.null(robust_info)) paste0(" (", robust_info$toughest_scenario, ")") else ""
       cli::cli_inform(
@@ -550,6 +552,19 @@ run_single_spec_search <- function(
     )
   }
 
+  verification_spec <- function(n) {
+    sp <- spec_look
+    if (identical(mc_adjustment, "bonferroni")) {
+      sp$mc_conf_level <- sequential_topup_conf_level(spec$mc_conf_level,
+        round_num = 1L, n_decisions = n,
+        mode = if (seq_two_stage) "two_stage" else "none")
+    }
+    sp
+  }
+  refresh_decisions <- function(df) {
+    reclassify_verified_mc(df, spec, verification_spec(nrow(df))$mc_conf_level)
+  }
+
   if (method == "grid" || n_grid <= (n_eval_init + n_eval_adapt)) {
     if (verbose) {
       cli::cli_inform(
@@ -557,7 +572,7 @@ run_single_spec_search <- function(
       )
     }
     s2_out <- evaluate_grid_batch(
-      spec = spec_look,
+      spec = verification_spec(n_grid),
       grid_sub = grid_df,
       point_bases = point_base_s2,
       nsim = nsim_final,
@@ -573,6 +588,7 @@ run_single_spec_search <- function(
     verified_df <- attach_pref(s2_out$summary)
     verified_df$stage <- "grid_final"
     verified_raw <- s2_out$raw
+    verified_df <- refresh_decisions(verified_df)
 
     if (nsim_topup > 0L) {
       verified_df <- apply_indeterminate_topup(
@@ -580,7 +596,7 @@ run_single_spec_search <- function(
         verified_raw = verified_raw,
         grid_df = grid_df,
         point_base_topup = point_base_topup,
-        spec = spec_look,
+        spec = verification_spec(nrow(verified_df)),
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
         workers = workers,
@@ -588,15 +604,7 @@ run_single_spec_search <- function(
         verbose = verbose
       )
     }
-    if (identical(mc_adjustment, "bonferroni")) {
-      conf_eff <- sequential_topup_conf_level(
-        spec$mc_conf_level,
-        round_num = 1L,
-        n_decisions = nrow(verified_df),
-        mode = if (seq_two_stage) "two_stage" else "none"
-      )
-      verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
-    }
+    verified_df <- refresh_decisions(verified_df)
     eval_all <- verified_df
     surf <- build_surrogate_surface(grid_df, eval_all, spec, prefer = prefer)
   } else {
@@ -667,7 +675,7 @@ run_single_spec_search <- function(
       )
     }
     s2_out <- evaluate_grid_batch(
-      spec = spec_look,
+      spec = verification_spec(length(verify_idx)),
       grid_sub = grid_df[verify_idx, , drop = FALSE],
       point_bases = point_base_s2[verify_idx],
       nsim = nsim_final,
@@ -683,6 +691,7 @@ run_single_spec_search <- function(
     verified_df <- attach_pref(s2_out$summary)
     verified_df$stage <- "final_verified"
     verified_raw <- s2_out$raw
+    verified_df <- refresh_decisions(verified_df)
 
     if (!any(verified_df$decision_status == "pass")) {
       # Refit GP surface incorporating Stage-2 evaluations so systematic
@@ -696,7 +705,7 @@ run_single_spec_search <- function(
       if (length(gp_feas_idx) > 0L) {
         best_backup <- gp_feas_idx[order(surf_refit$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
         ex_out <- evaluate_grid_batch(
-          spec = spec_look,
+          spec = verification_spec(nrow(verified_df) + length(best_backup)),
           grid_sub = grid_df[best_backup, , drop = FALSE],
           point_bases = point_base_s2[best_backup],
           nsim = nsim_final,
@@ -711,7 +720,7 @@ run_single_spec_search <- function(
         )
         ex_df <- attach_pref(ex_out$summary)
         ex_df$stage <- "final_verified_stepup"
-        verified_df <- rbind(verified_df, ex_df)
+        verified_df <- refresh_decisions(rbind(verified_df, ex_df))
         if (nsim_topup > 0L) verified_raw <- c(verified_raw, ex_out$raw)
       }
     }
@@ -722,7 +731,7 @@ run_single_spec_search <- function(
                            verified_df$n_item == grid_df$n_item[max_idx])
       if (!already_max) {
         cn_out <- evaluate_grid_batch(
-          spec = spec_look,
+          spec = verification_spec(nrow(verified_df) + 1L),
           grid_sub = grid_df[max_idx, , drop = FALSE],
           point_bases = point_base_s2[max_idx],
           nsim = nsim_final,
@@ -736,7 +745,7 @@ run_single_spec_search <- function(
         )
         cn_df <- attach_pref(cn_out$summary)
         cn_df$stage <- "final_verified_ceiling"
-        verified_df <- rbind(verified_df, cn_df)
+        verified_df <- refresh_decisions(rbind(verified_df, cn_df))
         if (nsim_topup > 0L) verified_raw <- c(verified_raw, cn_out$raw)
       }
     }
@@ -747,7 +756,7 @@ run_single_spec_search <- function(
         verified_raw = verified_raw,
         grid_df = grid_df,
         point_base_topup = point_base_topup,
-        spec = spec_look,
+        spec = verification_spec(nrow(verified_df)),
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
         workers = workers,
@@ -756,15 +765,7 @@ run_single_spec_search <- function(
       )
     }
 
-    if (identical(mc_adjustment, "bonferroni")) {
-      conf_eff <- sequential_topup_conf_level(
-        spec$mc_conf_level,
-        round_num = 1L,
-        n_decisions = nrow(verified_df),
-        mode = if (seq_two_stage) "two_stage" else "none"
-      )
-      verified_df <- reclassify_verified_mc(verified_df, spec, conf_eff)
-    }
+    verified_df <- refresh_decisions(verified_df)
 
     s1_keep <- !(paste(eval_s1$n_subj, eval_s1$n_item) %in%
                    paste(verified_df$n_subj, verified_df$n_item))
@@ -1116,9 +1117,15 @@ topup_rows <- function(
     verbose = verbose
   )
 
+  if (!"nsim_initial" %in% names(ver)) ver$nsim_initial <- ver$nsim
+  if (!"decision_initial" %in% names(ver)) ver$decision_initial <- ver$decision_status
+  if (!"nsim_topup_used" %in% names(ver)) ver$nsim_topup_used <- 0L
+  if (!"topup_only_power" %in% names(ver)) ver$topup_only_power <- NA_real_
   for (j in seq_along(ind_idx)) {
     r_i <- ind_idx[j]
     old_r <- ver[r_i, , drop = FALSE]
+    ver$nsim_topup_used[r_i] <- if (identical(topup_policy, "independent")) nsim_extra else old_r$nsim_topup_used + nsim_extra
+    ver$topup_only_power[r_i] <- extra_out$summary$power[j]
     new_r <- extra_out$summary[j, , drop = FALSE]
     if (identical(topup_policy, "independent")) {
       fresh <- attach_grid_meta(new_r, surf)
@@ -1713,7 +1720,7 @@ print.glmmplanr_result <- function(x, ...) {
   has_null <- can_define_null_target(x$spec)
   val_info <- assess_inferential_validity(cov_show, opt$n_valid, x$spec$alpha, has_null = has_null)
   one_cell <- isTRUE(x$spec$dgp$design$n_cells == 1L)
-  acc_line <- if (one_cell) {
+  acc_line <- if (!has_null || one_cell) {
     sprintf(
       "Target accuracy (%s): true = %.1f%% | Mean CI width = {.strong %.2f pp} (%.3f logit)",
       x$spec$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
@@ -1729,7 +1736,7 @@ print.glmmplanr_result <- function(x, ...) {
     "Target attainment: {.strong {status_txt}}",
     "Inferential validity: {val_info$detail}",
     "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected})",
-    "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
+    if (has_null) "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
     acc_line
   )
   exp_regimes <- detect_exploratory_regimes(x$spec)
@@ -1758,8 +1765,8 @@ print.glmmplanr_result <- function(x, ...) {
       )
     )
   }
-  if (!is.null(opt$joint_prob) && !is.na(opt$joint_prob)) {
-    cli::cli_inform(sprintf("Detection and width attainment in the same replication = %.1f%% [%.1f%%, %.1f%%]",
+  if (has_null && x$spec$criterion %in% c("both", "joint") && !is.null(opt$joint_prob) && !is.na(opt$joint_prob)) {
+    bullets <- c(bullets, sprintf("Detection and width attainment in the same replication = %.1f%% [%.1f%%, %.1f%%]",
       100 * opt$joint_prob, 100 * opt$joint_mc_lo, 100 * opt$joint_mc_hi))
   }
   if (!is.na(opt$aipe_prob)) {
@@ -1795,7 +1802,7 @@ print.glmmplanr_result <- function(x, ...) {
   }
   bullets <- c(
     bullets,
-    "Diagnostics: Singular = {sing_str} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Stage-2 H1 Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
+    "Diagnostics: Singular = {sing_str} | Non-conv/Fail = {sprintf('%.1f%%', opt$nonconv_rate * 100)} (MaxIter = {sprintf('%.1f%%', opt$max_iter_rate * 100)}) | Stage-2 Coverage = {ifelse(is.na(cov_show), 'NA', sprintf('%.1f%%', cov_show * 100))}"
   )
   if (nzchar(opt$top_error_reason)) {
     bullets <- c(bullets, "Top non-conv/error reason: {.val {opt$top_error_reason}}")

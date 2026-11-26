@@ -143,7 +143,9 @@ Bonferroni split) or \code{"pooled"} (exploratory, emits warning).}
 
 \item{mc_adjustment}{Multiplicity adjustment applied to Stage-2 Wilson Monte
 Carlo intervals across verified candidates: \code{"none"} (default) or
-\code{"bonferroni"}.}
+\code{"bonferroni"}. Adjusted decisions are used before step-up, ceiling and
+top-up checks; adding candidates also updates earlier decisions. In
+multi-scenario planning the family comprises candidate-by-scenario pairs.}
 
 \item{n_verify}{Number of Pareto-frontier candidate designs verified at
 \code{nsim_final} replications in Stage 2 (default \code{4L}).}
@@ -153,7 +155,9 @@ applies group-sequential futility curtailment during Stage-2 verification.}
 
 \item{nsim_sensitivity}{Number of Monte Carlo simulations per level used to
 build the 3-level random-slope sensitivity table at the recommended design
-(default \code{200L}; set to \code{0L} to skip).}
+(default \code{200L}; set to \code{0L} to skip).
+Skipped automatically when all participant, item and testlet slope SDs
+are zero or no random-slope columns exist.}
 
 \item{parallel_backend}{Parallel execution engine: \code{"auto"} (default),
 \code{"mirai"}, \code{"multicore"}, or \code{"sequential"}.}

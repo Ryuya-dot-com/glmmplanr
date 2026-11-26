@@ -19,6 +19,72 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="planning-contract-repair"></a>
+
+## Planning decisions, custom data and numerical failure contracts (2026-11-26)
+
+The follow-up to `e5149b8` fixes six bounded implementation/reporting issues;
+it does not change the response-model roadmap, priors, interval methods or
+nominal-inference recommendations.
+
+| Issue | Corrected behavior and check |
+| --- | --- |
+| Zero random slopes | Skip the three sensitivity DGPs when every participant/item/testlet slope SD is zero. Positive slopes in any block remain eligible. |
+| Late MC adjustment | Apply Bonferroni-adjusted decisions before step-up, ceiling and top-up; reclassify earlier candidates when the family grows. Deterministic rates straddling the Wilson boundary exercise all three branches. Scenario candidate selection precedes fresh confirmation with the candidate-by-scenario multiplicity fixed; exploratory searches do not run top-ups. |
+| Stale top-up metadata | Refresh `nsim_topup_used` and `topup_only_power` on subsequent independent or pooled top-up calls. An independent batch replaces the inference batch rather than accumulating its denominator. |
+| Custom testlet responses | Validate finite positive integer IDs and bounds; derive omitted passage IDs from scheduled items and reject conflicting passage labels/IDs. Exercise the documented four-column callback and retained passage IDs after subsetting. |
+| Absolute probabilities and printing | Reject probability-scale power/both/joint targets without weights of both signs. Undefined power/joint fields are NA; precision, coverage and reports remain available. Joint-attainment console text is emitted as a separate bullet. |
+| Numerical failure guards | Reset working likelihood on polishing; track nonpositive observed curvature separately from iteration failure; use observed curvature for polishing gradients. Derivative failures return a failed fit rather than throwing. Fixed-bank MML validates bounds, duplicate person-item rows (including zeros) and nonconstant items marked estimable before boundary calculations. |
+
+The new regression cases are in
+[`test-review-regressions.R`](../tests/testthat/test-review-regressions.R),
+alongside the existing curvature/saddle and Rasch precision tests. Mocked
+Monte Carlo counts test the optimizer's control flow, not statistical power
+or exact familywise coverage of adaptively selected Wilson intervals. The
+fresh scenario confirmation can require more fits than earlier result reuse;
+removing redundant zero-slope sensitivity eliminates a separate unnecessary
+cost without changing the DGP.
+
+For the numerical kernel, reuse the preceding 2,048 stored responses and 84
+selected profiles with unchanged estimands, starting values, fit settings,
+random streams, failure denominators and unrounded decision rules:
+
+```sh
+# Use R_LIBS pointing to an isolated installation of this source.
+Rscript --vanilla validation/covariance_mode_replay.R validation/review_contract_replay
+python3 validation/review_contract_replay/verify.py
+```
+
+The replay script retains comparisons against the original medium run;
+`verify.py` additionally compares directly against `e5149b8`'s
+`curvature_contract_replay/`. All 2,048 native final/coarse fits and 84 profiles
+remain valid, with zero failed profile objective evaluations. Point estimates,
+SEs, response hashes and all four interval/decision indicators are identical
+to the preceding repair (maximum point/SE difference 0pp; the prior 1e-4pp
+tolerance is not widened). See
+[`verification.json`](review_contract_replay/verification.json). The three
+older pre-roundoff tolerance exceptions remain historical evidence.
+
+An additional bounded four-person/two-item probe enumerated 254 nonconstant
+response patterns at three fixed slope variances (762 cases): both versions
+returned 666 converged fits and 96 curvature failures. A 2,001-point variance
+scan for the existing saddle response compared joint and conditional
+uncertainty in the old version: both returned 1,840 converged and 161 failed
+fits, without a derivative exception. Thus these probes do not reproduce the
+specific perturbation-only exception or establish its frequency. Its removal
+is checked at the implementation level: every derivative caller propagates
+the failure flag into `non_pd_hessian`/missing likelihood. The saved-response
+replay and existing negative-curvature controls assess regression behavior;
+they are not a new nominal-coverage study or a global-mode guarantee.
+
+Win-builder, GitHub CI and release packaging remain deferred until the feature
+set is finalized. No new API or independent large simulation is introduced.
+The isolated optimized macOS/R 4.6.1 installation passes one full invocation
+with `NOT_CRAN=true`: 824 assertions, zero failures/warnings and one opt-in
+Stan skip. The native source and compiler options are unchanged across the
+replay build and the subsequent R-documentation installation; their binary
+hashes are recorded separately rather than claiming binary identity.
+
 <a id="conditional-curvature-contract"></a>
 
 ## Rejecting conditional saddles in native fits (2026-11-26)

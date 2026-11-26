@@ -30,7 +30,11 @@ returning a trial \code{data.frame} (starting from \code{schedule$trials} or
 \code{\link[=simulate_dgp_data]{simulate_dgp_data()}} with binary \code{y}, \code{subj_id}, \code{item_id}, and \code{cell_id})
 for evaluating structural misspecification such as ability-dependent
 dropout, item-specific guessing, or non-normal random effects. Default
-\code{NULL} uses the built-in parametric DGP in \code{spec$dgp}.}
+\code{NULL} uses the built-in parametric DGP in \code{spec$dgp}.
+IDs must be positive integers within the scheduled subject, item and cell
+ranges. For testlet designs, omitted \code{testlet_id} values are recovered from
+the scheduled item-to-passage mapping; supplied \code{testlet_id} or \code{testlet}
+columns must agree with that mapping.}
 
 \item{verbose}{Logical; display a live \code{cli} progress bar with ETA across
 replications (default \code{FALSE}).}
