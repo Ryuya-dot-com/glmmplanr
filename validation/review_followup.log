@@ -1,0 +1,29 @@
+Source MD5: 91c9cf10d5730fb57ad8f81230fd358e 
+t25 tail at 1.96: 0.06123257 
+MCSE for p=.061, n=2048: 0.005288503 
+    B bound_over_sigma        pass
+1  99              0.9 0.084322669
+2 399              0.9 0.002201658
+3  99              1.1 0.922918027
+4 399              1.1 0.997448745
+Normal-bootstrap SD relative MCSE B99: 0.07142857 
+Four Stage-2 points plus three sensitivity levels, no curtailment: 460000 
+Partial schedule: identical item/cell groups= 12 ; rank-1 group limit= 24 
+Per-participant condition counts:
+
+ 0  1  2 
+ 9 30  9 
+One-sided DGP resolves to: maximal 
+y ~ condition + (condition | subj) + (condition | item)
+<environment: 0x79316555b0>
+Four single-dataset stationarity probes (no accuracy-rate claim):
+    chance corr converged reported_score max_scaled_logsd_gradient
+ 0.0000000  0.0      TRUE    0.004927366               0.004717584
+ 0.0000000  0.2      TRUE    0.000000000               0.393854956
+ 0.3333333  0.0      TRUE    0.000000000               0.311131595
+ 0.3333333  0.2      TRUE    0.000000000               0.312847713
+ gradient_step_change perturbations_converged
+         2.482125e-06                    TRUE
+         2.299316e-06                    TRUE
+         3.052889e-06                    TRUE
+         3.082505e-06                    TRUE

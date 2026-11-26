@@ -13,6 +13,16 @@ datasets and 361,728 retained inner fits, all valid. The validation guide
 retains indeterminate planning/calibration checks and an adverse nominal-null
 flag. Successful fitting is not presented as uniform inferential calibration.
 
+A subsequent focused review on 2026-11-26 identified an unresolved numerical
+assessment for correlated and nonzero-guessing native GLMM paths: their
+convergence flag does not check stationarity of the common Laplace covariance
+objective. Four single-dataset profile-gradient probes are recorded in
+`validation/README.md#review-followup`; they do not estimate error rates.
+Formal submission should wait for resolution of this objective/diagnostic
+contract and its implications for supported planning claims. The existing
+platform checks and archive below are unchanged; they do not settle this
+statistical assessment.
+
 ## Current local candidate
 
 Source archive: `glmmplanr_0.1.0.tar.gz` (1,240,738 bytes).

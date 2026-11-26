@@ -19,6 +19,154 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="review-followup"></a>
+
+## Technical review follow-up (2026-11-26)
+
+This follow-up checks the supplied review against the implementation and saved
+results. It is not a new exhaustive audit or a Monte Carlo performance study.
+The numerical source is commit `50f2c4d`; `src/glmm_laplace.cpp` has MD5
+`91c9cf10d5730fb57ad8f81230fd358e`. No estimator, default, public API, or
+release archive changed. Existing platform checks remain valid for their
+recorded sources, but do not establish the numerical property examined here.
+The local environment is R 4.6.1, Rcpp 1.1.2, RcppEigen 0.3.4.0.2 and
+pkgload 1.5.3. The archived script/log match the executed temporary files;
+syntax, new links and recorded perturbation convergence/step stability were
+checked without rerunning fits. Full tests, builds and platform checks were
+not repeated for these validation-only records.
+
+**Covariance stationarity is an unresolved release assessment.** The
+mean-shift correction and covariance-score stopping rule apply only when
+`chance == 0 && corr_mode == 0`. Elsewhere, the reported zero score is an
+initial value for a check that is bypassed, not an evaluated zero derivative.
+The default nonzero correlation selects the other path when active random
+slopes are matched. Correlation shrinkage/eigenvalue repair is not an exact
+joint optimizer of the Half-t/LKJ Laplace objective. The joint-delta
+calculation propagates individual log-SD uncertainties and their beta
+sensitivities, not a full covariance matrix including correlation parameters.
+These approximation limits were already partly disclosed in the shipped
+guide; the new finding below supplies a concrete numerical diagnostic.
+
+[`review_followup.R`](review_followup.R) and its
+[`execution log`](review_followup.log) retain four single-dataset probes.
+Run from the repository root with
+`Rscript --vanilla validation/review_followup.R`; this loads the development
+source with `pkgload`, not an independently installed reference estimator.
+Each design has 32 participants, 24 items, two conditions with marginal
+probabilities .55/.65, participant SDs .8/.35, item SDs .6/.4, and response
+seed 921126. The four cells cross guessing floors 0 and 1/3 with correlations
+0 and .2. Regularization and final-stage numerical budgets match the current
+native settings. All four point fits and all fixed-covariance perturbation
+fits converged according to their implementation-specific stopping rules.
+
+| Guessing floor | Correlation | Reported covariance score | Maximum scaled numerical log-SD gradient |
+| ---: | ---: | ---: | ---: |
+| 0 | 0 | .004927 | .004718 |
+| 0 | .2 | 0 (not evaluated) | .393855 |
+| 1/3 | 0 | 0 (not evaluated) | .311132 |
+| 1/3 | .2 | 0 (not evaluated) | .312848 |
+
+The negative profile objective is minus the native Laplace log likelihood
+and fixed-effect/SD log priors, including the log-SD coordinate Jacobian.
+Each perturbation holds fitted correlation matrices fixed and refits beta
+and conditional modes. The LKJ term is constant along these directions.
+Central differences at steps .001 and .0005 differ by at most 3.1e-6 in
+unscaled gradients. Scaling uses the native approximate log-SD standard
+errors, as in the diagonal-path regression test; it is not full observed
+information. These are necessary stationarity checks using the native
+profile evaluator, not independent likelihood optimization, correlation
+gradient checks, HMC comparisons, or estimates of bias/coverage. They show
+why convergence must not be described as common-objective stationarity
+across all paths. Existing 3AFC performance evidence is retained within its
+tested conditions. Resolve the objective/diagnostic contract and check its
+effect on design decisions before treating the release as statistically
+ready; do not silently replace correlated DGPs with zero correlations.
+
+**Two causal interpretations in the review exceed the evidence.**
+
+- `2 * pt(-1.96, 25)` is .06123257, but matching the saved 6.10% null rate
+  does not identify 25 effective degrees of freedom. At 2,048 replications
+  the MCSE of a 6.1% rate is .529 percentage points. Neither that match nor
+  unbiased SE alone establishes a t pivot. The claim that every design with
+  at most 30 items or 12 passages necessarily misses nominal inference is
+  unsupported. Finite clusters are a plausible contributor alongside
+  covariance estimation, regularization and nonlinear interval construction.
+  A GLMM Satterthwaite approximation needs derivation and validation, not
+  substitution of the smallest cluster count minus one. The
+  [lme4 inference documentation](https://lme4.github.io/lme4/reference/pvalues.html)
+  distinguishes available finite-sample procedures from GLMM Wald inference.
+- Under independent normal bootstrap replicates, the relative MCSE of the
+  estimated SD at B=99 is approximately 7.1%. Its effect on width attainment
+  can have either sign: for a threshold of .9 times the true SD, attainment
+  is 8.43% at B=99 versus .22% at B=399; for 1.1 times the true SD it is
+  92.29% versus 99.74%. These are analytic chi-square examples, not observed
+  GLMM rates. The saved 72-by-60 paired drop of 7.62pp (MCSE 1.68pp) is real;
+  the 399-refit comparison uses only 32 outer datasets, changing 22/32 to
+  26/32. It does not establish recovery over all 512 datasets, superior
+  coverage, or a sufficient new bootstrap default. The implemented interval
+  uses bootstrap SE with a normal critical value, not bootstrap quantiles.
+
+**API and computation findings.** Partial presentation does not guarantee
+condition/exposure balance; a fixed item seed conditions the simulation on
+one schedule. However, testlets are sampled as whole units, and repeated
+partial schedules can qualify for the rank-1 path. The retained 48-person,
+4-item, 2-per-person example has 12 item/cell patterns, below its 24-group
+limit. It satisfies the grouping condition; no native timing/flag benchmark
+was performed. Its counts in the first condition are 0/1/2 for 9/30/9 people,
+illustrating the separate balance issue. A one-sided zero slope SD in the
+DGP does not remove that fitted slope under `match_dgp` in a within-both
+design. Explicit balanced schedules and separate participant/item analysis
+structures are useful enhancement candidates, not grounds to promote every
+research-only procedure into the 0.1.0 API.
+
+The external-engine joint-delta fallback uses heuristic log-SD variances
+and lacks the native beta sensitivity; the .75 information floor caps
+log-SD variance; and the 85-iteration coarse path remains for noncanonical
+fits. These are verified code properties, not measured effect sizes on
+selection or coverage. Expose the approximation/floor status and examine
+affected saved cases before changing numerical rules. The 460,000-fit
+calculation is correct for four fully evaluated 1,000-replication final
+points plus three 200-replication sensitivity levels, each with 99 inner
+fits. It excludes screening, top-ups and additional scenarios, and is not a
+global maximum; curtailment can reduce it. Logit remains a legitimate
+estimand, so its default is not itself a statistical defect. The surrogate
+uses a monotonized mean with unconstrained kriging uncertainty; describe it
+as a search approximation, not an exact constrained-GP posterior.
+
+**Publication claims must reflect the matched comparisons.** In the saved
+item-pool comparison, native-grid and mlpwr GLMM searches each produced 19
+confirmed proposals from 20 runs (respectively one indeterminate result and
+one search error). For Rasch, native grid had 46 confirmed/4 indeterminate;
+mlpwr had 34 confirmed/5 indeterminate/1 failed and 10 explicitly unqualified
+returns. GP refitting of those ten saved searches recovered confirmed
+candidates without new simulation. Moreover, in the separate large L2
+comparison, mlpwr confirmed 34/40 versus grid 30/40, with equal evaluation
+budgets. These historical benchmarks do not support general superiority or
+the claim that mlpwr proposals frequently fail a Wilson gate. Their original
+kernel/scope labels remain in force. See the
+[item-pool results](item_pool_search/summary.csv) and
+[large L2 comparison](l2_replication_large/search_summary.csv).
+The [official mlpwr IRT tutorial](https://cran.r-project.org/web/packages/mlpwr/vignettes/IRT_Vignette.html)
+also explicitly demonstrates Rasch-versus-2PL and DIF power analysis.
+The manuscript's useful central question remains how estimand, allocation
+and success criterion change a researcher's design choice. Calibration,
+failure denominators and MC uncertainty support that question; they are not
+automatically new mathematical methods. Wilson bounds with alpha spending
+are not an exact finite-sample simultaneous guarantee merely by construction.
+Keep current user guidance separate from historical development evidence,
+and distinguish public workflows from research-script examples.
+
+Other wording qualifications: workspace reuse reduces allocations but is
+not allocation-free; RNG stream/substream lengths are 2^127/2^76, whereas
+the generator period is approximately 2^191. Conditional logit-range inputs
+are not the distribution of observed total scores or participant averages
+integrated over other random effects. Fixed-threshold cumulative-link
+concavity does not prove global concavity of the full marginal objective
+with estimated thresholds/covariances, nor does it make a free-discrimination
+GRM identical to a common-slope ordinal GLMM. Cubic category scaling describes
+a possible dense algebra cost, not every multinomial implementation's total
+runtime. The ordinal/multinomial roadmap priorities are unchanged.
+
 <a id="item-pool-planning"></a>
 
 ## Practical item-pool pilot and MML repair (2026-11-26)
