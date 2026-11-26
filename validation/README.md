@@ -19,6 +19,188 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="covariance-review-medium"></a>
+
+## Paired covariance-path study: prespecified medium run (2026-11-26)
+
+The authorized follow-up asks whether the review's nonstationarity finding
+affects point estimates, intervals, and planning decisions. It does not
+change the package estimator or establish a new public inference method.
+[`covariance_review_medium.R`](covariance_review_medium.R) evaluates 16 cells:
+complete 32 participants by 24 items, or partial 72 by 60 with 30 per person;
+guessing floor 0 or 1/3; random-effect correlation 0 or .2; and marginal
+effect 0 or 10pp with baseline .55. Participant intercept/slope SDs are
+.8/.35 and item SDs .6/.4. Latin-square schedules use item seed 37 and are
+fixed across replications. Layout and sample size change together, so this
+study does not identify a pure effect of partial presentation.
+
+Each cell has 128 independent outer replications (2,048 datasets total),
+using seed root 952260001 and separate case/replication streams. A separate
+one-per-cell technical run uses root 951260001 and is excluded from rates.
+Each pair uses identical responses. The current regularized native fit uses
+final-stage budgets and joint-delta SEs; bootstrap intervals are outside this
+comparison. Coarse-stage convergence is recorded on the same responses.
+Failure counts remain in the scheduled denominator for detection and joint
+attainment; coverage conditional on valid intervals and all-trial coverage
+are both reported. Joint attainment means zero excluded and a 95% interval
+width at most 20pp. Pointwise Wilson 95% bounds versus .80 give
+pass/indeterminate/fail, separately from coverage and null rejection.
+At 128 replications, MCSE is 1.93pp near 5% and 3.54pp near 80%; small
+departures cannot be resolved reliably.
+
+The diagnostic comparator profiles beta and conditional modes with the same
+native likelihood evaluator, then numerically optimizes four log SDs and,
+for correlated fits, two Fisher-transformed correlations. It retains the
+native beta/Half-t priors, log-SD Jacobian, and LKJ density on the correlation
+matrices. Fisher coordinates are an optimization device, not an additional
+prior Jacobian. This comparator is not independent of the native likelihood,
+not HMC, and not a demonstrated global optimizer. An independent dense
+likelihood/mode-score calculation checks the first dataset in each cell.
+An alternate optimizer start and halved curvature step are also checked
+on those first datasets. Bounds are SD exp(-5) to exp(2), correlation
+[-.98,.98]; boundary optima within 1e-4 are not accepted as interior reference
+fits. No eigenvalue repair is used for the full profile Hessian: nonpositive
+curvature, failed perturbations, optimizer failure, scaled score >= .01,
+or an objective increase > 1e-5 produce an invalid diagnostic interval.
+
+Reference uncertainty combines conditional beta uncertainty with the full
+profile covariance of log SDs and correlations. It changes both the optimum
+and uncertainty propagation, so any coverage change is not attributable to
+one component alone. Paired point changes, SE ratios, individual decision
+changes, bias, empirical SD, coverage/null rates and MC uncertainty are
+retained. Likelihood check tolerance is 1e-6; first-case curvature SE changes
+above .05pp or alternate-start objective differences above 1e-4 require
+investigation before accepting the technical setup. Responses, estimates,
+curvatures, failures, settings, source/binary hashes and environment are
+checkpointed every 16 datasets. Resume requires the same manifest.
+
+Run `GLMMPLANR_REVIEW_MODE=smoke sh validation/run-isolated.sh covariance_review_medium`
+first. After checking the technical output, reuse that isolated installation
+and copied source with `GLMMPLANR_REVIEW_MODE=medium Rscript --vanilla
+validation/covariance_review_medium.R`. The main-run settings and source
+must remain fixed after launch. This is a numerical validation study, not
+a comparison of newly selected optimal sample sizes or a change to the
+manuscript's scope.
+
+### Completed results and interpretation
+
+The main run completed all 2,048 datasets in approximately 290 seconds with
+six local workers (macOS, R 4.6.1), excluding installation, the separate smoke
+run and subsequent checks. It retained 389,759 profile-evaluator calls,
+including 930 unsuccessful evaluations; this is not a benchmark of only
+4,096 individual GLMM calls. Native final-stage and coarse-stage fits were
+both valid for 2,048/2,048 datasets. The diagnostic profile procedure yielded
+1,979/2,048 valid intervals (96.63%). All 69 invalid references occurred with
+nonzero guessing, with cell-specific validity from 104/128 to 128/128.
+All scheduled datasets remain in detection/attainment denominators.
+
+The central numerical finding replicates beyond the four initial examples.
+For zero guessing and zero correlation, all 512 numerical log-SD scores were
+below .005 (maximum .004915). In the other paths, all 1,521 evaluable scores
+exceeded .01; cell medians were .353 to .693. Fifteen score evaluations were
+unavailable because a perturbation did not converge. They are **not** zero
+scores or arbitrarily large gradients. The original optimization runner used
+a finite failure penalty; that penalty contaminated some recorded finite
+differences. [`check_covariance_scores.R`](check_covariance_scores.R) replays
+only these initial perturbations, preserves missing scores as NA, and
+reproduces the valid scores within 1e-6. Use
+[`score_checks.csv`](covariance_review_medium/score_checks.csv) and the
+corrected diagnostic summary for score interpretation; the original raw
+diagnostics are retained for provenance.
+
+Among the 1,979 common valid pairs, the change in the marginal condition
+contrast was small in this DGP. For noncanonical paths, cell-specific RMS
+changes were .032 to .120pp, the largest individual change was .538pp, and
+the RMS-SE ratio was .985 to 1.004. For the corrected zero/zero path, the
+largest point change was .000645pp. Eight common valid pairs changed coverage
+classification, six changed detection, and eight changed joint attainment.
+These counts do not include invalid diagnostic fits as disagreements about
+an available interval. The all-trial differences are separately retained.
+Changing the optimum and full covariance propagation did not consistently
+improve empirical coverage. Correlation/SD recovery is in
+[`parameter_summary.csv`](covariance_review_medium/parameter_summary.csv);
+the profile optimizer does not remove small-sample regularization bias.
+
+For the native method, marginal 95% coverage ranged from 93.75% to 98.44%
+over 16 cells. Null rejection ranged from 4/128 to 8/128 (3.13% to 6.25%);
+all eight pointwise Wilson intervals include .05. This resolution does not
+establish exact nominal calibration. Bias ranged from -.405 to +.724pp;
+the largest positive value is the zero-correlation, 3AFC, complete-layout
+null cell, with MCSE .337pp. Planned-effect bias ranged from -.363 to +.317pp.
+
+| Layout | Guessing | Correlation | Native joint count / 128 | 95% MC interval | Planning decision |
+| --- | ---: | ---: | ---: | --- | --- |
+| Complete 32 x 24 | 0 | 0 | 86 | 58.66–74.72% | Fail |
+| Complete 32 x 24 | 1/3 | 0 | 90 | 61.90–77.54% | Fail |
+| Complete 32 x 24 | 0 | .2 | 90 | 61.90–77.54% | Fail |
+| Complete 32 x 24 | 1/3 | .2 | 100 | 70.20–84.41% | Indeterminate |
+| Partial 72 x 60 | 0 | 0 | 126 | 94.48–99.57% | Pass |
+| Partial 72 x 60 | 1/3 | 0 | 127 | 95.71–99.86% | Pass |
+| Partial 72 x 60 | 0 | .2 | 126 | 94.48–99.57% | Pass |
+| Partial 72 x 60 | 1/3 | .2 | 127 | 95.71–99.86% | Pass |
+
+This table concerns a true 10pp contrast and width <=20pp. The profile
+procedure, counting its failures as unmet, gives the same eight categories.
+These are two evaluated layouts, not an optimized required sample size;
+different total observations and cluster counts prevent attributing their
+difference to partial presentation alone. The generous 20pp width criterion
+also must not be transferred to the earlier 10pp-width L2 study.
+
+**Reference limitations and verification.** Of the 69 rejected profile
+intervals, 34 had optimizer code 52; 35 had code 0 but failed the additional
+curvature/score checks. Every one encountered an unsuccessful evaluation.
+Huge negative raw Hessian eigenvalues can reflect the failure penalty, not
+negative curvature of the statistical likelihood. The first dataset in
+case 12 failed the reference checks, including alternate-start agreement;
+its alternate objective was .348 lower. Its rejected perturbation reports
+`inner_not_converged`, step 2.886e-7 versus the native 2e-7 threshold. Repeating
+with its returned beta did not resolve it, and its returned likelihood
+differed by -.780 from the independent observed-curvature calculation.
+Thus accepting that failed return merely because its step is small is not
+justified. This representative investigation does not assign the same cause
+to every failed evaluation. No failed result was replaced or silently retried
+into the main performance table.
+
+All 16 first-dataset native fits matched the current planning core to 1e-8pp.
+Dense likelihood checks at the saved native/profile points differed by at
+most 7.4e-13, with maximum conditional-mode score 1.83e-7. The 15 valid
+first-dataset references passed the halved-step/alternate-start checks; the
+invalid case remains excluded. An initial checking assertion requiring all
+16 references to succeed was inappropriate for a study that retains failures;
+both the initial and corrected check logs are saved. The failed-perturbation
+inspection likewise retains its initial log rather than presenting that
+unconverged likelihood as a successful equality check. Independent R and
+Python aggregation agreed on all 4,096 method rows, response pairs, counts,
+width/coverage/detection decisions and Wilson bounds. No full regression,
+Rasch simulation, package rebuild or platform recheck was needed because
+the numerical implementation is unchanged. The updated validation vignette
+was rendered separately and its new section/results checked in HTML; this
+does not update or recheck the existing release archive.
+
+Results and reproducibility: [all trials](covariance_review_medium/fits.csv.gz),
+[performance summary](covariance_review_medium/summary_summary.csv),
+[paired changes](covariance_review_medium/paired_summary.csv),
+[diagnostics](covariance_review_medium/diagnostic_summary.csv),
+[verification](covariance_review_medium/verification.log),
+[failure inspection](covariance_review_medium/failure-inspection.log), and
+[run log](covariance_review_medium/run.log). The RDS batches retain responses,
+specifications, schedules, fits and curvature matrices. Summary reproduction
+uses [`summarize_covariance_review.R`](summarize_covariance_review.R);
+[`check_covariance_review.R`](check_covariance_review.R) and
+[`inspect_covariance_profile_failure.R`](inspect_covariance_profile_failure.R)
+check the first cases and the declared failure, respectively. Invoke each
+script with the results directory, using the recorded isolated library.
+
+The [coverage figure](covariance_review_medium/coverage.png)
+([PDF](covariance_review_medium/coverage.pdf)) uses theme_bw without a title
+or caption. Bars are pointwise MC intervals for coverage among valid
+intervals; the profile denominator can differ. The conclusion is limited:
+nonstationarity is reproducible, but its impact on this marginal contrast
+was modest among comparable fits. The diagnostic optimizer is not yet a
+production replacement or an independent gold standard. Resolve the native
+objective/diagnostic contract and strengthen the reference evaluator before
+changing defaults or treating numerical stationarity as an accuracy guarantee.
+
 <a id="review-followup"></a>
 
 ## Technical review follow-up (2026-11-26)

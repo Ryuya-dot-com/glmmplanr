@@ -1,0 +1,7 @@
+ case replicate attempt              status   inner_step    logLik
+   12         1       1 inner_not_converged 2.885786e-07 -1436.357
+   12         1       2 inner_not_converged 2.885786e-07 -1436.357
+ beta_intercept beta_effect dense_ll_difference dense_mode_score
+     -0.5079713   0.4524274          -0.7798319     6.000131e-07
+     -0.5079713   0.4524274          -0.7798319     6.000131e-07
+Unchanged main-run failures retained; a small mode step alone does not validate a profiled optimum.

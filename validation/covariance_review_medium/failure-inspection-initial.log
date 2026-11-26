@@ -1,0 +1,2 @@
+Error: max(abs(result$dense_ll_difference)) < 1e-06 is not TRUE
+Execution halted

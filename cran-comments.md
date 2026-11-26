@@ -23,6 +23,18 @@ contract and its implications for supported planning claims. The existing
 platform checks and archive below are unchanged; they do not settle this
 statistical assessment.
 
+The authorized medium follow-up completed 2,048 paired datasets. Native fits
+were all valid; the profile diagnostic supplied 1,979 valid intervals, with
+its 69 failures retained. Nonstationarity was reproduced, but common-valid
+marginal-effect changes were modest in this limited DGP. The comparator's
+own failed likelihood evaluations prevent treating it as an independent
+reference or production replacement. See the updated validation guide and
+`validation/README.md#covariance-review-medium`. The guide update is not
+included in the existing archive listed below. No numerical code/default
+changed, and no new formal submission or platform check was made.
+The updated validation vignette rendered successfully in a separate local
+HTML check, with the new section present; the source archive was not rebuilt.
+
 ## Current local candidate
 
 Source archive: `glmmplanr_0.1.0.tar.gz` (1,240,738 bytes).

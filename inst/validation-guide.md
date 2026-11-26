@@ -24,6 +24,47 @@ below retain their original implementation and should not be read as a fresh
 validation of every old design under the correction. Fixed-bank MML is
 unchanged by this update and retains its existing calibration evidence.
 
+<a id="covariance-review-medium"></a>
+
+## Focused Check of Covariance Paths
+
+A paired study used 16 conditions with 128 datasets each: complete 32-person
+by 24-item presentation or partial presentation to 72 people over 60 items,
+with 30 per person,
+guessing floor 0 or 1/3, random-effect correlation 0 or .2, and marginal
+contrasts 0 or 10pp from baseline .55. Participant intercept/slope SDs were
+.8/.35; item SDs .6/.4. Fixed Latin-square schedules used seed 37. This is
+a limited DGP comparison, not an estimate of an optimal required sample size.
+
+All 2,048 native fits were valid. A diagnostic optimizer of the same Laplace
+objective, with full profile covariance propagation, supplied 1,979 valid
+intervals. It shares the native likelihood evaluator and is not an independent
+reference or a public engine. Numerical checks found small log-SD scores
+on the corrected zero-guessing/zero-correlation path; all 1,521 evaluable
+scores on the other paths exceeded the diagnostic .01 threshold. Fifteen
+additional scores could not be evaluated because of failed perturbations.
+A zero returned covariance score on those native paths denotes a bypassed
+check, not a computed stationary derivative.
+
+Among common valid pairs, noncanonical-path effect changes had cell-specific
+RMS .032–.120pp, maximum .538pp, and RMS-SE ratios .985–1.004. Eight of 1,979
+pairs changed joint detection/width classification. Native coverage ranged
+93.75–98.44%; null rejection ranged 3.13–6.25%, with all eight pointwise MC
+intervals including .05. At 128 datasets, MCSE near 5% is 1.93pp, so these
+results cannot establish exact nominal calibration. Failed reference fits
+remain unmet in all-trial detection/attainment rates; valid-only comparisons
+do not remove their limitations.
+
+For a 10pp effect and width <=20pp, the complete layout had three failed
+planning checks and one indeterminate check; the larger partial layout
+passed all four. The diagnostic procedure gave the same categories despite
+its failures. Counts, sample sizes and total exposure change together, so
+this does not demonstrate that partial presentation itself improves precision.
+The study did not test the default bootstrap intervals or justify switching
+defaults. Numerical stationarity, successful fitting and inferential accuracy
+remain distinct requirements. Detailed scripts, responses, failures and
+MC intervals are retained in the repository's validation suite.
+
 <a id="visualization"></a>
 
 ## Reading and Customizing Simulation Figures
