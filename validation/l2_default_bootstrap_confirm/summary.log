@@ -1,0 +1,93 @@
+ case condition        method n_valid  coverage  detection      joint
+   25      null bootstrap_399      32 0.8437500 0.15625000 0.15625000
+   31      null bootstrap_399      32 0.9687500 0.03125000 0.03125000
+   50      null bootstrap_399      32 0.9062500 0.09375000 0.09375000
+   25   planned bootstrap_399      32 0.9062500 1.00000000 0.93750000
+   31   planned bootstrap_399      32 1.0000000 0.96875000 0.96875000
+   50   planned bootstrap_399      32 0.9687500 0.87500000 0.81250000
+   25      null  bootstrap_99     512 0.9218750 0.07812500 0.07617188
+   31      null  bootstrap_99     512 0.9375000 0.06250000 0.06054688
+   50      null  bootstrap_99     512 0.9628906 0.03710938 0.03320312
+   25   planned  bootstrap_99     512 0.9375000 0.96679688 0.90234375
+   31   planned  bootstrap_99     512 0.9492188 0.94726562 0.91992188
+   50   planned  bootstrap_99     512 0.9550781 0.94921875 0.77148438
+   25      null   joint_delta     512 0.9316406 0.06835938 0.06835938
+   31      null   joint_delta     512 0.9277344 0.07226562 0.07226562
+   50      null   joint_delta     512 0.9609375 0.03906250 0.03710938
+   25   planned   joint_delta     512 0.9414062 0.96484375 0.92187500
+   31   planned   joint_delta     512 0.9609375 0.95507812 0.95507812
+   50   planned   joint_delta     512 0.9570312 0.94531250 0.84765625
+ coverage_floor  null_ceiling joint_decision
+  indeterminate indeterminate           fail
+  indeterminate indeterminate           fail
+  indeterminate indeterminate           fail
+  indeterminate          <NA>  indeterminate
+  indeterminate          <NA>           pass
+  indeterminate          <NA>  indeterminate
+  indeterminate indeterminate           fail
+  indeterminate indeterminate           fail
+           pass          pass           fail
+  indeterminate          <NA>           pass
+           pass          <NA>           pass
+           pass          <NA>  indeterminate
+  indeterminate indeterminate           fail
+  indeterminate indeterminate           fail
+           pass          pass           fail
+  indeterminate          <NA>           pass
+           pass          <NA>           pass
+           pass          <NA>           pass
+ case condition     method_a      method_b   n n_both_valid validity_changes
+   25      null  joint_delta  bootstrap_99 512          512                0
+   31      null  joint_delta  bootstrap_99 512          512                0
+   50      null  joint_delta  bootstrap_99 512          512                0
+   25   planned  joint_delta  bootstrap_99 512          512                0
+   31   planned  joint_delta  bootstrap_99 512          512                0
+   50   planned  joint_delta  bootstrap_99 512          512                0
+   25      null bootstrap_99 bootstrap_399  32           32                0
+   31      null bootstrap_99 bootstrap_399  32           32                0
+   50      null bootstrap_99 bootstrap_399  32           32                0
+   25   planned bootstrap_99 bootstrap_399  32           32                0
+   31   planned bootstrap_99 bootstrap_399  32           32                0
+   50   planned bootstrap_99 bootstrap_399  32           32                0
+ rms_se_ratio se_ratio_q025 se_ratio_q975 coverage_change_both_valid
+    0.9990527     0.8624421      1.125642               -0.009765625
+    1.0011067     0.8459302      1.130577                0.009765625
+    1.0069861     0.8691881      1.144764                0.001953125
+    0.9971493     0.8690307      1.140901               -0.003906250
+    1.0013815     0.8558999      1.131242               -0.011718750
+    0.9977086     0.8630984      1.130457               -0.001953125
+    0.9978714     0.9173255      1.095046                0.000000000
+    1.0099984     0.8890087      1.125404                0.000000000
+    0.9952112     0.9026033      1.169877                0.000000000
+    1.0043767     0.8843660      1.123294               -0.031250000
+    0.9938947     0.8872034      1.137814                0.000000000
+    0.9822257     0.8957653      1.135243                0.000000000
+ coverage_mcse detection_change detection_mcse joint_change  joint_mcse
+   0.005154465      0.009765625    0.005154465   0.00781250 0.005518864
+   0.005849174     -0.009765625    0.005849174  -0.01171875 0.006160591
+   0.004370738     -0.001953125    0.004370738  -0.00390625 0.005526974
+   0.005526974      0.001953125    0.004370738  -0.01953125 0.010308930
+   0.004760696     -0.007812500    0.004776351  -0.03515625 0.008603751
+   0.003385118      0.003906250    0.006770235  -0.07617188 0.016821177
+   0.000000000      0.000000000    0.000000000   0.03125000 0.031250000
+   0.044901326      0.000000000    0.044901326   0.00000000 0.044901326
+   0.000000000      0.000000000    0.000000000   0.00000000 0.000000000
+   0.031250000      0.000000000    0.000000000   0.09375000 0.052351460
+   0.000000000      0.000000000    0.044901326   0.00000000 0.044901326
+   0.000000000      0.031250000    0.031250000   0.12500000 0.074460425
+ n_joint_changes
+               8
+              10
+               8
+              28
+              20
+              77
+               1
+               2
+               0
+               3
+               2
+               6
+ n_outer n_executed n_inner_valid n_inner_failed duplicated_probe_attempts
+    3072     361728        361728              0                      1188
+All outer keys, paired hashes, denominators, and inner SEs audited.

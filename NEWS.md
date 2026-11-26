@@ -44,6 +44,11 @@
   assess numerical accuracy, interval calibration, and additional CPU cost.
   No public API was added; planning attainment is still distinct from
   adequate coverage and null rejection.
+- Added a separate confirmation of the default probability-scale bootstrap
+  (99 inner refits), paired with joint-delta intervals on the same responses.
+  Inner failures, Monte Carlo uncertainty, and a 399-refit sensitivity subset
+  are retained. Public-workflow checks also cover default full/partial
+  planning, independent validation, serialization, and Rasch planning.
 - Fixed-bank MML now uses safeguarded EM acceleration after ordinary EM reaches
   its limit and can identify an exact zero-variance solution. The fallback
   checks the variance score as well as parameter updates, avoiding premature

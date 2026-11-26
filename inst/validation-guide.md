@@ -113,7 +113,7 @@ Both estimators have 6,095/6,400 complete valid banks. Only two per-trial
 joint decisions differ, one in each direction at the .60 maximum-error
 boundary. All 50 attainment counts and ten proposed sample sizes agree.
 Item estimates are not identical (maximum paired difference .02620 logits).
-The [screening figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/main/validation/item_pool_comparison.png)
+The [screening figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/f35e579103825f9e8c4b1d49f3f0a6772f1e5834/validation/item_pool_comparison.png)
 shows the layout effect; it is not evidence of equivalence outside these
 Rasch conditions.
 
@@ -130,7 +130,7 @@ whole-bank tolerances, not universal minimum sample sizes.
 **mlpwr 1.1.1.** It receives the same native success function, candidate grid
 and cost as glmmplanr's uniform grid evaluation. This includes Rasch recovery
 as well as GLMM detection/precision; mlpwr already supports custom IRT
-simulations, as illustrated in its [IRT tutorial](https://cran.r-project.org/web/packages/mlpwr/vignettes/IRT_Vignette.html).
+simulations, as illustrated in its [IRT tutorial](https://CRAN.R-project.org/package=mlpwr/vignettes/IRT_Vignette.html).
 This comparison does not evaluate glmmplanr's GP optimizer. There are 50
 Rasch searches and 20 GLMM searches per method, using five search seeds per
 family/preference. Actual simulation budgets match at 30,000 Rasch and
@@ -186,7 +186,7 @@ For the recall Rasch bank with all 50 items and N=1000, difficulty attainment
 For the easier recognition bank, the -3 shift improves attainment from
 24/64 (37.5%) to 61/64 (95.3%) by reducing ceiling responses. Thus the
 relevant quantity is the population/item match, not simply low ability.
-The [targeting figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/main/validation/l2_targeting.png)
+The [targeting figure](https://github.com/Ryuya-dot-com/glmmplanr/blob/f35e579103825f9e8c4b1d49f3f0a6772f1e5834/validation/l2_targeting.png)
 shows these within-format comparisons.
 
 In the separate correctly specified 2PL recall arm at N=1000, response-curve
@@ -344,7 +344,8 @@ on fresh, matched responses; it does not identify new minimum sample sizes
 over the full original grid. Planning PASS and inferential diagnostics should
 continue to be read separately.
 
-The fresh comparison used 2,048 null and 2,048 planned trials per design,
+The fresh comparison used `joint_delta` intervals, with 2,048 null and
+2,048 planned trials per design,
 with the same responses for previous and corrected executables. Each person
 answers 30 words. The corrected results are:
 
@@ -383,6 +384,49 @@ concurrent load and processor frequency.
 
 [Detailed protocol, executable provenance and paired results](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#l2-uncertainty-correction)
 are retained with the earlier results.
+
+<a id="default-bootstrap-confirmation"></a>
+
+### Confirming the Default Probability-Scale Bootstrap
+
+The default uses `prob_se_method = "bootstrap"` with 99 inner refits.
+The corrected solver was separately checked on three of the preceding
+profiles, with 512 new null and 512 new planned datasets per layout.
+Both methods use the same responses and point estimates. All 3,072 outer
+fits and 361,728 retained inner refits were valid. This confirms operation;
+it does not establish nominal coverage or attainment of every planning goal.
+
+| Profile; N×J | Default null rejection (95% MC interval) | Default planned coverage (95% MC interval) | Default detection AND width <=10pp (95% MC interval) |
+| --- | --- | --- | --- |
+| Intercepts only; 54×30 | 6.25% (4.46–8.69) | 94.92% (92.66–96.51) | 91.99% (89.32–94.04) |
+| Moderate slopes; 72×60 | 3.71% (2.39–5.72) | 95.51% (93.35–96.99) | 77.15% (73.32–80.58) |
+| Larger variances; 162×30 | 7.81% (5.79–10.46) | 93.75% (91.31–95.54) | 90.23% (87.36–92.51) |
+
+Every rate uses 512 datasets per condition and pointwise Wilson intervals.
+At 72×60, the same-response joint-delta attainment is 84.77%
+(81.39–87.62), compared with 77.15% for the default. The paired difference
+is -7.62pp (MCSE 1.68pp). The bootstrap result is indeterminate against the
+80% planning target; a joint-delta pass cannot be transferred to it.
+Average SEs are very similar (RMS ratio 0.998), but the per-dataset SE ratio
+has empirical 2.5th–97.5th percentiles of 0.863–1.130. Similar average
+interval widths therefore do not guarantee the same threshold decisions.
+
+The default's coverage and null checks pass their practical bounds at
+72×60. The null check is indeterminate at 54×30. Both checks are
+indeterminate at 162×30, whose null interval is above nominal 5%.
+These limitations remain visible alongside the two joint-planning passes;
+all valid fits do not imply adequately calibrated inference in every profile.
+
+The first 32 planned datasets per layout also use 399 refits. Joint
+attainment changes from 31/32 to 31/32, 22/32 to 26/32, and 27/32 to
+30/32 respectively. This small subset demonstrates sensitivity to inner
+simulation, not superior coverage or justification for a new default.
+The defaults remain unchanged. Specify the same interval method and
+`control = target_control(prob_boot = ...)` in final planning confirmation
+as intended for the analysis. No new minimum participant/item recommendation
+follows from these selected layouts.
+
+[Protocol, paired results, retained inner counts and figure](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#default-bootstrap-confirmation).
 
 <a id="rasch-mml-acceleration"></a>
 
@@ -584,7 +628,7 @@ To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 
 
 | Package | Target Measurement Question | Role Relative to `glmmplanr` |
 |---|---|---|
-| **irtsim** | Simulation-based IRT study planning with item-parameter recovery and missingness/booklet designs. | Independent planning workflow with a mirt backend. The [matched Rasch comparison](#item-pool-package-comparison) uses the same responses, scale and whole-bank success event ([manual](https://cran.r-project.org/web/packages/irtsim/refman/irtsim.html)). |
+| **irtsim** | Simulation-based IRT study planning with item-parameter recovery and missingness/booklet designs. | Independent planning workflow with a mirt backend. The [matched Rasch comparison](#item-pool-package-comparison) uses the same responses, scale and whole-bank success event ([manual](https://CRAN.R-project.org/package=irtsim/refman/irtsim.html)). |
 | **irtpwr** | Analytical/asymptotic sample size calculation for IRT model-comparison and item-fit hypotheses (e.g., Rasch vs. 2PL). | Suited to hypothesis testing of IRT model structure, whereas `plan_rasch_precision()` bounds parameter RMSE and variance recovery tolerances ([irtpwr vignette](https://CRAN.R-project.org/package=irtpwr/vignettes/demo.html)). |
 | **pwrRasch** | Simulation-based power to detect Rasch model misfit via group-by-item interaction tests. | Addresses DIF / model-fit testing rather than individual item calibration error bounds ([pwrRasch manual](https://CRAN.R-project.org/package=pwrRasch/refman/pwrRasch.html)). |
 | **TAM** & **eRm** | Item calibration for operational item banks via Marginal Maximum Likelihood (`TAM`) or Conditional Maximum Likelihood (`eRm`). | `plan_rasch_fixed_bank()` cross-validates directly against `TAM::tam.mml()` on identical response matrices; `eRm` provides CML sensitivity checks ([TAM reference](https://search.r-project.org/CRAN/refmans/TAM/html/tam.mml.html); [Mair & Hatzinger, 2007](https://www.jstatsoft.org/article/view/v020i09)). |

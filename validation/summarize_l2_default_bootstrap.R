@@ -87,6 +87,35 @@ for (file in files) {
 inner <- data.frame(n_outer = 6L * m$nsim, n_executed = n_executed, n_inner_valid = n_inner_valid,
   n_inner_failed = n_executed - n_inner_valid, duplicated_probe_attempts = 6L * 2L * 99L)
 write.csv(inner, file.path(out, "inner_execution.csv"), row.names = FALSE)
+library(ggplot2)
+main <- subset(summary, method != "bootstrap_399")
+planned <- subset(main, condition == "planned"); null <- subset(main, condition == "null")
+panel <- function(v, metric, rate, lo, hi) {
+  data.frame(case = v$case, method = v$method, metric = metric,
+    rate = v[[rate]], lo = v[[lo]], hi = v[[hi]])
+}
+pd <- rbind(panel(planned, "Planned 95% interval coverage", "coverage", "coverage_lo", "coverage_hi"),
+  panel(null, "Null rejection", "detection", "detection_lo", "detection_hi"),
+  panel(planned, "Detection AND width <=10pp", "joint", "joint_lo", "joint_hi"))
+labels <- c(`31` = "Intercepts only\nN=54, J=30", `50` = "Moderate slopes\nN=72, J=60",
+  `25` = "Larger variances\nN=162, J=30")
+pd$design <- factor(labels[as.character(pd$case)], levels = rev(labels))
+pd$method <- factor(pd$method, c("joint_delta", "bootstrap_99"), c("Joint delta", "Default bootstrap (99)"))
+reference <- data.frame(metric = c("Planned 95% interval coverage", "Null rejection",
+  "Detection AND width <=10pp"), value = c(.95, .05, .8))
+p <- ggplot(pd, aes(rate, design, color = method)) +
+  geom_vline(data = reference, aes(xintercept = value), color = "grey55", linetype = "dashed") +
+  geom_errorbar(aes(xmin = lo, xmax = hi), orientation = "y", width = .15,
+    position = position_dodge(width = .5)) + geom_point(position = position_dodge(width = .5), size = 2.5) +
+  facet_wrap(~metric, scales = "free_x") +
+  scale_x_continuous(labels = function(x) paste0(round(100 * x), "%")) +
+  scale_color_manual(values = c("Joint delta" = "#6D7784", "Default bootstrap (99)" = "#B74627")) +
+  labs(x = NULL, y = NULL, color = NULL, title = "Default interval method after the native covariance correction",
+    subtitle = sprintf("Same responses; %d datasets per condition; 30 words per person", m$nsim),
+    caption = "Pointwise 95% Wilson intervals. Coverage uses valid fits; rejection and joint attainment use every attempted dataset.\nDashed lines are nominal or planning targets. Selected profiles, not a minimum-sample-size search.") +
+  theme_minimal(base_size = 11) + theme(legend.position = "bottom", panel.grid.minor = element_blank(),
+    plot.caption = element_text(hjust = 0))
+ggsave(file.path(out, "comparison.png"), p, width = 12, height = 5.5, dpi = 150)
 print(summary[c("case", "condition", "method", "n_valid", "coverage", "detection", "joint",
   "coverage_floor", "null_ceiling", "joint_decision")], row.names = FALSE)
 print(paired, row.names = FALSE)

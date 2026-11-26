@@ -157,7 +157,7 @@ use common valid fits and have a separate MCSE.
 **Shared search conditions.** `mlpwr` 1.1.1 receives the same native simulation,
 estimator and binary success function as glmmplanr's public grid evaluation.
 This explicitly includes an IRT use of mlpwr; its interface accepts a custom
-simulation function and its [official IRT tutorial](https://cran.r-project.org/web/packages/mlpwr/vignettes/IRT_Vignette.html)
+simulation function and its [official IRT tutorial](https://CRAN.R-project.org/package=mlpwr/vignettes/IRT_Vignette.html)
 already illustrates IRT power analysis. Here the Bernoulli event is joint
 recovery/precision attainment, rather than only rejection of a null.
 For Rasch, each of the ten form/SD families uses the five N values above and
@@ -463,7 +463,7 @@ The joint target is two-sided 5% detection AND a 95% interval no wider than
 10pp. Both normalized participant-priority and stimulus-priority costs are
 used; each method receives 1,080 simulations for each profile/preference.
 
-Following the [mlpwr tutorial](https://cran.r-project.org/web/packages/mlpwr/vignettes/IRT_Vignette.html),
+Following the [mlpwr tutorial](https://CRAN.R-project.org/package=mlpwr/vignettes/IRT_Vignette.html),
 a function generates data, fits the analysis and returns a logical success
 indicator to `find.design()`. The tutorial's IRT model-comparison/DIF testing
 goals differ from this recovery/precision goal. Here mlpwr uses a GP and
@@ -1067,7 +1067,7 @@ as intermediate evidence.
 
 ## Default-bootstrap confirmation before submission
 
-The final covariance-corrected solver is being checked on its default
+The final covariance-corrected solver was checked on its default
 probability-scale interval path. The preceding 24,576-dataset study used
 `joint_delta`; the 399-refit exploratory series used the previous solver.
 Neither is relabeled as validation of the corrected default bootstrap.
@@ -1089,9 +1089,62 @@ rule are retained explicitly. Prespecified practical checks remain observed
 valid rate >=99%, Wilson lower coverage bound >=92.5%, and upper null bound
 <=7.5%; joint planning uses detection AND width <=10pp, lower bound >=80%.
 At 512 replications the nominal-null MCSE is about 0.96pp. Indeterminate
-decisions will be retained without result-dependent extensions. The 32-pair
+decisions are retained without result-dependent extensions. The 32-pair
 99/399 check measures inner simulation sensitivity, not comparative coverage
 with precise outer Monte Carlo uncertainty.
+
+**Completed confirmation.** All 3,072 outer datasets returned valid fits
+under both interval methods. All 361,728 retained inner refits were valid;
+the unmodified-call probes requested another 1,188 refits. Those probes
+matched the captured 99-refit point estimates, SEs and validity decisions.
+All paired response hashes, trial keys, denominators and retained-vector
+SEs passed independent aggregation checks. The nearest coverage, detection
+and width decision boundaries were respectively 0.000961, 0.000163 and
+0.002101 pp away, exceeding the 1e-7 pp matching tolerance.
+
+| Profile; N×J | Interval method | Null rejection (95% Wilson MC interval) | Planned coverage (95% MC interval) | Detection AND width <=10pp (95% MC interval) |
+| --- | --- | --- | --- | --- |
+| Intercepts only; 54×30 | Joint delta | 7.23% (5.29–9.80) | 96.09% (94.04–97.46) | 95.51% (93.35–96.95) |
+| Intercepts only; 54×30 | Default bootstrap, 99 | 6.25% (4.46–8.69) | 94.92% (92.66–96.51) | 91.99% (89.32–94.04) |
+| Moderate slopes; 72×60 | Joint delta | 3.91% (2.54–5.96) | 95.70% (93.58–97.15) | 84.77% (81.39–87.62) |
+| Moderate slopes; 72×60 | Default bootstrap, 99 | 3.71% (2.39–5.72) | 95.51% (93.35–96.99) | 77.15% (73.32–80.58) |
+| Larger variances; 162×30 | Joint delta | 6.84% (4.96–9.36) | 94.14% (91.76–95.87) | 92.19% (89.54–94.21) |
+| Larger variances; 162×30 | Default bootstrap, 99 | 7.81% (5.79–10.46) | 93.75% (91.31–95.54) | 90.23% (87.36–92.51) |
+
+Every row uses 512 datasets per condition. Bootstrap joint attainment passes
+the 80% lower-bound gate at 54×30 and 162×30; 72×60 is **indeterminate**, not
+a confirmed pass or confirmed failure. Its paired change from joint delta
+is -7.62pp (MCSE 1.68pp), with 77/512 individual joint decisions changing.
+Its RMS SE ratio is 0.998, and its mean width is 9.20 versus 9.24pp. Thus
+similar average SEs or widths do not establish interchangeable threshold
+decisions. The per-dataset bootstrap/joint-delta SE ratio spans 0.863–1.130
+at the empirical 2.5th–97.5th percentiles in this cell.
+
+The default's practical coverage/null checks both pass at 72×60. At 54×30,
+planned coverage passes but the null check is indeterminate. At 162×30,
+planned coverage and the null check are indeterminate; its null interval
+lies above nominal 5%, an adverse calibration flag. Joint delta also has a
+nominal-null flag at 54×30 in this independent batch. These results do not
+supersede the earlier 2,048-per-cell results or justify claiming exact
+95%/5% calibration from all successful fits.
+
+On the 32-dataset planned subsets, increasing 99 to 399 refits changes
+joint attainment from 31/32 to 31/32, 22/32 to 26/32, and 27/32 to 30/32
+for 54×30, 72×60 and 162×30 respectively. Individual joint decisions change
+in 2, 6 and 3 pairs. This is sensitivity evidence, with insufficient outer
+precision to establish 399-refit coverage or a new default. The public
+defaults remain unchanged. A final planning confirmation must use the
+interval method and inner-refit count intended for the analysis; a
+joint-delta pass is not transferred to the default bootstrap. The three
+selected layouts neither establish new minimum sample sizes nor provide
+uniform inferential calibration.
+
+[Trial records](l2_default_bootstrap_confirm/fits.csv.gz) ·
+[summary](l2_default_bootstrap_confirm/summary.csv) ·
+[paired differences and MCSEs](l2_default_bootstrap_confirm/paired.csv) ·
+[actual inner counts](l2_default_bootstrap_confirm/inner_execution.csv) ·
+[comparison figure](l2_default_bootstrap_confirm/comparison.png) ·
+[aggregation audit](l2_default_bootstrap_confirm/summary.log).
 
 The separate technical smoke run used roots 941250001/942250001 and four
 outer datasets per cell. All 24 outer datasets and 5,976 retained inner
@@ -1108,6 +1161,23 @@ results agree with one and two configured workers. The checks use six
 replications per design for integration only; their passes, failures and
 indeterminate decisions are not sample-size recommendations.
 [Workflow check log](release_workflows/check.log).
+
+The resulting source archive is 1,254,503 bytes, SHA-256
+`b9b025ca54039867b32795661b63c20f02f9f50631b72c98e19002eb07b31087`.
+Its 37 R/C++/test files match the source that passed 713 regression
+assertions (one opt-in Stan skip). The local final difference check has
+zero errors/warnings and one incoming NOTE for the new submission and
+`cmdstanr` additional repository. Remote URL checking is enabled and
+passes. Examples and vignette reconstruction passed on the immediately
+preceding archive; the final build also reconstructed vignettes. The final
+archive changes only packaging metadata, four validation-guide URLs and
+their HTML, and three printed environment addresses in the otherwise
+identical workflow HTML. This is combined stage evidence, not one full
+check command. Win-builder uploads are recorded separately from results;
+external outcomes are not inferred from successful upload.
+[Archive identity](release_candidate/archive-identity.json) ·
+[final difference check](release_candidate/package-check.log) ·
+[preceding example/vignette check](release_candidate/pre-link-fix-check.log).
 
 ## Reference Environment & Isolated Reproduction
 
@@ -1648,7 +1718,7 @@ This follow-up holds the 16-item bank and every item's exposure fixed to disting
 
 Use the same bank and three discrimination profiles as §4J (1 throughout, 0.75–1.35, 0.55–1.80). The complete arm reuses its 240 × 16 archives, including all 128 replications per profile. Generate each incomplete replicate from the same L'Ecuyer stream (master seed 91652001), drawing the same abilities and response uniforms so that the first 240 readers share potential responses before taking the booklet mask. The complete and incomplete arms both average any error over the same 16 item identities. Fit the native Rasch and mirt Rasch models and the mirt and TAM 2PL models as in §4J. Apply the same complete-positive-bank criterion, difficulty RMSE and maximum absolute error criteria, and joint 2PL criterion. No interval refits are scheduled. Report per-arm exact 95% Monte Carlo intervals and paired differences in attainment with conservative pointwise 95% intervals based on the two discordance rates. For interpretable measures of accuracy, retain the bank and item-curve RMSE medians and the projected mean-score contrast error. Compare bank validity and numerical failures separately.
 
-Use the public irtsim 0.2.0 workflow in a separate 128-replicate-per-layout, wide-discrimination check (master seed 91654, within the integer range of its serial seed calculation). Supply the same 16 true item parameters and the same 30-row booklet matrix. Check the exact masking schedule and derive the same full-bank criteria from its per-iteration item results. It generates a separate response sample and uses its own mirt defaults. This independently checks the design and the usability of the public irtsim workflow. [irtsim reference](https://cran.r-project.org/web/packages/irtsim/refman/irtsim.html)
+Use the public irtsim 0.2.0 workflow in a separate 128-replicate-per-layout, wide-discrimination check (master seed 91654, within the integer range of its serial seed calculation). Supply the same 16 true item parameters and the same 30-row booklet matrix. Check the exact masking schedule and derive the same full-bank criteria from its per-iteration item results. It generates a separate response sample and uses its own mirt defaults. This independently checks the design and the usability of the public irtsim workflow. [irtsim reference](https://CRAN.R-project.org/package=irtsim/refman/irtsim.html)
 
 The new arm completed 384 datasets and 1,536 fits in 40.1 seconds with six workers under R 4.6.1 on arm64 macOS. All 768 Rasch fits returned a complete bank. The incomplete designs returned complete positively oriented 2PL banks in 371/384 fits for mirt and 376/384 for TAM. A separate aggregation checked all 24,576 fitted item rows, the identity of the bank across the two layouts, and the paired replication keys.
 
