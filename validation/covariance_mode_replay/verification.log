@@ -1,0 +1,11 @@
+ case replicate estimate_change_pp  se_change_pp before_iterations
+    2        32       2.374375e-05 -0.0001627876                33
+    2        85      -6.000534e-05 -0.0003801485                22
+    2       118      -2.217616e-04 -0.0001379614                28
+ after_iterations after_covariance_score dense_ll_difference
+               36            0.004524865                   0
+               26            0.003138492                   0
+               23            0.004570093                   0
+Three types of evidence are separate: 2,048 native replays; tolerance exceptions inspected; 84 selected profile replays.
+Max first-case dense likelihood difference: 7.389644e-13 ; mode score: 1.823026e-07 
+Nominal inference was not independently revalidated. The original comparison tolerance was not met in 3 cases; no saved decision changed.

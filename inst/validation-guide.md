@@ -24,6 +24,31 @@ below retain their original implementation and should not be read as a fresh
 validation of every old design under the correction. Fixed-bank MML is
 unchanged by this update and retains its existing calibration evidence.
 
+**Current numerical diagnostics.** Native covariance-score stopping is
+implemented for zero-guessing, uncorrelated fits. Other paths retain fast
+approximate moment updates; their convergence does not certify stationarity
+of the same marginal covariance objective. Specifications and plan reports
+identify those paths. An uncomputed covariance score is `NA`, including fits
+with covariance held fixed. Native likelihoods are also `NA` unless the fit
+converges and the final observed-curvature calculation is ready. Do not use
+intermediate values from failed fits as objective evaluations.
+
+The conditional-mode line search now accounts for floating-point roundoff
+only when a small Newton step has predicted improvement below that scale.
+It then rechecks the original 2e-7 mode tolerance; neither this tolerance nor
+the iteration budget is relaxed. The study below used the preceding source;
+its raw records retain the old zero diagnostic sentinel and failed returns.
+The same-response repair replay is recorded separately in the validation
+suite. All 69 previously failed diagnostic optimizations recovered under the
+same acceptance rules, and 15 selected valid controls remained valid. Native
+replays of all 2,048 responses changed no coverage, detection or width decision.
+Three fits exceeded the predeclared 1e-4pp numerical comparison tolerance:
+maximum point/SE changes were .000222/.000381pp. Independent likelihood and
+mode checks passed for those exceptions; they are not reported as bitwise
+identical fits. This change does not turn the moment updates into exact joint
+MAP estimation or introduce a new public estimator. The selected repair
+replay is not an independent confirmation of nominal inference.
+
 <a id="covariance-review-medium"></a>
 
 ## Focused Check of Covariance Paths
@@ -43,8 +68,8 @@ reference or a public engine. Numerical checks found small log-SD scores
 on the corrected zero-guessing/zero-correlation path; all 1,521 evaluable
 scores on the other paths exceeded the diagnostic .01 threshold. Fifteen
 additional scores could not be evaluated because of failed perturbations.
-A zero returned covariance score on those native paths denotes a bypassed
-check, not a computed stationary derivative.
+In that historical run, a zero returned covariance score on those native
+paths denoted a bypassed check. The current implementation returns `NA`.
 
 Among common valid pairs, noncanonical-path effect changes had cell-specific
 RMS .032–.120pp, maximum .538pp, and RMS-SE ratios .985–1.004. Eight of 1,979

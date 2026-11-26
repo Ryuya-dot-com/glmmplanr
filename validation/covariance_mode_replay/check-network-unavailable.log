@@ -1,0 +1,28 @@
+* using log directory ‘/private/tmp/glmmplanr-mode-repair-check/glmmplanr.Rcheck’
+* using R version 4.6.1 (2026-06-24)
+* using platform: aarch64-apple-darwin23
+* R was compiled by
+    Apple clang version 17.0.0 (clang-1700.3.19.1)
+    GNU Fortran (GCC) 14.2.0
+* running under: macOS Golden Gate 27.2.1
+* using session charset: UTF-8
+* current time: 2026-11-26 12:30:16 UTC
+* using options ‘--no-tests --no-manual --as-cran’
+* checking for file ‘glmmplanr/DESCRIPTION’ ... OK
+* this is package ‘glmmplanr’ version ‘0.1.0’
+* package encoding: UTF-8
+* checking CRAN incoming feasibility ...Warning: unable to access index for repository https://CRAN.R-project.org/src/contrib:
+  cannot open URL 'https://CRAN.R-project.org/src/contrib/PACKAGES'
+Warning: unable to access index for repository https://bioconductor.org/packages/3.23/bioc/src/contrib:
+  cannot open URL 'https://bioconductor.org/packages/3.23/bioc/src/contrib/PACKAGES'
+Warning: unable to access index for repository https://bioconductor.org/packages/3.23/data/annotation/src/contrib:
+  cannot open URL 'https://bioconductor.org/packages/3.23/data/annotation/src/contrib/PACKAGES'
+Warning: unable to access index for repository https://bioconductor.org/packages/3.23/data/experiment/src/contrib:
+  cannot open URL 'https://bioconductor.org/packages/3.23/data/experiment/src/contrib/PACKAGES'
+Warning: unable to access index for repository https://stan-dev.r-universe.dev/src/contrib:
+  cannot open URL 'https://stan-dev.r-universe.dev/src/contrib/PACKAGES'
+Warning in read.dcf(con) :
+  URL 'https://CRAN.R-project.org/src/contrib/PACKAGES.in': status was 'Couldn't resolve host name'
+Error in read.dcf(con) : 
+  cannot open the connection to 'https://CRAN.R-project.org/src/contrib/PACKAGES.in'
+Execution halted

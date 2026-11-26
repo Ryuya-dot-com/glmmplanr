@@ -5,6 +5,7 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
+#include <limits>
 
 // [[Rcpp::depends(RcppEigen)]]
 
@@ -13,6 +14,19 @@ namespace {
 // The Laplace determinant is first-order sensitive to error in the conditional mode.
 constexpr double conditional_mode_tol = 2e-7;
 constexpr int max_cell_archetypes = 32;
+
+// Near a mode, an otherwise useful Newton step can improve the objective by
+// less than summation roundoff. Accept that step, then recheck the unchanged
+// mode tolerance on the next iteration; this is not a convergence shortcut.
+inline bool accept_mode_step(double value, double current, double scale,
+                             double slope, double max_step) {
+  if (!std::isfinite(value)) return false;
+  if (value >= current + 1e-4 * scale * std::max(slope, 0.0)) return true;
+  const double roundoff = 32.0 * std::numeric_limits<double>::epsilon() *
+    (1.0 + std::abs(current));
+  return max_step < 1e-5 && slope >= 0.0 && scale * slope <= roundoff &&
+    value >= current - roundoff;
+}
 
 using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
@@ -192,7 +206,9 @@ Eigen::MatrixXd update_cov_matrix(
     return es.eigenvectors() * ev.asDiagonal() * es.eigenvectors().transpose();
   }
 
-  // Exact MAP update in theta_j = log(tau_j) coordinates under Half-Student-t(df = 3, scale = prior_tau_sd)
+  // Diagonal Gaussian-moment MAP step in log-SD coordinates with Half-t(3)
+  // priors. Correlation shrinkage below is an approximate moment update,
+  // not joint optimization of the marginal Half-t/LKJ objective.
   const double df_t = 3.0;
   const double df_s0_sq = df_t * prior_tau_sd * prior_tau_sd;
   const double a_quad = static_cast<double>(n_clusters) + df_t;
@@ -1829,7 +1845,7 @@ struct GLMMWorkspace {
           best_phi = phi_try;
           best_sc = sc;
         }
-        if (std::isfinite(phi_try) && phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0)) {
+        if (accept_mode_step(phi_try, phi_cur, sc, slope, st_max)) {
           v_s_cur.noalias() += sc * step_s_buf;
           v_2_cur.noalias() += sc * step_2_buf;
           accepted_bt = true;
@@ -1937,12 +1953,12 @@ struct GLMMWorkspace {
 
     bool fin_obs_ready = false;
     const bool profile_covariance = (chance == 0.0 && corr_mode == 0);
-    double covariance_score_norm = profile_covariance && !fix_cov ? INFINITY : 0.0;
+    double covariance_score_norm = profile_covariance && !fix_cov ? INFINITY : NA_REAL;
     auto covariance_stationary = [&]() {
       // A score below 0.5% of the local information scale is numerically
       // negligible relative to sampling uncertainty; verify against direct
       // profile optimization rather than tightening EM iterations indefinitely.
-      return !profile_covariance || covariance_score_norm < 5e-3;
+      return fix_cov || !profile_covariance || covariance_score_norm < 5e-3;
     };
     // Reuse the Laplace beta/mode refinement inside covariance updates so
     // covariance and beta solve the same approximate marginal objective.
@@ -2044,7 +2060,7 @@ struct GLMMWorkspace {
             best_sc = sc;
           }
           if (std::isfinite(phi_try) &&
-              (phi_try >= phi_cur + 1e-4 * sc * std::max(slope, 0.0) ||
+              (accept_mode_step(phi_try, phi_cur, sc, slope, final_inner_step) ||
                ((sc * final_inner_step) < 1e-7 && phi_try >= phi_cur))) {
             v_s.noalias() += sc * step_s_buf;
             v_2.noalias() += sc * step_2_buf;
@@ -2709,7 +2725,9 @@ struct GLMMWorkspace {
     res.Sigma_i = Sigma_i;
     res.Sigma_t = Sigma_t;
     res.covariance_score_norm = covariance_score_norm;
-    res.log_lik_laplace = log_lik_laplace;
+    // Failed fits can retain a working/Fisher determinant or a stale mode.
+    // Do not expose that intermediate value as a usable Laplace likelihood.
+    res.log_lik_laplace = res.strictly_converged && fin_obs_ready ? log_lik_laplace : NA_REAL;
     res.final_outer_diff = final_outer_diff;
     res.final_inner_step = final_inner_step;
     res.outer_used = outer_used;

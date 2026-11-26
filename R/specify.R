@@ -67,6 +67,10 @@
 #'   Tierney-Kadane Laplace Hessian with a diagonal log-SD variance propagation
 #'   term; correlated-slope designs (especially under $m$-AFC or sparsity)
 #'   should be cross-checked against `"stan_hmc"` or parametric bootstrap SEs.
+#'   Covariance-score stopping is available for zero-guessing, uncorrelated
+#'   fits. Correlated or guessing-adjusted fits use approximate moment updates;
+#'   convergence on these paths does not certify stationarity of the marginal
+#'   covariance objective or exact joint Half-t/LKJ MAP estimation.
 #' @param analysis_re Random-effect structure of the fitted analysis model:
 #'   `"match_dgp"` (default; automatically fits `"intercept_only"` if `dgp` has
 #'   no non-zero random slopes, `"uncorrelated"` if slopes have zero

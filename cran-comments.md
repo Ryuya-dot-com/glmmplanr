@@ -5,37 +5,75 @@ been made. The pre-plot-change source completed Win-builder R-release and
 R-devel checks with 0 errors, 0 warnings and 1 incoming NOTE each. R-release
 also flagged four URLs already corrected in the R-devel and current archives.
 The preceding source passed three-platform GitHub Actions. The current
-candidate adds plot styling and annotation controls; its local checks are
-recorded separately below.
+candidate adds plot controls and a conditional-mode roundoff/diagnostic
+repair; its local checks are recorded separately below. The earlier Windows
+and three-platform results do not validate the changed numerical kernel.
 
 The post-correction default-bootstrap confirmation completed 3,072 outer
 datasets and 361,728 retained inner fits, all valid. The validation guide
 retains indeterminate planning/calibration checks and an adverse nominal-null
 flag. Successful fitting is not presented as uniform inferential calibration.
 
-A subsequent focused review on 2026-11-26 identified an unresolved numerical
-assessment for correlated and nonzero-guessing native GLMM paths: their
-convergence flag does not check stationarity of the common Laplace covariance
-objective. Four single-dataset profile-gradient probes are recorded in
-`validation/README.md#review-followup`; they do not estimate error rates.
-Formal submission should wait for resolution of this objective/diagnostic
-contract and its implications for supported planning claims. The existing
-platform checks and archive below are unchanged; they do not settle this
-statistical assessment.
+A focused review on 2026-11-26 confirmed that correlated and nonzero-guessing
+native GLMM paths use approximate covariance moment updates: their convergence
+flag does not check stationarity of the marginal covariance objective or
+certify exact joint Half-t/LKJ MAP estimation. This limitation is now stated
+in specifications, plan reports and help. Uncomputed covariance scores are
+NA, and unusable likelihoods from unconverged fits are NA.
 
 The authorized medium follow-up completed 2,048 paired datasets. Native fits
 were all valid; the profile diagnostic supplied 1,979 valid intervals, with
 its 69 failures retained. Nonstationarity was reproduced, but common-valid
-marginal-effect changes were modest in this limited DGP. The comparator's
-own failed likelihood evaluations prevent treating it as an independent
-reference or production replacement. See the updated validation guide and
-`validation/README.md#covariance-review-medium`. The guide update is not
-included in the existing archive listed below. No numerical code/default
-changed, and no new formal submission or platform check was made.
-The updated validation vignette rendered successfully in a separate local
-HTML check, with the new section present; the source archive was not rebuilt.
+marginal-effect changes were modest in this limited DGP. The comparator
+shares the native likelihood and is not an independent reference or
+production replacement. See the validation guide and
+`validation/README.md#covariance-review-medium`.
+
+A subsequent small-step roundoff repair retains the existing convergence
+tolerance, iteration budgets, covariance updates and priors. On all 2,048
+saved responses, native final/coarse fits remain valid and no coverage,
+detection, width or joint decision changes. Three point/SE comparisons
+exceed the prespecified 1e-4 percentage-point tolerance (maximum changes
+.000222/.000380pp); individual dense likelihood/mode checks pass. These
+are disclosed exceptions, not strict numerical equivalence. Replaying only
+the 69 failed profiles plus 15 controls gives 84 valid profiles with zero
+failed objective evaluations. This is a saved-response numerical check,
+not a new independent simulation proving nominal inference. The approximate
+covariance updates and their nonstationarity remain disclosed limitations.
+Details are in `validation/README.md#covariance-mode-repair`.
 
 ## Current local candidate
+
+Source archive: `glmmplanr_0.1.0.tar.gz` (1,257,141 bytes).
+SHA-256: `ca751f6a0405f8f053eee6f57976dbd7b37647fd1412efb254f566da7d528355`.
+
+0 errors | 0 warnings | 1 note
+
+* macOS, R 4.6.1, `aarch64-apple-darwin23`.
+* `R CMD check --as-cran --no-manual --no-tests`, with
+  `_R_CHECK_FORCE_SUGGESTS_=false`, `_R_CHECK_DEPENDS_ONLY_=true`,
+  `_R_CHECK_CRAN_INCOMING_REMOTE_=true`, `_R_CHECK_SYSTEM_CLOCK_=false`.
+* Installation, compiled-code checks, help, examples, URLs and vignette
+  reconstruction passed. Test evidence is recorded separately below.
+* The full test suite is covered by 740 passing assertions, zero failures
+  or warnings, and one opt-in Stan skip. The source/debug invocation
+  completed 34 calibrate assertions before interruption during core-workflows
+  because of -O0 cost. All remaining groups completed against the matching
+  optimized installation: 706 assertions in 294.8 seconds. This is combined
+  stage evidence, not one uninterrupted full invocation. The first targeted
+  run passed 71 assertions; these are not added again to the suite total.
+* The NOTE contains new-submission status and the optional additional
+  `cmdstanr` repository (availability confirmed). Optional `instantiate`
+  was not available. An initial sandboxed check stopped at DNS access before
+  installation; the network-enabled check above completed successfully.
+* The archive's 43 R/C++/Stan/test and selected documentation files match
+  the working source exactly; all 13 relative README links resolve and the
+  updated validation section appears in the built HTML vignette.
+* No new Win-builder upload, three-platform CI or formal submission was made.
+* Build/check logs and source identity are retained in
+  `validation/covariance_mode_replay/` (excluded from the CRAN archive).
+
+## Previous local candidate before the numerical repair
 
 Source archive: `glmmplanr_0.1.0.tar.gz` (1,240,738 bytes).
 SHA-256: `5a80fc0b2858a5479ef166f90428e218dacb5cade833218324e58989cce63c5f`.

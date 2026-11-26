@@ -1,0 +1,37 @@
+✔ | F W  S  OK | Context
+
+⠏ |          0 | laplace-covariance                                             
+⠋ |          1 | laplace-covariance                                             
+⠼ |          5 | laplace-covariance                                             
+⠧ |          8 | laplace-covariance                                             
+⠋ |         11 | laplace-covariance                                             
+⠹ |         13 | laplace-covariance                                             
+⠦ |         17 | laplace-covariance                                             
+⠏ |         20 | laplace-covariance                                             
+⠹ |         23 | laplace-covariance                                             
+⠼ |         25 | laplace-covariance                                             
+⠧ |         28 | laplace-covariance                                             
+⠏ |         30 | laplace-covariance                                             
+⠙ |         32 | laplace-covariance                                             
+⠸ |         34 | laplace-covariance                                             
+⠦ |         37 | laplace-covariance                                             
+⠇ |         39 | laplace-covariance                                             
+⠋ |         41 | laplace-covariance                                             
+⠹ |         43 | laplace-covariance                                             
+⠴ |         46 | laplace-covariance                                             
+⠇ |         49 | laplace-covariance                                             
+✔ |         51 | laplace-covariance [48.2s]
+
+⠏ |          0 | laplace-status                                                 
+⠋ |          1 | laplace-status                                                 
+⠸ |          4 | laplace-status                                                 
+⠴ |          6 | laplace-status                                                 
+⠇ |          9 | laplace-status                                                 
+⠙ |         12 | laplace-status                                                 
+⠼ |         15 | laplace-status                                                 
+✔ |         20 | laplace-status [9.0s]
+
+══ Results ═════════════════════════════════════════════════════════════════════
+Duration: 57.2 s
+
+[ FAIL 0 | WARN 0 | SKIP 0 | PASS 71 ]

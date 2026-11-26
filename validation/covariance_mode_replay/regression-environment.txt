@@ -1,0 +1,8 @@
+Source test command: Rscript --vanilla -e 'testthat::test_local()'
+Source test: pkgload default debug build, compiler flags -UNDEBUG -Wall -pedantic -g -O0.
+Completed calibrate group: 34 assertions. Interrupted core-workflows by SIGINT after confirming active CPU computation and debug-build cost.
+One frozen-response timing probe, same arguments and 9 iterations: old installed 0.030 s; new installed 0.026 s; source debug 1.602 s. Not a general performance benchmark.
+Continuation: testthat::test_local(load_package="installed", filter=<all existing groups except calibrate>), with isolated library /var/folders/w2/x3mn6s2n71q1lz51yqrrqqj80000gn/T/glmmplanr-validation.5bcqIcw9/library.
+The 21 R/C++/Stan installed-source files match the repository exactly; current tests loaded from repository.
+NOT_CRAN=true through test_local; optional Stan tests require GLMMPLANR_TEST_STAN=true and were not requested in this repair.
+Separate archive check omits test execution to avoid duplicating this suite.

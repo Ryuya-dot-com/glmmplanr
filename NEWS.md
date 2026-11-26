@@ -1,10 +1,16 @@
 # glmmplanr 0.1.0
 
 * Initial public release of `glmmplanr`.
+* Native conditional-mode line searches now allow only floating-point roundoff
+  when the predicted Newton improvement is below that scale. The original
+  convergence tolerance and iteration budgets remain unchanged. Uncomputed
+  covariance scores and likelihoods from unconverged fits are returned as `NA`.
+  Specification printing and plan reports identify covariance moment-update
+  paths, whose convergence does not certify marginal covariance stationarity.
 * All planning entry points now use built-in estimators by default. Random-item Rasch planning defaults to `engine = "cpp_laplace"`; use `engine = "lme4"` explicitly to reproduce earlier runs that used the previous default. Fixed-bank MML and the regularized crossed-GLMM defaults are unchanged.
 * Declarative crossed, balanced Latin-square, incomplete-block (`items_per_subject`), and testlet-nested (`design_testlet()`) experimental and assessment schedules with separate trial-level missingness (`attrition`) and whole-participant dropout (`participant_dropout`).
 * Exact 1D Gauss-Hermite quadrature inversion (`calibrate_dgp()`, `cell_probs_from_diffs()`) over the combined cell normal random-effect variance mapping substantive marginal cell probabilities and $m$-AFC lower guessing asymptotes (`chance = 1/m`) to conditional GLMM parameters, with adaptive quadrature verification against numerical integration.
-* Two-dimensional Pareto-optimal sample size, interval-width (AIPE), and ROPE planning (`optimize_sample_size()`, `switch_preference()`) via Universal Kriging monotone Gaussian process surrogates, stabilized C++ Laplace / SQUAREM estimation (`RcppEigen`, Half-Student-t(3) log-SD MAP and curvature), batch C++ parametric bootstrap, optional Bonferroni multiplicity adjustment (`mc_adjustment`), and independent fresh-batch top-up verification (`topup_policy = "independent"`).
+* Two-dimensional Pareto-optimal sample size, interval-width (AIPE), and ROPE planning (`optimize_sample_size()`, `switch_preference()`) via Universal Kriging monotone Gaussian process surrogates, stabilized C++ Laplace / SQUAREM estimation (`RcppEigen`, Half-Student-t(3) regularization and approximate covariance updates), batch C++ parametric bootstrap, optional Bonferroni multiplicity adjustment (`mc_adjustment`), and independent fresh-batch top-up verification (`topup_policy = "independent"`).
 * Scenario comparison plots for verified sample sizes (`plot(plan, type = "scenarios")`) and fixed-design validation plots for detection, coverage, valid-fit counts, and response patterns (`plot(check)` and `plot(check, type = "patterns")`).
 * Static plots now use `theme_bw()` and hide automatic titles, subtitles and captions by default. Set `show_annotations = TRUE` to restore them, or add custom `ggplot2::labs()`. This applies to GLMM/Rasch plots and `check_dgp()`; interactive 3D plots use a white background and omit their title by default. Simulation values, intervals and decisions are unchanged.
 * Random-item (`plan_rasch_precision()`) and fixed-item-bank (`plan_rasch_fixed_bank()`) Rasch parameter recovery planning with per-item exposure and connected-component diagnostics, extreme response pattern diagnostics (`response_patterns()`), publication-ready visualizations/tables (`plot()`, `as_gt()`), CSV export (`as.data.frame()`), and English sample size justifications (`report_plan()`).

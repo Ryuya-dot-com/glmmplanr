@@ -81,7 +81,11 @@ in any fixed-effect design cell are 0 or all are 1. For \code{"cpp_laplace"}
 and \code{"bayes_laplace"}, analytical fixed-effect SEs combine the
 Tierney-Kadane Laplace Hessian with a diagonal log-SD variance propagation
 term; correlated-slope designs (especially under $m$-AFC or sparsity)
-should be cross-checked against \code{"stan_hmc"} or parametric bootstrap SEs.}
+should be cross-checked against \code{"stan_hmc"} or parametric bootstrap SEs.
+Covariance-score stopping is available for zero-guessing, uncorrelated
+fits. Correlated or guessing-adjusted fits use approximate moment updates;
+convergence on these paths does not certify stationarity of the marginal
+covariance objective or exact joint Half-t/LKJ MAP estimation.}
 
 \item{analysis_re}{Random-effect structure of the fitted analysis model:
 \code{"match_dgp"} (default; automatically fits \code{"intercept_only"} if \code{dgp} has

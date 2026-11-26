@@ -1,0 +1,16 @@
+✔ | F W  S  OK | Context
+
+⠏ |          0 | calibrate                                                      
+⠏ |         10 | calibrate                                                      
+⠼ |         15 | calibrate                                                      
+⠇ |         19 | calibrate                                                      
+⠇ |         29 | calibrate                                                      
+✔ |         34 | calibrate [3.4s]
+
+⠏ |          0 | core-workflows                                                 
+⠼ |         15 | core-workflows                                                 
+⠏ |         20 | core-workflows                                                 
+⠸ |         24 | core-workflows                                                 
+
+
+Execution halted

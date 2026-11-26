@@ -19,6 +19,102 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="covariance-mode-repair"></a>
+
+## Conditional-mode roundoff and diagnostic contract repair (2026-11-26)
+
+The medium study's representative failed perturbation is frozen as a small
+synthetic regression fixture. The old installed source reproduces
+`inner_not_converged`, step 2.886e-7 and a finite, unusable likelihood.
+The repair permits a conditional-mode Newton step only within summation
+roundoff when its predicted improvement is itself below that scale and the
+unscaled step is small. The next iteration must meet the unchanged 2e-7
+mode criterion. Iteration budgets, priors and covariance update formulas
+are unchanged. Uncomputed covariance scores now return NA; the likelihood
+is NA unless strict convergence and final observed curvature are available.
+Specifications and reports explicitly describe the approximate moment path.
+
+Before replay, the point-estimate and SE comparison tolerances were fixed
+at 1e-4 percentage points; every coverage, detection and width decision is
+compared before rounding, even within those tolerances.
+[`covariance_mode_replay.R`](covariance_mode_replay.R) reuses all 2,048 saved
+response vectors for native final/coarse fits. It reruns the unchanged archived
+profile optimizer only for its 69 failures, the 15 initially unevaluable
+scores and the first dataset of each cell (overlaps removed). The remainder
+is not recomputed as another full profile study. New and old valid fits,
+failures, response identity, likelihood/mode checks and changes in design
+decisions remain separate. This replay assesses a numerical repair on saved
+data; it is not an independent Monte Carlo confirmation of inference.
+
+The modified conditional-mode routine also participates in fixed-effect
+curvature calculations, so the full regression suite is covered in addition
+to the targeted regression and same-response replay. Fixed-bank MML code is
+unchanged; no new Rasch performance simulation is required. Historical
+platform checks remain evidence for their original source.
+
+**Replay results.** Both final and coarse native settings retained 2,048/2,048
+valid fits, with zero changes to coverage, detection, width or joint decisions.
+Maximum absolute point/SE changes were .000221762/.000380149pp. The
+prespecified 1e-4pp comparison tolerance was exceeded in three cases: cell 2,
+replications 32, 85 and 118. It was not increased after seeing those results.
+All three have zero guessing/correlation. Their covariance iteration counts
+changed 33→36, 22→26 and 28→23, respectively; each meets the .005 score rule.
+Independent dense likelihood differences were zero at printed precision,
+and mode checks passed. These small, inspected numerical differences are
+not strict numerical equivalence. The largest covariance-element change
+was .000381501. All results and exceptions remain in the denominator.
+
+The selected profile replay comprises 84 unique datasets: all 69 failures,
+all 15 initially unavailable scores (already among those failures), and 15
+additional first-case controls. All 84 profile fits passed the unchanged
+acceptance rules; no failed objective evaluations occurred. The largest
+scaled profile score was .0008411. The original 69 failures are preserved in
+their old run, not overwritten. In the 16 first cases, dense likelihood
+differences were at most 7.4e-13 and mode scores at most 1.83e-7; halving
+curvature steps changed SE by at most 2.97e-6pp, and alternate-start objective
+differences were at most 1.27e-7. All 15 previously missing initial scores
+are now evaluable and above .01, so recovering convergence does not remove
+the separate moment-update nonstationarity finding.
+
+The frozen failure and diagnostic semantics passed the initial 71 targeted
+assertions. [`verify_covariance_mode_replay.R`](verify_covariance_mode_replay.R)
+checks the saved replay, its numerical exceptions and selected reference
+fits without starting a new simulation. Results:
+[native comparisons](covariance_mode_replay/comparison.csv),
+[reference replay](covariance_mode_replay/reference_summary.csv),
+[tolerance exceptions](covariance_mode_replay/tolerance_exceedances.csv),
+[verification log](covariance_mode_replay/verification.log) and
+[execution log](covariance_mode_replay/run.log).
+
+**Regression and packaging.** All test groups are covered by 740 passing
+assertions, zero failures/warnings and one opt-in Stan skip. The source
+`test_local()` invocation used pkgload's default debug build (-O0): after
+34 calibrate assertions passed, it was interrupted during core-workflows
+and the remaining groups ran against the matching optimized installation
+(706 assertions, 294.8 seconds). A single frozen-response timing probe gave
+.030/.026 seconds for old/new optimized builds and 1.602 seconds for the
+debug build, each with 9 iterations; this is not a general speed benchmark.
+The incomplete invocation is retained, and no claim of a single uninterrupted
+full run is made. See [execution settings](covariance_mode_replay/regression-environment.txt),
+[interrupted log](covariance_mode_replay/regression-debug-interrupted.log)
+and [completed remaining groups](covariance_mode_replay/regression-installed.log).
+
+The new 1,257,141-byte archive has SHA-256
+`ca751f6a0405f8f053eee6f57976dbd7b37647fd1412efb254f566da7d528355`.
+On macOS/R 4.6.1, `R CMD check --as-cran --no-manual --no-tests` passed with
+0 errors, 0 warnings and 1 NOTE (new submission; optional cmdstanr repository,
+availability confirmed). Tests use the separate evidence above rather than
+duplicating the full suite. Installation, compiled code, examples, help,
+URLs and vignette reconstruction passed. Optional instantiate was unavailable.
+The initial sandboxed check stopped at DNS resolution before installation;
+the network-enabled check completed. The archive's 43 code/test/selected-doc
+files match the source, the optimized installation's 21 R/C++/Stan source
+files match, and all 13 relative README links resolve. See
+[archive identity](covariance_mode_replay/archive-identity.json) and
+[package check](covariance_mode_replay/00check.log).
+No new Win-builder upload, three-platform CI or CRAN submission was performed;
+the prior archive's platform results are not assigned to this changed kernel.
+
 <a id="covariance-review-medium"></a>
 
 ## Paired covariance-path study: prespecified medium run (2026-11-26)

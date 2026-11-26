@@ -1,0 +1,104 @@
+✔ | F W  S  OK | Context
+
+⠏ |          0 | core-workflows                                                 
+⠇ |          9 | core-workflows                                                 
+⠏ |         20 | core-workflows                                                 
+⠸ |         24 | core-workflows                                                 
+⠹ |         33 | core-workflows                                                 
+⠋ |         41 | core-workflows                                                 
+⠙ |         42 | core-workflows                                                 
+⠦ |         57 | core-workflows                                                 
+⠇ |         69 | core-workflows                                                 
+⠹ |         73 | core-workflows                                                 
+✔ |         80 | core-workflows [239.5s]
+
+⠏ |          0 | cost-and-precision-upgrades                                    
+⠼ |          5 | cost-and-precision-upgrades                                    
+⠹ |         13 | cost-and-precision-upgrades                                    
+⠸ |         24 | cost-and-precision-upgrades                                    
+⠦ |         27 | cost-and-precision-upgrades                                    
+⠹ |         33 | cost-and-precision-upgrades                                    
+⠦ |         37 | cost-and-precision-upgrades                                    
+✔ |         37 | cost-and-precision-upgrades [10.8s]
+
+⠏ |          0 | design-validation                                              
+⠧ |         38 | design-validation                                              
+✔ |         60 | design-validation
+
+⠏ |          0 | design                                                         
+⠏ |         40 | design                                                         
+⠋ |         71 | design                                                         
+✔ |         71 | design
+
+⠏ |          0 | diagnostics-and-topup                                          
+⠋ |         11 | diagnostics-and-topup                                          
+⠙ |         12 | diagnostics-and-topup                                          
+⠋ |         31 | diagnostics-and-topup                                          
+⠧ |         38 | diagnostics-and-topup                                                  Term Calibrated_Beta Naive_mAFC_Beta Naive_Std_Logit
+ (Intercept)         -0.2353         -0.2041          0.5726
+   learning1          1.2194          1.0537          0.7438
+
+⠸ |         54 | diagnostics-and-topup                                          
+⠋ |         61 | diagnostics-and-topup                                          
+✔ |         62 | diagnostics-and-topup [1.2s]
+
+⠏ |          0 | engines-and-specify                                            
+⠙ |          2 | engines-and-specify                                            
+⠏ |         10 | engines-and-specify                                            
+⠋ |         11 | engines-and-specify                                            
+✔ |         27 | engines-and-specify [6.2s]
+
+⠏ |          0 | laplace-covariance                                             
+⠼ |         15 | laplace-covariance                                             
+⠹ |         43 | laplace-covariance                                             
+⠧ |         48 | laplace-covariance                                             
+✔ |         51 | laplace-covariance [1.4s]
+
+⠏ |          0 | laplace-status                                                 
+⠸ |          4 | laplace-status                                                 
+⠴ |          6 | laplace-status                                                 
+⠼ |         15 | laplace-status                                                 
+✔ |         27 | laplace-status
+
+⠏ |          0 | optimize-and-report                                            
+⠋ |          1 | optimize-and-report                                            
+⠧ |         48 | optimize-and-report                                            
+✔ |         53 | optimize-and-report [33.2s]
+
+⠏ |          0 | plan-methods                                                   
+⠸ |         24 | plan-methods                                                   
+✔ |         39 | plan-methods
+
+⠏ |          0 | plot-diagnostics                                               
+⠋ |         11 | plot-diagnostics                                               
+⠸ |         24 | plot-diagnostics                                               
+⠋ |         31 | plot-diagnostics                                               
+⠧ |         38 | plot-diagnostics                                               
+✔ |         40 | plot-diagnostics
+
+⠏ |          0 | rasch-precision                                                
+⠋ |          1 | rasch-precision                                                
+⠙ |         12 | rasch-precision                                                
+⠼ |         25 | rasch-precision                                                
+⠏ |         50 | rasch-precision                                                
+⠹ |         53 | rasch-precision                                                
+✔ |         67 | rasch-precision
+
+⠏ |          0 | response-patterns                                              
+✔ |         46 | response-patterns
+
+⠏ |          0 | stan-reference                                                 
+✔ |      1   0 | stan-reference
+
+⠏ |          0 | target-scale-and-robustness                                    
+⠴ |         16 | target-scale-and-robustness                                    
+✔ |         46 | target-scale-and-robustness
+
+══ Results ═════════════════════════════════════════════════════════════════════
+Duration: 294.8 s
+
+── Skipped tests (1) ───────────────────────────────────────────────────────────
+• Set GLMMPLANR_TEST_STAN=true to run the independent Stan fit (1):
+  'test-stan-reference.R:2:3'
+
+[ FAIL 0 | WARN 0 | SKIP 1 | PASS 706 ]

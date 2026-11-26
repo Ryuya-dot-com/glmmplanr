@@ -245,6 +245,13 @@ analysis_description <- function(sp) {
   } else {
     sprintf("parametric bootstrap (%d refits per successful replication)", if (is.null(sp$prob_boot)) 99L else sp$prob_boot)
   }
-  sprintf("Primary analysis: %s, %s random effects, %s link. Target uncertainty: %s.",
+  description <- sprintf("Primary analysis: %s, %s random effects, %s link. Target uncertainty: %s.",
     engine_label, sp$analysis_re, stats::family(sp)$link, method)
+  chance_fit <- if (identical(sp$analysis_link, "logit")) 0 else sp$dgp$chance
+  if (sp$engine %in% c("cpp_laplace", "bayes_laplace") &&
+      (chance_fit > 0 || identical(sp$analysis_re, "maximal"))) {
+    description <- paste(description,
+      "Native covariance estimation uses approximate moment updates; convergence does not include a marginal covariance-score check on this path.")
+  }
+  description
 }
