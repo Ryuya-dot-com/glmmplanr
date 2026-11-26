@@ -123,6 +123,9 @@ test_that("2D GP surrogate optimizer is worker-invariant, monotone, and generate
 
   report <- report_plan(res_w1, print_output = FALSE)
   expect_match(report, "Sample Size Justification")
+  expect_match(report, "approximate moment updates")
+  printed_plan <- paste(testthat::capture_messages(capture.output(print(res_w1))), collapse = "\n")
+  expect_match(printed_plan, "approximate moment updates")
   expect_output(printed <- withVisible(report_plan(res_w1)), "Sample Size Justification")
   expect_false(printed$visible)
   expect_identical(printed$value, report)

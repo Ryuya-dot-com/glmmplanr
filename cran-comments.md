@@ -1,10 +1,29 @@
 ## Submission status
 
+External checks are on hold at the maintainer's request until the feature set
+is finalized. The working source adds an observed-curvature contract repair
+after the archived candidate described below. That archive and its earlier
+checks do not include this repair. No new Win-builder upload, GitHub Actions
+run, push or formal CRAN submission is part of this correction.
+
+The repair rejects a reproduced 3AFC conditional saddle and requires unclamped
+observed curvature for final mode acceptance and derivative evaluation. On
+saved responses, all 2,048 native fits and 84 selected profiles retain the
+preceding repair's point estimates, SEs and decisions; the profiles have zero
+failed objective evaluations. These are numerical regression checks, not an
+independent confirmation of nominal inference. The isolated macOS/R 4.6.1
+installation passes 740 distinct assertions across targeted/remaining runs
+(34 repeated assertions excluded), with zero failures/warnings and one opt-in
+Stan skip. Both CRAN-skipped test cases were completed separately. The updated
+validation vignette renders successfully. Source identity and execution logs
+are in `validation/curvature_contract_replay/`. No new full `R CMD check` or
+release archive was made; the archive hashes below remain historical evidence.
+
 Preparation for the first CRAN submission; no formal CRAN submission has
 been made. The pre-plot-change source completed Win-builder R-release and
 R-devel checks with 0 errors, 0 warnings and 1 incoming NOTE each. R-release
 also flagged four URLs already corrected in the R-devel and current archives.
-The preceding source passed three-platform GitHub Actions. The current
+The preceding source passed three-platform GitHub Actions. The archived
 candidate adds plot controls and a conditional-mode roundoff/diagnostic
 repair; its local checks are recorded separately below. The earlier Windows
 and three-platform results do not validate the changed numerical kernel.
@@ -51,7 +70,7 @@ guide retains these limits. R and independent Python arithmetic agree for
 12,864 intervals and their summary decisions; details are in
 `validation/README.md#interval-mechanism-audit`.
 
-## Current local candidate
+## Archived local candidate before the curvature guard
 
 Source archive: `glmmplanr_0.1.0.tar.gz` (1,258,394 bytes).
 SHA-256: `add111e217880877426f11e971d65389b60800b377f5b981c6165a0da05127d8`.

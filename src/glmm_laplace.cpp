@@ -1865,7 +1865,8 @@ struct GLMMWorkspace {
 
     if (!obs_factored) {
       eval_trials(beta_eval, v_s_cur, v_2_cur, chance, true);
-      assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, true);
+      // Derivatives require observed curvature, not a clamped search metric.
+      assemble_and_factor(beta_eval, v_s_cur, v_2_cur, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws, false);
     }
     return grad_beta_from_factored(rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_grad_ws);
   }
@@ -2035,11 +2036,9 @@ struct GLMMWorkspace {
           apply_Rt_ass_in_place(step_s_buf);
           final_inner_step = std::max(step_s_buf.lpNorm<Eigen::Infinity>(), step_2_buf.lpNorm<Eigen::Infinity>());
           if (final_inner_step < conditional_mode_tol) {
-            const double ll_obs = eval_trials(beta, v_s, v_2, chance, true);
-            logdet_obs = assemble_and_factor(beta, v_s, v_2, P_beta, rhs_s_buf, rhs_2_buf, rhs_b_buf, llt_22_fin_ws, true);
-            log_lik_laplace = ll_obs - 0.5 * (v_s.squaredNorm() + v_2.squaredNorm() + logdet_obs);
-            inner_converged = true;
-            fin_obs_ready = true;
+            // The observed-Newton check above did not certify a mode.
+            // A small Fisher step at a saddle cannot replace that check.
+            log_lik_laplace = NA_REAL;
             break;
           }
           slope = rhs_s_buf.dot(step_s_buf) + rhs_2_buf.dot(step_2_buf);
@@ -2686,7 +2685,8 @@ struct GLMMWorkspace {
       (has_testlet && is_cov_singular(Sigma_t, corr_mode))
     );
 
-    if (!pos_def_b || !beta.allFinite() || !se_beta.allFinite()) {
+    if (!pos_def_b || !beta.allFinite() || !se_beta.allFinite() ||
+        (inner_converged && outer_converged && !fin_obs_ready)) {
       res.status = "non_pd_hessian";
       res.strictly_converged = false;
     } else if (!inner_converged) {

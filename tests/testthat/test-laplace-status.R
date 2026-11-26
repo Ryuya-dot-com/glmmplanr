@@ -45,6 +45,40 @@ test_that("unavailable native diagnostics are missing rather than zero or workin
   expect_true(is.na(failed$covariance_score_norm))
 })
 
+test_that("a small Fisher step at a conditional saddle is not convergence", {
+  # Independent dense curvature at the former accepted fit has eigenvalue -1.081659.
+  s <- rep(0:3, each = 2L)
+  i <- rep(0:1, 4L)
+  z <- rep(c(-1, 1), 4L)
+  a <- list(y = as.integer(s == 0L), X = cbind(1, z),
+    subj_idx = s, Z_subj = cbind(1, z), n_subj = 4L,
+    item_idx = i, Z_item = matrix(1, 8L, 1L), n_item = 2L,
+    testlet_idx = integer(), Z_testlet = matrix(numeric(), 0L, 0L), n_testlet = 0L,
+    chance = 1/3, corr_mode = 0L, regularized = TRUE,
+    init_Sigma_subj = diag(c(.01, 16)), init_Sigma_item = matrix(.01),
+    fix_cov = TRUE, max_em_iter = 400L, max_pirls_iter = 44L)
+  for (swapped in c(FALSE, TRUE)) {
+    b <- a
+    if (swapped) {
+      for (pair in list(c("subj_idx", "item_idx"), c("Z_subj", "Z_item"),
+                       c("n_subj", "n_item"), c("init_Sigma_subj", "init_Sigma_item"))) {
+        b[pair] <- a[rev(pair)]
+      }
+    }
+    for (joint in c(FALSE, TRUE)) {
+      f <- do.call(cpp_fit_crossed_glmm, c(b, list(compute_joint_vcov = joint)))
+      expect_false(f$converged)
+      expect_identical(f$status, "non_pd_hessian")
+      expect_true(is.na(f$logLik))
+    }
+    # The same response pattern with positive observed curvature remains usable.
+    b[[if (swapped) "init_Sigma_item" else "init_Sigma_subj"]] <- diag(c(.01, .25))
+    control <- do.call(cpp_fit_crossed_glmm, b)
+    expect_true(control$converged)
+    expect_true(is.finite(control$logLik))
+  }
+})
+
 test_that("analysis descriptions distinguish moment convergence from covariance scores", {
   des <- design_crossed(list(condition = c("a", "b")))
   for (g in c(0, 1/3)) for (rho in c(0, .2)) {

@@ -27,11 +27,23 @@ unchanged by this update and retains its existing calibration evidence.
 **Current numerical diagnostics.** Native covariance-score stopping is
 implemented for zero-guessing, uncorrelated fits. Other paths retain fast
 approximate moment updates; their convergence does not certify stationarity
-of the same marginal covariance objective. Specifications and plan reports
-identify those paths. An uncomputed covariance score is `NA`, including fits
-with covariance held fixed. Native likelihoods are also `NA` unless the fit
-converges and the final observed-curvature calculation is ready. Do not use
-intermediate values from failed fits as objective evaluations.
+of the same marginal covariance objective. Specifications, printed optimization
+results and plan reports identify those paths. An uncomputed covariance score
+is `NA`, including fits with covariance held fixed. Native likelihoods are also
+`NA` unless the fit
+converges and the final, unclamped observed curvature is positive definite.
+Curvature clipping may aid intermediate search steps, but cannot certify a
+conditional mode or supply its final Laplace determinant. A small Fisher step
+at a saddle is rejected. Do not use intermediate values from failed fits as
+objective evaluations. These checks do not certify a global mode for the
+nonconcave guessing-adjusted model or nominal interval calibration.
+
+The curvature guard rejects a deterministic four-person/two-item 3AFC saddle
+that previously returned a finite likelihood. On the saved medium-study
+responses, all 2,048 native final/coarse fits and 84 selected profiles remain
+valid with unchanged point estimates, SEs and decisions relative to the
+preceding roundoff repair. This is a numerical regression check, not a new
+independent assessment of inference.
 
 The conditional-mode line search now accounts for floating-point roundoff
 only when a small Newton step has predicted improvement below that scale.
@@ -53,7 +65,8 @@ replay is not an independent confirmation of nominal inference.
 
 ## Focused Check of Covariance Paths
 
-A paired study used 16 conditions with 128 datasets each: complete 32-person
+A paired study used a single two-level experimental factor in 16 simulation
+conditions with 128 datasets each: complete 32-person
 by 24-item presentation or partial presentation to 72 people over 60 items,
 with 30 per person,
 guessing floor 0 or 1/3, random-effect correlation 0 or .2, and marginal
@@ -545,7 +558,12 @@ This shows inner-simulation sensitivity, not a confirmed benefit or an
 80% guarantee for 399 refits. At the 162×30 null, RMS bootstrap SE matches
 the empirical SD closely (ratio 1.002), but the lowest-SE fifth has 17/102
 exclusions. Aggregate SE agreement therefore does not establish adequate
-calibration of dataset-specific intervals.
+calibration of dataset-specific intervals. This post hoc grouping by estimated
+SE does not identify the separate contributions of finite clusters, variance
+approximations and finite bootstrap draws. Joint-delta null rejection here is
+35/512 (6.84%; 95% MC interval 4.96–9.36%). The 31/512 (6.05%) obtained by
+substituting the cell's empirical SD is an oracle diagnostic, not joint delta
+or an available correction for a new study.
 
 Exploratory percentile/basic intervals reconstructed from the saved draws
 are not public interval options. With 99 refits, percentile intervals reduce

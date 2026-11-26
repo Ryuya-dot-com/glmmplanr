@@ -1,0 +1,4 @@
+tau= 4 joint= FALSE converged= TRUE ll= -6.020682 beta= -3.067993 3.918173e-20 minH= -1.081659 inner= 3.360198e-08 phi_increase= 5.408435e-05 
+finite_difference_curvature= -1.081687 clamped_ll= -6.020682 score_max= 3.360548e-08 
+tau= 4 joint= TRUE converged= TRUE ll= -6.020682 beta= -3.067993 3.918173e-20 minH= -1.081659 inner= 3.360198e-08 phi_increase= 5.408435e-05 
+finite_difference_curvature= -1.081687 clamped_ll= -6.020682 score_max= 3.360548e-08 

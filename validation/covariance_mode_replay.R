@@ -1,7 +1,8 @@
 # Replay saved responses after the mode-roundoff/diagnostic-contract repair.
 source("validation/planning_comparison_helpers.R")
 old <- "validation/covariance_review_medium"
-out <- "validation/covariance_mode_replay"
+args <- commandArgs(TRUE)
+out <- if (length(args)) args[1L] else "validation/covariance_mode_replay"
 cases <- read.csv(file.path(old,"cases.csv"))
 diagnostics <- read.csv(file.path(old,"diagnostics.csv"))
 scores <- read.csv(file.path(old,"score_checks.csv"))

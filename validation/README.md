@@ -19,6 +19,71 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="conditional-curvature-contract"></a>
+
+## Rejecting conditional saddles in native fits (2026-11-26)
+
+A review found a failure of the final curvature contract, separate from the
+roundoff repair: a small Fisher step could set both convergence and observed
+curvature readiness after negative observed weights had been clipped. The
+four-person, two-item, 3AFC counterexample has one all-correct person and three
+all-incorrect people, condition coding -1/+1, fixed participant intercept/slope
+SDs .1/4 and item intercept SD .1. Its standardized conditional negative-log
+density Hessian has minimum eigenvalue -1.081659; moving .01 along that
+direction increases the log density by 5.408e-5. The old fit reported
+convergence and logLik -6.020682 despite this saddle. This deterministic
+counterexample does not estimate a failure rate under a planning DGP.
+
+The final check now requires a small observed-Newton step and unmodified
+positive-definite observed curvature. A small Fisher step alone is rejected,
+and derivative evaluations no longer substitute clipped observed curvature.
+The counterexample returns `non_pd_hessian`, `converged=FALSE` and `logLik=NA`,
+with and without joint covariance propagation. Regression tests also exchange
+the participant/item blocks to exercise automatic orientation, and retain a
+positive-curvature control. The old code fails the 12 rejection assertions;
+the repaired code passes them. The unchanged 2e-7 tolerance, priors, covariance
+updates and iteration budgets remain in use. This is a validity guard, not a
+new saddle-escape algorithm or a global-mode/coverage guarantee.
+
+Reproduction: install the source in an isolated library, set `R_LIBS` to that
+library, then run
+`Rscript --vanilla validation/covariance_mode_replay.R validation/curvature_contract_replay`.
+The script retains the original saved-response comparison; its optional output
+directory prevents overwriting the preceding repair. The additional
+[`verify.py`](curvature_contract_replay/verify.py) compares the new CSVs directly
+with `covariance_mode_replay/`, not with the older, pre-roundoff executable.
+The same predeclared 1e-4pp point/SE tolerance and unrounded decisions apply.
+
+All 2,048 native final/coarse fits remain valid, with identical stored point
+estimates, SEs, response hashes and coverage/detection/width/joint decisions
+relative to the immediately preceding repair. All 84 selected profiles remain
+valid, with zero failed objective evaluations and identical point/SE and
+interval decisions. Maximum point and SE differences are zero. No new DGP
+responses, bootstrap draws or independent nominal-inference confirmation were
+generated. See [`verification.json`](curvature_contract_replay/verification.json)
+and the [dense-curvature reproduction](curvature_contract_replay/counterexample.R).
+Historical raw results and the three earlier tolerance exceptions are retained.
+
+Local validation used an isolated optimized installation on macOS/R 4.6.1.
+The curvature/status groups passed 94 assertions; the other test groups passed
+626, and the two CRAN-skipped cases passed 54 in a separate run. Their 34
+previously completed assertions are not counted twice: 740 distinct assertions
+pass, with zero failures/warnings and only the opt-in Stan check unexecuted.
+This is combined test evidence, not one uninterrupted invocation. An initial
+test-selection command failed before running tests because of string escaping;
+the selector was corrected without changing tests or restarting completed groups.
+The updated validation vignette renders successfully and contains the current
+guard and statistical distinctions. Package installation, the tests and the
+render are recorded in [`local-validation.json`](curvature_contract_replay/local-validation.json).
+A new source archive or full `R CMD check` is not claimed.
+
+Printed optimization results now include the same analysis description as
+specifications and plan reports. The maintainer has deferred Win-builder and
+GitHub CI until the feature set is finalized; no push or external submission
+is made for this correction. This repository-only validation directory is not
+bundled in CRAN archives. The current sections are not yet on published `main`;
+their publication and the guide's external links must be verified at release.
+
 <a id="interval-mechanism-audit"></a>
 
 ## Saved-draw audit of interval calibration and planning thresholds (2026-11-26)
@@ -115,6 +180,12 @@ gives 31/512. Neither oracle operation is available for an actual new study,
 and neither identifies a unique cause or a universally correct multiplier
 or degrees of freedom. In particular, this is not evidence that finite-B
 noise alone explains the 7.81% null rejection.
+
+The unmodified joint-delta null rejection is 35/512 (6.84%, pointwise 95%
+Wilson interval 4.96–9.36%). The oracle 31/512 (6.05%) above must not be
+reported as joint-delta performance. Likewise, 434/512 versus 395/512 compares
+joint delta with B=99, not B=399 with B=99; the width limit is 10pp and the
+planned effect is 8pp. The experimental model has one two-level factor.
 
 The alternative intervals use the same parametric refits and original point
 estimate; both remain exploratory. On the full 512-dataset cells:

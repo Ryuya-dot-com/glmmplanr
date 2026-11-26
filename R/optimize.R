@@ -1693,6 +1693,7 @@ extract_pareto_frontier <- function(surf, spec) {
 #' @export
 print.glmmplanr_result <- function(x, ...) {
   cli::cli_h2("glmmplanr 2D Sample Size Optimization Result")
+  cli::cli_text("{analysis_description(x$spec)}")
   opt <- x$optimal
   unit_lbl <- switch(x$spec$scale, logit = "logit", pp = "pp", prob = "prob")
 

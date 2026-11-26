@@ -1,0 +1,81 @@
+laplace-status: ....................123456..789abc.........
+
+══ Failed ══════════════════════════════════════════════════════════════════════
+── 1. Failure ('test-laplace-status.R:70:7'): a small Fisher step at a condition
+Expected `f$converged` to be FALSE.
+Differences:
+`actual`:   TRUE 
+`expected`: FALSE
+
+
+── 2. Failure ('test-laplace-status.R:71:7'): a small Fisher step at a condition
+Expected `f$status` to be identical to "non_pd_hessian".
+Differences:
+1/1 mismatches
+x[1]: "converged"
+y[1]: "non_pd_hessian"
+
+── 3. Failure ('test-laplace-status.R:72:7'): a small Fisher step at a condition
+Expected `is.na(f$logLik)` to be TRUE.
+Differences:
+`actual`:   FALSE
+`expected`: TRUE 
+
+
+── 4. Failure ('test-laplace-status.R:70:7'): a small Fisher step at a condition
+Expected `f$converged` to be FALSE.
+Differences:
+`actual`:   TRUE 
+`expected`: FALSE
+
+
+── 5. Failure ('test-laplace-status.R:71:7'): a small Fisher step at a condition
+Expected `f$status` to be identical to "non_pd_hessian".
+Differences:
+1/1 mismatches
+x[1]: "converged"
+y[1]: "non_pd_hessian"
+
+── 6. Failure ('test-laplace-status.R:72:7'): a small Fisher step at a condition
+Expected `is.na(f$logLik)` to be TRUE.
+Differences:
+`actual`:   FALSE
+`expected`: TRUE 
+
+
+── 7. Failure ('test-laplace-status.R:70:7'): a small Fisher step at a condition
+Expected `f$converged` to be FALSE.
+Differences:
+`actual`:   TRUE 
+`expected`: FALSE
+
+
+── 8. Failure ('test-laplace-status.R:71:7'): a small Fisher step at a condition
+Expected `f$status` to be identical to "non_pd_hessian".
+Differences:
+1/1 mismatches
+x[1]: "converged"
+y[1]: "non_pd_hessian"
+
+── 9. Failure ('test-laplace-status.R:72:7'): a small Fisher step at a condition
+Expected `is.na(f$logLik)` to be TRUE.
+Differences:
+`actual`:   FALSE
+`expected`: TRUE 
+
+
+── 10. Failure ('test-laplace-status.R:70:7'): a small Fisher step at a conditio
+Expected `f$converged` to be FALSE.
+Differences:
+`actual`:   TRUE 
+`expected`: FALSE
+
+  ... and 2 more
+
+
+Maximum number of 10 failures reached, some test results may be missing.
+
+══ DONE ════════════════════════════════════════════════════════════════════════
+Error:
+! Test failures.
+Execution halted

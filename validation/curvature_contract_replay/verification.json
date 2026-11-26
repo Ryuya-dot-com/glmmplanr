@@ -1,0 +1,46 @@
+{
+  "comparison.csv": {
+    "rows": 2048,
+    "changed": {
+      "estimate": 0,
+      "se": 0,
+      "valid": 0,
+      "early_valid": 0,
+      "covered": 0,
+      "detected": 0,
+      "width_ok": 0,
+      "joint": 0,
+      "response_hash": 0
+    },
+    "max_point_difference_pp": 0.0,
+    "max_se_difference_pp": 0.0
+  },
+  "reference_fits.csv": {
+    "rows": 168,
+    "changed": {
+      "estimate": 0,
+      "se": 0,
+      "valid": 0,
+      "covered": 0,
+      "detected": 0,
+      "width_ok": 0,
+      "joint": 0,
+      "response_hash": 0
+    },
+    "max_point_difference_pp": 0.0,
+    "max_se_difference_pp": 0.0
+  },
+  "reference_summary.csv": {
+    "rows": 84,
+    "changed": {
+      "native_valid": 0,
+      "profile_valid": 0,
+      "early_valid": 0,
+      "evaluations": 0,
+      "failed_evaluations": 0
+    },
+    "failed_evaluations": 0
+  },
+  "source_sha256": "511abbc39943808cf0bbc418d585a369592c313015ebe6e926d55825178492c7",
+  "comparison": "Current curvature guard versus preceding roundoff repair; no new responses."
+}

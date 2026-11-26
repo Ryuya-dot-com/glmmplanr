@@ -1,6 +1,11 @@
 # glmmplanr 0.1.0
 
 * Initial public release of `glmmplanr`.
+* Native GLMM fits reject conditional saddles even when a Fisher step is small.
+  Final mode checks and derivative evaluations require unclamped observed
+  curvature; failed checks cannot return a converged, finite Laplace likelihood.
+  Optimization-result printing now includes the same analysis description as
+  specification printing and plan reports.
 * Native conditional-mode line searches now allow only floating-point roundoff
   when the predicted Newton improvement is below that scale. The original
   convergence tolerance and iteration budgets remain unchanged. Uncomputed

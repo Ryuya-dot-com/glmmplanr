@@ -1,0 +1,8 @@
+Error in `testthat::test_dir()`:
+! No test files found.
+Backtrace:
+    ▆
+ 1. └─testthat::test_dir(...)
+ 2.   └─cli::cli_abort("No test files found.")
+ 3.     └─rlang::abort(...)
+Execution halted
