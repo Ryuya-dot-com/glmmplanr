@@ -653,8 +653,7 @@ va_item_sd <- 0.9978
 Always inspect `X_cells` before copying coefficients. `glmmplanr`'s default
 `contrast = "sum"` uses `-0.5, +0.5`, whereas R's `lme4::glmer()` defaults to
 treatment coding (`0, 1`) and `contr.sum(2)` uses `+1, -1`. Changing coding
-changes intercepts, slopes, and random-effect covariances. See R's
-[contrast documentation](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/contrast.html).
+changes intercepts, slopes, and random-effect covariances (see `?stats::contr.sum`).
 
 ### Convert the GLMM table to marginal cell probabilities
 
