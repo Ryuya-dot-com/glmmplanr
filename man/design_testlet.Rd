@@ -49,7 +49,11 @@ can vary. Nested designs draw complete testlets. Crossed designs present
 all within-pair conditions for every selected item.}
 
 \item{item_seed}{Integer seed for the item allocation (default 1). A design
-point uses the same schedule across response replications and engines.}
+point uses the same schedule across response replications and engines, so
+\code{\link[=optimize_sample_size]{optimize_sample_size()}}, \code{\link[=evaluate_design_point]{evaluate_design_point()}}, and
+\code{\link[=validate_design_point]{validate_design_point()}} evaluate operating characteristics conditional on
+this fixed item-presentation layout. Vary \code{item_seed} across \code{scenarios}
+when item assignment will be re-randomized anew at study execution.}
 }
 \value{
 An object of class \code{"glmmplanr_design"}.

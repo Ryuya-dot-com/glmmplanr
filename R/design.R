@@ -47,7 +47,11 @@
 #'   can vary. Nested designs draw complete testlets. Crossed designs present
 #'   all within-pair conditions for every selected item.
 #' @param item_seed Integer seed for the item allocation (default 1). A design
-#'   point uses the same schedule across response replications and engines.
+#'   point uses the same schedule across response replications and engines, so
+#'   [optimize_sample_size()], [evaluate_design_point()], and
+#'   [validate_design_point()] evaluate operating characteristics conditional on
+#'   this fixed item-presentation layout. Vary `item_seed` across `scenarios`
+#'   when item assignment will be re-randomized anew at study execution.
 #'
 #' @return An S3 object of class `"glmmplanr_design"` containing cell tables,
 #'   contrast matrices, design matrices (`X_cells`, `Z_subj_cells`,
@@ -90,15 +94,10 @@ design_crossed <- function(
     ))
   }
   factor_names <- as.character(names(factors))
-  if (anyDuplicated(factor_names)) {
+  if (anyDuplicated(factor_names) || anyDuplicated(trimws(factor_names))) {
     cli::cli_abort("Factor names in {.arg factors} must be unique.")
   }
-  if (any(factor_names %in% c("subj", "item", "testlet", "list_id", "cell_id", "y"))) {
-    cli::cli_abort(c(
-      "Factor names cannot use reserved column names ({.val subj}, {.val item}, {.val testlet}, {.val list_id}, {.val cell_id}, {.val y}).",
-      "i" = "Choose a descriptive condition name (e.g., {.val condition}, {.val task}, {.val group})."
-    ))
-  }
+  validate_factor_names_vec(factor_names)
   for (fn in factor_names) {
     lv <- as.character(factors[[fn]])
     if (length(lv) < 2L || anyNA(lv) || any(!nzchar(lv)) || anyDuplicated(lv)) {
@@ -146,17 +145,21 @@ design_crossed <- function(
 
   has_testlet <- !is.null(testlet_size)
   if (has_testlet) {
-    testlet_size <- as.integer(testlet_size)
-    if (length(testlet_size) != 1L || is.na(testlet_size) || testlet_size < 2L) {
-      cli::cli_abort("{.arg testlet_size} must be an integer >= 2 when specified.")
+    if (!is.numeric(testlet_size) || !is.null(dim(testlet_size)) ||
+        length(testlet_size) != 1L || !is.finite(testlet_size) ||
+        testlet_size != floor(testlet_size) || testlet_size < 2 ||
+        testlet_size > .Machine$integer.max) {
+      cli::cli_abort("{.arg testlet_size} must be a whole integer >= 2 when specified.")
     }
+    testlet_size <- as.integer(testlet_size)
   } else {
     testlet_size <- 1L
   }
 
   if (!is.null(items_per_subject)) {
     if (length(items_per_subject) != 1L || !is.numeric(items_per_subject) ||
-        !is.finite(items_per_subject) || items_per_subject < 1 ||
+        !is.null(dim(items_per_subject)) || !is.finite(items_per_subject) ||
+        items_per_subject != floor(items_per_subject) || items_per_subject < 1 ||
         items_per_subject > .Machine$integer.max || items_per_subject %% testlet_size != 0) {
       cli::cli_abort("{.arg items_per_subject} must be a positive integer multiple of the testlet size ({testlet_size}).")
     }
@@ -324,6 +327,29 @@ design_testlet <- function(
   )
 }
 
+#' Validate Factor Names Against Reserved Schedule and Formula Identifiers
+#' @noRd
+reserved_design_columns <- c(
+  "subj", "item", "testlet",
+  "subj_id", "item_id", "testlet_id",
+  "list_id", "cell_id", "cell_name", "trial_id", "y",
+  "Z_subj_cells", "Z_item_cells", "Z_testlet_cells"
+)
+
+validate_factor_names_vec <- function(factor_names) {
+  if (!length(factor_names)) return(invisible(TRUE))
+  fn_trim <- trimws(as.character(factor_names))
+  bad <- unique(factor_names[factor_names %in% reserved_design_columns | fn_trim %in% reserved_design_columns])
+  if (length(bad) > 0L) {
+    cli::cli_abort(c(
+      "Factor names cannot use reserved column names ({.val {bad}}).",
+      "i" = "Reserved names: {.val {reserved_design_columns}}.",
+      "i" = "Choose a descriptive condition name (e.g., {.val condition}, {.val task}, {.val group})."
+    ))
+  }
+  invisible(TRUE)
+}
+
 #' Build a Factor Contrast Matrix
 #' @noRd
 build_contrast_matrix <- function(levels_chr, scheme = c("sum", "helmert", "treatment")) {
@@ -374,9 +400,11 @@ build_effect_map <- function(fixed_rhs, cells, X_cells) {
 #' valid_multiples(c(10, 20), k = 4)
 #' @export
 valid_multiples <- function(n_range, k, arg_name = "n_range") {
-  k <- as.integer(k)
-  if (!is.numeric(n_range) || length(n_range) < 1L || anyNA(n_range)) {
-    cli::cli_abort("{.arg {arg_name}} must be a numeric scalar or range c(min, max).")
+  k <- validate_positive_int(k, "k", 1L)
+  if (!is.numeric(n_range) || !is.null(dim(n_range)) || length(n_range) < 1L ||
+      any(!is.finite(n_range)) || any(n_range < 1) ||
+      any(n_range != floor(n_range)) || any(n_range > .Machine$integer.max)) {
+    cli::cli_abort("{.arg {arg_name}} must contain positive whole integers.")
   }
   if (length(n_range) == 1L) {
     val <- as.integer(round(n_range / k) * k)
@@ -384,18 +412,22 @@ valid_multiples <- function(n_range, k, arg_name = "n_range") {
     return(val)
   }
   if (length(n_range) == 2L) {
-    lo <- as.integer(ceiling(min(n_range) / k) * k)
-    hi <- as.integer(floor(max(n_range) / k) * k)
+    if (n_range[1L] > n_range[2L]) {
+      cli::cli_abort("{.arg {arg_name}} range c(min, max) must satisfy min <= max.")
+    }
+    lo <- as.integer(ceiling(n_range[1L] / k) * k)
+    hi <- as.integer(floor(n_range[2L] / k) * k)
     if (lo < k) lo <- k
     if (hi < lo) {
       cli::cli_abort(
-        "No multiple of list balance factor {.val {k}} exists inside {.arg {arg_name}} = c({min(n_range)}, {max(n_range)})."
+        "No multiple of list balance factor {.val {k}} exists inside {.arg {arg_name}} = c({n_range[1L]}, {n_range[2L]})."
       )
     }
     return(seq.int(lo, hi, by = k))
   }
-  vals <- sort(unique(as.integer(round(n_range / k) * k)))
-  vals[vals >= k]
+  vals <- round(n_range / k) * k
+  vals <- sort(unique(as.integer(pmax(vals, k))))
+  vals
 }
 
 #' Generate a Balanced Experimental Trial Schedule for (n_subj, n_item)
@@ -424,18 +456,27 @@ valid_multiples <- function(n_range, k, arg_name = "n_range") {
 #' head(schedule$trials)
 #' @export
 generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diagnostics = FALSE) {
+  if (!rlang::is_bool(strict)) cli::cli_abort("{.arg strict} must be TRUE or FALSE.")
   if (!rlang::is_bool(diagnostics)) cli::cli_abort("{.arg diagnostics} must be TRUE or FALSE.")
   if (!inherits(design, "glmmplanr_design")) {
     cli::cli_abort("{.arg design} must be a {.cls glmmplanr_design} object.")
   }
-  n_subj <- as.integer(n_subj)
-  n_item <- as.integer(n_item)
+  if (!is.numeric(n_subj) || !is.null(dim(n_subj)) || length(n_subj) != 1L || !is.finite(n_subj) ||
+      !is.numeric(n_item) || !is.null(dim(n_item)) || length(n_item) != 1L || !is.finite(n_item) ||
+      n_subj > .Machine$integer.max || n_item > .Machine$integer.max) {
+    cli::cli_abort("{.arg n_subj} and {.arg n_item} must be single finite numbers.")
+  }
+  if (strict && (n_subj != floor(n_subj) || n_item != floor(n_item))) {
+    cli::cli_abort("{.arg n_subj} and {.arg n_item} must be whole integers when {.code strict = TRUE}.")
+  }
   if (n_subj < design$k_subj || n_item < design$k_item) {
     cli::cli_abort(
       "Sample sizes ({n_subj}, {n_item}) must be at least ({design$k_subj}, {design$k_item})."
     )
   }
   if (strict) {
+    n_subj <- as.integer(n_subj)
+    n_item <- as.integer(n_item)
     if (n_subj %% design$k_subj != 0L) {
       lo_s <- max(design$k_subj, as.integer(floor(n_subj / design$k_subj)) * design$k_subj)
       hi_s <- as.integer(ceiling(n_subj / design$k_subj)) * design$k_subj
@@ -535,7 +576,7 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diag
   bi_idx <- bi_group_i[grid$item_id]
   cell_id <- cell_lookup[cbind(bs_idx, bi_idx, ls_idx)]
   trials <- data.frame(
-    subj = factor(grid$subj_id),
+    subj = factor(grid$subj_id, levels = subj_ids),
     item = factor(grid$item_id, levels = item_ids),
     subj_id = grid$subj_id,
     item_id = grid$item_id,
@@ -550,15 +591,34 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diag
     trials[[fn]] <- design$cells[[fn]][cell_id]
   }
 
+  id_chk <- assess_trial_identifiability(cell_id, design)
+  eff_m <- if (!is.null(m) && m < n_item) m else NULL
+  eff_seed <- if (!is.null(m) && m < n_item) design$item_seed else NULL
   schedule <- list(
     trials = trials,
     n_subj = n_subj,
     n_item = n_item,
     n_testlet = if (design$has_testlet) n_passages else 0L,
+    has_testlet = design$has_testlet,
+    testlet_size = design$testlet_size,
     n_cells = design$n_cells,
+    allocation = design$allocation,
+    between_subj = design$between_subj,
+    between_item = design$between_item,
+    within_subj = design$within_subj,
+    within_item = design$within_item,
+    ls_factors = design$ls_factors,
+    items_per_subject = eff_m,
+    item_seed = eff_seed,
+    trials_per_pair = design$trials_per_pair,
+    factor_names = design$factor_names,
+    cells = design$cells[, c(design$factor_names, "cell_name", "cell_id"), drop = FALSE],
     n_trials_full = nrow(trials),
     n_trials_scheduled = nrow(trials),
-    n_trials_expected = compute_expected_trials(design, n_subj, n_item)
+    n_trials_expected = compute_expected_trials(design, n_subj, n_item),
+    identifiable = id_chk$ok,
+    missing_cells = id_chk$missing_cells,
+    identifiability_reason = id_chk$reason
   )
   if (diagnostics) {
     components <- if (is.null(m) || m == n_item) rep.int(1L, n_item) else {
@@ -566,8 +626,55 @@ generate_design_schedule <- function(design, n_subj, n_item, strict = TRUE, diag
     }
     schedule$item_exposure <- data.frame(item_id = item_ids,
       n_scheduled = tabulate(trials$item_id, n_item), component = components)
+    schedule$cell_exposure <- data.frame(
+      cell_id = seq_len(design$n_cells),
+      cell_name = as.character(design$cells$cell_name),
+      n_scheduled = id_chk$cell_counts,
+      stringsAsFactors = FALSE
+    )
   }
   schedule
+}
+
+assess_trial_identifiability <- function(cell_id, design, X = NULL) {
+  n_cells <- design$n_cells
+  if (!length(cell_id)) {
+    return(list(
+      ok = FALSE,
+      cell_counts = integer(n_cells),
+      missing_cells = as.character(design$cells$cell_name),
+      reason = "Observed trials omit required design cells."
+    ))
+  }
+  counts <- tabulate(cell_id, nbins = n_cells)
+  present <- counts > 0L
+  if (!all(present)) {
+    missing_nms <- as.character(design$cells$cell_name[!present])
+    return(list(
+      ok = FALSE,
+      cell_counts = counts,
+      missing_cells = missing_nms,
+      reason = sprintf(
+        "Observed trials omit required design cells (%s).",
+        paste(missing_nms, collapse = ", ")
+      )
+    ))
+  }
+  X_chk <- if (is.null(X)) design$X_cells[which(present), , drop = FALSE] else X
+  if (nrow(X_chk) < ncol(X_chk) || qr(X_chk)$rank < ncol(X_chk)) {
+    return(list(
+      ok = FALSE,
+      cell_counts = counts,
+      missing_cells = character(0),
+      reason = "Fixed-effect model matrix is rank-deficient on observed trials."
+    ))
+  }
+  list(
+    ok = TRUE,
+    cell_counts = counts,
+    missing_cells = character(0),
+    reason = NULL
+  )
 }
 
 item_components <- function(trials, n_item) {

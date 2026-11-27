@@ -19,6 +19,94 @@ their original executable and remain historical evidence, not confirmation
 of the corrected implementation over the entire old grid. Fixed-bank MML
 is byte-identical across this correction; its existing evidence is retained.
 
+<a id="identifiability-and-ranking-repair"></a>
+
+## Identifiability, preference ranking, validation intervals and replay separation (2026-11-27)
+
+The follow-up to `daa4d83` fixes planning, identifiability, worker-version,
+reporting and reproducibility issues and separates read-only archive checks from
+fresh isolated recomputations. In `src/glmm_laplace.cpp`, `cpp_fit_rasch_fixed_mml`
+rejects unidentifiable person-variance data and `fit_glmm_core_ws` scales
+above-chance starting-mean bounds (`[chance + 0.05(1 - chance), chance + 0.95(1 - chance)]`)
+and numerical boundary epsilons by `1 - chance` so valid high guessing floors
+(`chance >= 0.95`) initialize cleanly without changing `chance = 0` or interior
+`chance = 1/3` fits; priors, covariance updates and default interval methods are
+unchanged.
+
+| Issue | Corrected behavior and check |
+| --- | --- |
+| Worker build verification & `simulation_version = 5L` | `run_parallel_tasks()` prepends the parent `glmmplanr` library path when starting `mirai` pools and verifies `.glmmplanr_source_md5` across all active daemons (aborting before stamping `simulation_version = 5L` if pre-existing daemons hold a mismatched build). `simulation_version = 5L` ensures `topup_verification()` blocks and `switch_preference()` warns on incompatible pre-v5 saved candidate tables (including `simulation_version = 4` plans affected by positive-`chance` clamping, non-0.80 `ci_assurance` quantiles in `ci_width_q80`, or `n_valid == 0` conditional intervals, alongside pre-v4 unnormalized contrast weights), and `isolated_seeded_call()` extracts global symbols from default argument expressions in `formals(fn)` as well as `body(fn)` under Box-Muller RNG. |
+| Named RE alignment, effect conflict guards & schedule condition/balance checks | `calibrate_dgp()` aligns named `subj_sd`, `item_sd`, `testlet_sd`, `slope_sd_ratio`, and named `corr_structure` matrices by RE column or single-df term name (rejecting partial, duplicate, unknown, or mismatched row/col names); `cell_probs_from_diffs()` rejects duplicate, conflicting-alias (`c(C = 30, C1 = 8)`), or `"(Intercept)"` specifications; `simulate_dgp_data()` verifies schedule `allocation`, `between_subj`, `between_item`, `items_per_subject`, trial counts, unit-ID ranges, per-subject distinct-item quotas, distinct within-pair conditions (`(subj_id, item_id, cell_id)`, catching e.g. `A,B -> A,A` pair mutations), whole-testlet selection, and within-unit Latin-square balance against `dgp$design`; and integer dimension/range validators reject negative or fractional inputs before coercion. |
+| High-chance initialization, `mafc_binomial()` link precision, `n_valid == 0` conditional intervals, width quantiles & reporting | Above-chance C++ initialization, IEEE-754 machine-epsilon bounds on `(chance, 1)` in `mafc_binomial()` (preserving round-trip `linkfun(linkinv(eta))` at both `chance = 1 - 1e-8` and `eta = -18`), and Stan `real<lower=0, upper=1> chance;` support `chance` across `[0, 1)`. Under `failure_policy = "conditional"`, `n_valid == 0` sets `power_mcse` and conditional Wilson bounds to `NA_real_` (keeping `effective_* = 0` and `fail`); `ci_width_q80` stays fixed at the 80th percentile alongside `ci_width_q_assurance`; `plot(validate_design_point(...))` labels zero-truth `"planned"` rows as `"Type I error"` (`alpha`); `as_gt()` adds `rope_ci` for `criterion = "rope"` plans and aborts on uncomputed `"sensitivity"`/`"robust"` requests; and Rasch plan objects retain `dgp`, `items_per_subject`, `item_seed`, `attrition`, and `participant_dropout`. |
+| Missing-condition fast path | Unify fixed-effect cell and rank identifiability checks (`assess_trial_identifiability()`) across `generate_design_schedule()`, cached C++ fits (even when `attrition = 0` and `participant_dropout = 0`) and data-frame fits. Partial-presentation schedules omitting required cells return `insufficient_data` (`0/nsim` valid, `fail`) on both paths. |
+| Fixed-bank & random-item Rasch variance identifiability + item names | Fixed-item Rasch MML (`engine = "mml"` or `"tam"`) marks replications invalid whenever fewer than two items are estimable or no examinee has `>= 2` observed responses on estimable (non-constant) items, and random-item Rasch (`plan_rasch_precision()` and `plan_rasch_fixed_bank(method = "random_item")`) requires `>= 2` observed participants, `>= 2` observed items, and `>= 2` observed responses on at least one participant and at least one item, preventing unidentifiable 1-to-1 or 1-item-per-person schedules from passing SD tolerances. `plan_rasch_fixed_bank()` retains input names on `item_difficulties` and adds `item_name` to `item_summary`. |
+| Schedule/design compatibility, reserved factor names & custom testlet IDs | `design_crossed()` / `design_testlet()` reserve all internal schedule and formula columns (`subj_id`, `item_id`, `testlet_id`, `cell_name`, `trial_id`, `Z_*_cells`, etc.); `simulate_dgp_data()` verifies schedule cell/level/testlet compatibility against `dgp$design`; and `validate_custom_data()` maps omitted `subj_id`/`item_id` by matching `schedule$trials` labels rather than `as.factor()` re-indexing. |
+| Attainable-zero probability contrasts, shared cell-name alignment, saved-plan version checks & sensitivity/reporting sync | `specify_target()`, `null_target_spec()`, Type M/S diagnostics and `prob_target_kind()` evaluate bounds and residuals on unit-normalized weights `w / max(|w|)` (calibrating representable asymmetric nulls such as `c(-1, 1e-13)` at `chance = 0` while distinguishing double-precision underflow boundaries from mathematical unattainability). `align_named_cell_vector()` unifies exact-first cell-name matching and partial/duplicate-name rejection across `calibrate_dgp(cell_probs = ...)` and `align_cell_weights()` (supporting spaces and dots in factor levels, and keeping `cell_contrast_weights` cleanly exported under `roxygen2::roxygenise()`). `simulation_version = 4L` blocks `topup_verification()` under both `"independent"` and `"pooled"` from mixing or pooling incompatible pre-v4 candidate tables; `sensitivity` tracks `source_scenario` across `switch_preference()` and `topup_verification()`; `as_gt()` headers show the limiting scenario's effect; `report_plan()` computes sensitivity ranges across all slope levels including `"standard"`; and `isolated_seeded_call()` propagates `lib.loc`/MD5 checks and `.GlobalEnv` callback bindings under Box-Muller RNG. |
+| Surrogate `min_valid_rate` gating, `n_eval_init` guards & exact WLS trend | Under `failure_policy = "conditional"`, `build_surrogate_surface()` fits a monotone GP for `valid_rate` (`pred_valid_rate`), uses observed `valid_rate` at evaluated grid points and Laplace-smoothed thresholds on unevaluated points (so `min_valid_rate >= 0.99` does not reject `100%`-valid surfaces), and `select_stage2_candidates()` retains observed feasible candidates when `pred_criterion_met` is empty rather than defaulting to the grid ceiling. `optimize_sample_size()` requires `n_eval_init >= 1` once post-constraint candidate counts enter the `surrogate_gp` subset branch (while allowing `n_eval_init = 0` for `grid` or auto full-grid confirmation), `fit_nonneg_slope_wls()` solves centered active-set Cholesky analytically rather than calling `L-BFGS-B` (preventing `non-finite value supplied by optim` on 3-point underdetermined designs), and multi-scenario `optimize_sample_size()` resolves `stage1_re` and `stage1_engine` independently per scenario DGP. |
+| Validation intervals & post-top-up Wilson reporting | `validate_design_point()` returns `decision_status` and Wilson intervals for `width_attainment`, `joint_attainment` and `rope_attainment` (plotted as `"ROPE exclusion"`). `topup_verification()` preserves `search_meta$mc_conf_level_effective` as the initial Stage-2 level while storing per-candidate `mc_conf_level_used`, so `report_plan()` cites the exact Wilson level of the selected candidate alongside fixed-`item_seed` partial-presentation conditioning notes. |
+| Conditional-validity interim curtailment | Under `failure_policy = "conditional"`, `early_stop` curtails for `valid_rate` only when `(n_valid_interim + n_remaining) / nsim < min_valid_rate` (deterministic impossibility), preserving candidates that reach the validity floor over the full run. |
+| Preference ordering and scenario trial costs | Make `fewer_subj`, `fewer_items` and `fewer_trials` strictly lexicographic across arbitrary candidate ranges. When multi-scenario designs differ in scheduled or expected trial counts at the same `(n_subj, n_item)`, report scenario-specific counts explicitly rather than attributing one scenario's count to all scenarios. |
+| Full-grid multi-scenario deduplication | Skip redundant exploratory searches when `method = "grid"` or `nrow(grid_df) <= n_eval_init + n_eval_adapt`, confirming the fixed candidate-by-scenario grid once on fresh streams. |
+| Post-top-up state and absolute-target plots | `topup_verification()` refreshes `evaluated` and `surface` alongside `verified` (single- and multi-scenario, preserved across `saveRDS()`/`readRDS()`). Absolute probability targets keep `pred_power = NA` rather than `0.5` and default `plot()` to `ci_width` (also supporting `metric = "aipe_prob"`). |
+| Pre-coercion input checks | Reject factor/character `y` in `validate_custom_data()` before integer conversion, and validate positive whole-integer replication and worker counts before coercion. |
+| Observed-data interval workflow & CI | Enforce `model.frame()`-aligned cell-separation checks (robust to dropped `NA` rows), numeric optimizer-convergence checks (`opt == 0`) and finite-vcov checks on both `glmer` and `bootMer` refits in `vignettes/planning-workflows.Rmd`, verified by executing the vignette chunk in `test-review-regressions.R`; add `release/**`, `workflow_dispatch`, `R 4.1` (declared minimum) and `R-devel` to `.github/workflows/R-CMD-check.yaml`. |
+
+### Separating archived-result verification from fresh recomputation
+
+1. **Read-only audit of saved replay CSVs (no re-simulation or file modification):**
+   ```sh
+   python3 validation/verify_replay_against_archive.py
+   ```
+   `verify_replay_against_archive.py` checks header schemas, internal marginal
+   and logit interval/detection consistency, and all marginal, conditional
+   (`logit`, `logit_se`, `logit_truth`, `logit_covered`) and profile-diagnostic
+   columns without Python `assert` statements, so `python3 -O` fails non-zero
+   identically on any `NaN`/`Inf`, tolerance, or decision mismatch.
+2. **Fresh recomputation into a new empty directory (no block reuse):**
+   ```sh
+   # Isolated install + fresh replay into a temporary directory (~2 MB staged inputs, not 213 MB)
+   sh validation/run-isolated.sh covariance_mode_replay
+   # Verify the newly computed directory against the archived baseline:
+   python3 validation/verify_replay_against_archive.py /path/to/glmmplanr-validation.XXXXXXXX/replay_out
+   ```
+   Passing `--fresh <new_output_dir>` to `validation/covariance_mode_replay.R`
+   refuses non-empty directories so cached `.rds` blocks are never silently
+   reused. When resuming an interrupted run without `--fresh`,
+   `checkpoint_dir()` hashes all `R/*.R` and `src/*.{cpp,h}` package source
+   files alongside script and input MD5s (including `cases.csv` and
+   `diagnostics.csv`), `settings` (including `cases`), R version and package
+   versions, verifies per-block `case` metadata on resume, and verifies that
+   the loaded `glmmplanr` namespace's build-time `.glmmplanr_source_md5`
+   matches the current working-tree sources (rejecting stale or mismatched
+   `R_LIBS` installations while still permitting separate temporary installs
+   built from the identical source).
+
+3. **Input dependencies staged by `validation/run-isolated.sh`:**
+   By default `run-isolated.sh` copies package sources plus `validation/*.R`
+   and parses `validation/$name.R` together with transitively `source()`d
+   helper scripts to stage every existing `validation/...` input file or
+   directory automatically (set `VALIDATION_COPY_ALL=1` only if a full copy of
+   all ~213 MB archived outputs is needed):
+   - `rasch_fixed_bank`, `coverage_recheck`, `stan_uncertainty`,
+     `three_choice_precision`, `package_calibration`: package source +
+     `validation/*.R` only (no archived subdirectories required).
+   - Scripts sourcing `planning_comparison_helpers.R`: stages
+     `validation/item_pool_planning_verified/pool.csv` and `forms.csv`, plus
+     script-specific inputs (e.g., `validation/item_pool_search/search.csv` for
+     `confirm_item_pool_search` and `compare_item_pool_irtsim`).
+   - `covariance_mode_replay` / `inspect_covariance_profile_failure` /
+     `check_covariance_scores`: stages `validation/item_pool_planning_verified/`
+     and `validation/covariance_review_medium/`.
+   - `interval_mechanism_audit` / `summarize_l2_default_bootstrap`: stages
+     `validation/l2_default_bootstrap_confirm/`.
+   - `summarize_l2_vocabulary_extremes` / `summarize_few_shared_passages` /
+     `check_two_pl_*`: stages matching stem-prefixed scenario/summary/fit
+     files (e.g., `validation/l2_vocabulary_extremes_*`) constructed via
+     `file.path()` / `paste0()`.
+   - `three_choice_cov_decomposition`: stages
+     `validation/three_choice_precision_native.csv` and
+     `validation/three_choice_precision_stan.csv`.
+
 <a id="planning-contract-repair"></a>
 
 ## Planning decisions, custom data and numerical failure contracts (2026-11-26)
@@ -2802,6 +2890,41 @@ variance and the mean posterior variance. In 0.2.4 the corresponding
 reported measure used error-variance subtraction. The focal i08 native
 infit and outfit each differed by at most 0.000002 between versions
 across the 448 matched diagnostic datasets.
+
+**Winsteps definitions vs. `mfrmr` 0.3.2 diagnostics.** Per the Winsteps
+and Facets manuals (`reliability.htm`, `table3_1.htm`) and Wright & Masters
+(1982, pp. 92, 106; 2002, *RMT* 16:3, p. 888), Rasch separation, strata, and
+reliability are defined on direct (unshrunk) logit measures using the
+**population** observed variance $\text{P.SD}^2 = \frac{1}{N}\sum_{i=1}^N (\hat{\beta}_i - \bar{\hat{\beta}})^2$
+(divisor $N$; sample counterparts `S.SD`, `S.Sep`, `S.Strata`, and
+$\text{S.Rel} = \{1 + (N - 1)\text{P.Rel}\}/N$ use divisor $N - 1$),
+$\text{Model RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^N \text{Model SE}_i^2}$, and
+$\text{Real RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^N \text{Real SE}_i^2}$ with
+$\text{Real SE}_i = \text{Model SE}_i\sqrt{\max(1, \text{INFIT MnSq}_i)}$:
+$\text{True SD} = \sqrt{\max(0, \text{P.SD}^2 - \text{RMSE}^2)}$,
+$\text{Separation } G = \text{True SD} / \text{RMSE}$,
+$\text{Strata } H = (4G + 1)/3$, and
+$\text{Reliability } R = \max(0, \text{P.SD}^2 - \text{RMSE}^2) / \text{P.SD}^2 = G^2 / (1 + G^2)$
+(reported separately for non-extreme and extreme+non-extreme elements).
+By contrast, `mfrmr` 0.3.2's `diagnose_mfrm()` (`.mfrm_diagnose_fit()`) departs
+from Winsteps in three ways: (1) under `score_method = "EAP"` (its MML default),
+it sets `v_true = stats::var(EAP)` (shrunk posterior-mean variance) and plugs
+misfit-inflated `RealSE` into the additive EAP ratio
+`RealReliability = v_obs / (v_obs + mean(RealSE^2))` and
+`RealSeparation = sqrt(v_obs / mean(RealSE^2))`, which breaks the total-variance
+identity and prevents `RealReliability` and `RealSeparation` from ever reaching
+`0` (or `Strata` from reaching `1/3`) even when `Real RMSE >= Observed SD`;
+(2) across all facets and methods (`JML` and `MML`), it uses sample variance
+`stats::var()` (divisor $N - 1$, `S.SD^2`) alongside `mse = mean(s^2)` (divisor
+$N$) without distinguishing Winsteps/Facets's default population definitions
+(`P.SD^2`, divisor $N$), inflating separation, strata, and reliability for small
+facet counts; and (3) it reports only `RealSeparation`-based strata under an
+unlabeled `Strata` column without `ModelStrata`. In our 4L helper script
+(`validation/rasch_fit_benchmark_helpers.R`), `person_eap_rel` is marginal EAP
+reliability (`var(eap) / (var(eap) + mean(post_var))`), `person_eap_ratio` is
+not interpreted as Winsteps separation, and `item_rel` / `item_separation` use
+sample variance (`var(b)`, divisor $J - 1$, i.e. `S.Rel` / `S.Sep`) with MML
+observed-information SEs.
 
 #### Anchored DIF replay
 

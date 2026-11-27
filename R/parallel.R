@@ -6,22 +6,88 @@ split_indices <- function(n, k) {
   unname(split(seq_len(n), grp))
 }
 
+parent_glmmplanr_worker_spec <- function() {
+  ns <- asNamespace("glmmplanr")
+  raw_path <- getNamespaceInfo(ns, "path")
+  pkg_path <- normalizePath(raw_path, winslash = "/", mustWork = TRUE)
+  is_installed <- file.exists(file.path(pkg_path, "Meta", "package.rds"))
+  pkg_lib <- if (is_installed) dirname(pkg_path) else NULL
+  is_dev <- !is_installed || (
+    isNamespaceLoaded("pkgload") &&
+      isTRUE(tryCatch(pkgload::is_dev_package("glmmplanr"), error = function(e) FALSE))
+  )
+  list(
+    pkg_path = pkg_path,
+    is_installed = is_installed,
+    is_dev = is_dev,
+    pkg_lib = pkg_lib,
+    lib_paths = unique(c(pkg_lib, .libPaths())),
+    expected_md5 = .glmmplanr_source_md5
+  )
+}
+
+sync_and_verify_mirai_pool <- function(wspec) {
+  init_res <- mirai::everywhere(
+    {
+      .libPaths(unique(c(wspec$pkg_lib, wspec$lib_paths)))
+      if (!("glmmplanr" %in% loadedNamespaces())) {
+        if (isTRUE(wspec$is_dev) && !isTRUE(wspec$is_installed)) {
+          pkgload::load_all(wspec$pkg_path, compile = FALSE, quiet = TRUE)
+        } else {
+          loadNamespace("glmmplanr", lib.loc = wspec$pkg_lib)
+        }
+      }
+      w_ns <- asNamespace("glmmplanr")
+      w_md5 <- get0(".glmmplanr_source_md5", envir = w_ns, inherits = FALSE)
+      w_path <- normalizePath(getNamespaceInfo(w_ns, "path"), winslash = "/", mustWork = FALSE)
+      list(
+        ok = identical(w_md5, wspec$expected_md5),
+        worker_md5 = w_md5,
+        worker_path = w_path
+      )
+    },
+    wspec = wspec
+  )[]
+  errs <- vapply(init_res, mirai::is_error_value, logical(1L))
+  if (any(errs)) {
+    return(list(status = "error", detail = init_res[errs]))
+  }
+  bad <- vapply(init_res, function(x) !is.list(x) || !isTRUE(x$ok), logical(1L))
+  if (any(bad)) {
+    first_bad <- init_res[[which(bad)[1L]]]
+    return(list(
+      status = "mismatch",
+      worker_path = if (is.list(first_bad)) first_bad$worker_path else NA_character_
+    ))
+  }
+  list(status = "ok")
+}
+
+abort_mirai_version_mismatch <- function(worker_path = NA_character_) {
+  path_clause <- if (is.character(worker_path) && length(worker_path) == 1L &&
+                     !is.na(worker_path) && nzchar(worker_path)) {
+    sprintf(" (worker loaded from '%s')", worker_path)
+  } else {
+    ""
+  }
+  cli::cli_abort(c(
+    paste0(
+      "Active {.pkg mirai} worker(s) have a different {.pkg glmmplanr} build loaded than the current session",
+      path_clause, "."
+    ),
+    "i" = "Reset existing workers with {.code mirai::daemons(0)} before running parallel simulations so all workers load the current {.pkg glmmplanr} installation."
+  ))
+}
+
 start_mirai_pool <- function(workers) {
+  wspec <- parent_glmmplanr_worker_spec()
   tryCatch({
     # Pool setup may draw from the caller even when all tasks have explicit seeds.
     with_rng_stream(1L, mirai::daemons(workers))
-    is_dev <- isNamespaceLoaded("pkgload") &&
-      isTRUE(tryCatch(pkgload::is_dev_package("glmmplanr"), error = function(e) FALSE))
-    if (is_dev) {
-      pkg_root <- getNamespaceInfo(asNamespace("glmmplanr"), "path")
-      init_res <- mirai::everywhere(
-        pkgload::load_all(p, compile = FALSE, quiet = TRUE),
-        p = pkg_root
-      )[]
-      if (any(vapply(init_res, mirai::is_error_value, logical(1L)))) {
-        try(mirai::daemons(0L), silent = TRUE)
-        return(FALSE)
-      }
+    chk <- sync_and_verify_mirai_pool(wspec)
+    if (!identical(chk$status, "ok")) {
+      try(mirai::daemons(0L), silent = TRUE)
+      return(FALSE)
     }
     TRUE
   }, error = function(e) {
@@ -91,11 +157,25 @@ run_parallel_tasks <- function(
        (isTRUE(mirai::daemons_set()) || .Platform$OS.type != "unix" || is_macos))
 
   if (prefer_mirai) {
+    wspec <- parent_glmmplanr_worker_spec()
+    mstate <- new.env(parent = emptyenv())
+    mstate$mismatch <- FALSE
+    mstate$worker_path <- NA_character_
     res <- tryCatch({
       started_daemons <- FALSE
       if (!isTRUE(mirai::daemons_set())) {
         if (!start_mirai_pool(workers)) stop("mirai pool init failed", call. = FALSE)
         started_daemons <- TRUE
+      } else {
+        sync_chk <- sync_and_verify_mirai_pool(wspec)
+        if (identical(sync_chk$status, "mismatch")) {
+          mstate$mismatch <- TRUE
+          mstate$worker_path <- sync_chk$worker_path
+          stop("mirai worker version mismatch", call. = FALSE)
+        }
+        if (!identical(sync_chk$status, "ok")) {
+          stop("mirai pool sync failed", call. = FALSE)
+        }
       }
       on.exit(if (started_daemons) try(mirai::daemons(0L), silent = TRUE), add = TRUE)
       full_out <- vector("list", n_tasks)
@@ -103,10 +183,29 @@ run_parallel_tasks <- function(
       if (!started_daemons && nzchar(chk) && chk != "false") {
         waves <- split(seq_len(n_tasks), ceiling(seq_len(n_tasks) / workers))
       }
+      expected_md5 <- wspec$expected_md5
       for (wv in waves) {
         sub_out <- mirai::mirai_map(
-          tasks[wv], function(tsk, fn) fn(tsk), .args = list(fn = worker_fn)
+          tasks[wv],
+          function(tsk, fn, exp_md5) {
+            w_ns <- asNamespace("glmmplanr")
+            w_md5 <- get0(".glmmplanr_source_md5", envir = w_ns, inherits = FALSE)
+            if (!identical(w_md5, exp_md5)) {
+              return(structure(
+                list(worker_path = normalizePath(getNamespaceInfo(w_ns, "path"), winslash = "/", mustWork = FALSE)),
+                class = "glmmplanr_worker_mismatch"
+              ))
+            }
+            fn(tsk)
+          },
+          .args = list(fn = worker_fn, exp_md5 = expected_md5)
         )[]
+        mis_mask <- vapply(sub_out, inherits, logical(1L), "glmmplanr_worker_mismatch")
+        if (any(mis_mask)) {
+          mstate$mismatch <- TRUE
+          mstate$worker_path <- sub_out[[which(mis_mask)[1L]]]$worker_path
+          stop("mirai worker version mismatch", call. = FALSE)
+        }
         if (any(vapply(sub_out, mirai::is_error_value, logical(1L)))) {
           stop("mirai worker error", call. = FALSE)
         }
@@ -115,6 +214,9 @@ run_parallel_tasks <- function(
       }
       full_out
     }, error = function(e) NULL)
+    if (isTRUE(mstate$mismatch)) {
+      abort_mirai_version_mismatch(mstate$worker_path)
+    }
     if (!is.null(res)) return(res)
     # Platform or backend selection already favored non-forked workers.
     return(run_seq(seq_len(n_tasks)))

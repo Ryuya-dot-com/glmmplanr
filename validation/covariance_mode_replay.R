@@ -1,8 +1,14 @@
 # Replay saved responses after the mode-roundoff/diagnostic-contract repair.
+# Pass `--fresh <new_output_dir>` for an independent recomputation without block reuse.
 source("validation/planning_comparison_helpers.R")
 old <- "validation/covariance_review_medium"
 args <- commandArgs(TRUE)
-out <- if (length(args)) args[1L] else "validation/covariance_mode_replay"
+fresh <- "--fresh" %in% args
+pos_args <- setdiff(args, "--fresh")
+if (fresh && !length(pos_args)) {
+  stop("Supply a new output directory when running with --fresh.")
+}
+out <- if (length(pos_args)) pos_args[1L] else "validation/covariance_mode_replay"
 cases <- read.csv(file.path(old,"cases.csv"))
 diagnostics <- read.csv(file.path(old,"diagnostics.csv"))
 scores <- read.csv(file.path(old,"score_checks.csv"))
@@ -11,17 +17,58 @@ selected <- unique(rbind(diagnostics[!diagnostics$profile_valid,c("case","replic
   data.frame(case=cases$case,replicate=1L)))
 paths <- list.files(old,pattern="^case-.*-block-.*rds$",full.names=TRUE)
 checkpoint_dir(out,c("validation/covariance_mode_replay.R",paths,
-  file.path(old,c("source_script.R","manifest.rds","score_checks.csv")),"R/plan_methods.R"),
-  list(nsim=2048L,selected=selected,point_tolerance_pp=1e-4,se_tolerance_pp=1e-4,
-    reference="unchanged archived optimizer, priors and acceptance rules"),c("glmmplanr","digest"))
+  file.path(old,c("cases.csv","diagnostics.csv","source_script.R","manifest.rds","score_checks.csv")),"R/plan_methods.R"),
+  list(nsim=2048L,cases=cases,selected=selected,point_tolerance_pp=1e-4,se_tolerance_pp=1e-4,
+    reference="unchanged archived optimizer, priors and acceptance rules"),c("glmmplanr","digest"),
+  fresh=fresh)
 for(e in parse(file.path(old,"source_script.R"))) {
   if(is.call(e) && identical(e[[1]],as.name("<-")) && is.symbol(e[[2]]) &&
      as.character(e[[2]]) %in% c("make_case","unpack","dense_check","run_trial")) eval(e)
 }
 atomic_rds(list(selected=selected,cases=cases),file.path(out,"cases.rds"))
+verify_case_matches_table <- function(block_case, path_lbl) {
+  idx <- which(cases$case == block_case$case)
+  if (length(idx) != 1L) stop("Block case ID missing or duplicated in cases.csv: ", path_lbl)
+  common <- intersect(names(cases), names(block_case))
+  for (cn in common) {
+    v_tbl <- cases[[cn]][idx]
+    v_blk <- block_case[[cn]][1L]
+    same <- if (is.numeric(v_tbl) && is.numeric(v_blk)) {
+      abs(as.numeric(v_tbl) - as.numeric(v_blk)) <= 1e-12
+    } else {
+      identical(as.character(v_tbl), as.character(v_blk))
+    }
+    if (!isTRUE(same)) {
+      stop(sprintf("Saved block '%s' disagrees with cases.csv on '%s' (%s vs %s).",
+                   path_lbl, cn, as.character(v_blk), as.character(v_tbl)))
+    }
+  }
+}
 run_block <- function(path) {
-  target <- file.path(out,basename(path)); if(file.exists(target)) return(target)
-  a <- readRDS(path); obj <- list(spec=a$spec,schedule=a$schedule,
+  target <- file.path(out,basename(path))
+  a <- readRDS(path)
+  verify_case_matches_table(a$case, path)
+  if (!fresh && file.exists(target)) {
+    saved_b <- readRDS(target)
+    if (!is.list(saved_b) || !is.data.frame(saved_b$comparison) ||
+        !all(saved_b$comparison$case == a$case$case)) {
+      stop("Existing output block does not match input block case ID: ", target)
+    }
+    exp_sel <- sort(selected$replicate[selected$case == a$case$case &
+                                       selected$replicate %in% saved_b$comparison$replicate])
+    got_sel <- sort(vapply(saved_b$references, function(r) as.integer(r$rows$replicate[1L]), integer(1L)))
+    if (!identical(exp_sel, got_sel)) {
+      stop("Existing output block selected reference replicates disagree with current inputs: ", target)
+    }
+    for (ref_k in saved_b$references) {
+      r_fit <- ref_k$rows
+      if (any(abs(as.numeric(r_fit$effect_pp) - as.numeric(a$case$effect_pp)) > 1e-12)) {
+        stop("Existing output block reference_fits effect_pp disagrees with cases.csv: ", target)
+      }
+    }
+    return(list(path = target, recomputed = FALSE))
+  }
+  obj <- list(spec=a$spec,schedule=a$schedule,
     cache=glmmplanr:::prepare_cpp_schedule_cache(a$spec,a$schedule))
   x <- a$case; rows <- list(); references <- list()
   bases <- glmmplanr:::allocate_stage_point_streams(952260001L,1L,cases$case,nrow(cases))
@@ -52,12 +99,16 @@ run_block <- function(path) {
     }
   }
   atomic_rds(list(comparison=do.call(rbind,rows),references=references),target)
-  cat(basename(path),"saved\n"); target
+  cat(basename(path),"recomputed and saved\n")
+  list(path = target, recomputed = TRUE)
 }
 results <- parallel::mclapply(paths,run_block,mc.cores=if(.Platform$OS.type=="windows") 1L else 6L,
   mc.set.seed=FALSE,mc.preschedule=FALSE)
-stopifnot(all(vapply(results,function(p) is.character(p) && length(p)==1L && file.exists(p),logical(1))))
-batches<-lapply(results,readRDS)
+stopifnot(all(vapply(results,function(r) is.list(r) && is.character(r$path) && length(r$path)==1L && file.exists(r$path),logical(1))))
+n_recomputed <- sum(vapply(results, function(r) isTRUE(r$recomputed), logical(1)))
+cat(sprintf("Blocks recomputed: %d/%d (reused from checkpoint: %d)\n",
+  n_recomputed, length(results), length(results) - n_recomputed))
+batches<-lapply(results,function(r) readRDS(r$path))
 comparison<-do.call(rbind,lapply(batches,`[[`,"comparison"))
 ref<-unlist(lapply(batches,`[[`,"references"),recursive=FALSE)
 ref_summary<-do.call(rbind,lapply(ref,function(z) cbind(z$diagnostic,

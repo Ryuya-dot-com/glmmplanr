@@ -21,19 +21,44 @@ mc_summary <- function(success, valid = rep(TRUE, length(success))) {
     mc_lo = unname(ci[1]), mc_hi = unname(ci[2]),
     decision = if (ci[1] >= .8) "pass" else if (ci[2] < .8) "fail" else "indeterminate")
 }
-checkpoint_dir <- function(out, scripts, settings, packages) {
+checkpoint_dir <- function(out, scripts, settings, packages, fresh = FALSE) {
+  if (isTRUE(fresh) && dir.exists(out) && length(list.files(out, all.files = TRUE, no.. = TRUE))) {
+    stop("Fresh recomputation requires a new or empty output directory: ", out)
+  }
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
-  files <- c(scripts, "validation/planning_comparison_helpers.R",
+  pkg_sources <- sort(c(
+    list.files("R", pattern = "\\.R$", full.names = TRUE),
+    list.files("src", pattern = "\\.(cpp|h)$", full.names = TRUE)
+  ), method = "radix")
+  tree_pkg_md5 <- tools::md5sum(pkg_sources)
+  inst_pkg_md5 <- get0(".glmmplanr_source_md5", envir = asNamespace("glmmplanr"), inherits = FALSE)
+  if (is.null(inst_pkg_md5) || !identical(inst_pkg_md5, tree_pkg_md5)) {
+    stop(
+      "Loaded glmmplanr installation (", find.package("glmmplanr"),
+      ") was not built from the current working-tree R/ and src/ sources.",
+      call. = FALSE
+    )
+  }
+  files <- unique(c(scripts, "validation/planning_comparison_helpers.R",
     "validation/item_pool_planning_verified/pool.csv", "validation/item_pool_planning_verified/forms.csv",
-    "src/glmm_laplace.cpp", "R/rasch_precision.R", "R/engines.R", "R/optimize.R")
+    pkg_sources))
   binary <- list.files(system.file("libs", package = "glmmplanr"), pattern = "\\.(so|dll)$",
                        recursive = TRUE, full.names = TRUE)
   manifest <- list(settings = settings, files = tools::md5sum(files),
+    installed_source_md5 = inst_pkg_md5,
     binary = unname(tools::md5sum(binary)), R = R.version.string,
     packages = vapply(packages, function(p) as.character(packageVersion(p)), ""))
   path <- file.path(out, "manifest.rds")
   if (file.exists(path)) {
-    if (!identical(readRDS(path), manifest)) stop("Resume manifest differs: ", out)
+    saved <- readRDS(path)
+    resume_keys <- c("settings", "files", "installed_source_md5", "R", "packages")
+    if (!identical(saved[resume_keys], manifest[resume_keys])) {
+      stop("Resume manifest differs in settings, source/input/install hashes, R or package versions: ", out)
+    }
+    if (!identical(saved$binary, manifest$binary)) {
+      saved$resumed_binaries <- unique(c(saved$resumed_binaries, manifest$binary))
+      saveRDS(saved, path)
+    }
   } else {
     if (length(list.files(out))) stop("Existing directory has no matching manifest: ", out)
     saveRDS(manifest, path)

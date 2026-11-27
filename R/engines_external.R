@@ -182,12 +182,14 @@ build_stan_data <- function(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec) {
     if (q == 1L) matrix(1, des$n_cells, 1L) else z
   }
   quad <- gh_quad_1d(spec$dgp$n_quad)
+  w_scale <- max(abs(spec$contrast_weights))
+  w_unit <- unname(spec$contrast_weights) / w_scale
   list(
     M = des$n_cells, X_cell = des$X_cells,
     Zs_cell = cell_z(des$Z_subj_cells, ncol(Z_s)),
     Zi_cell = cell_z(des$Z_item_cells, ncol(Z_i)),
     Zt_cell = if (has_t) cell_z(des$Z_testlet_cells, ncol(Z_t)) else matrix(0, des$n_cells, 0L),
-    contrast = unname(spec$contrast_weights), K = length(quad$nodes),
+    contrast = w_unit, K = length(quad$nodes),
     nodes = quad$nodes, weights = quad$weights,
     marginal = as.integer(spec$prob_estimand == "marginal"),
     N = nrow(df),
@@ -415,14 +417,17 @@ fit_via_stan_hmc <- function(
     V_est <- stats::cov(draws_b)
     est <- unname(b_est[eff_idx])
     se <- sqrt(V_est[eff_idx, eff_idx])
-    prob_est <- mean(contrast_draws)
-    prob_se <- stats::sd(contrast_draws)
+    w_scale <- max(abs(spec$contrast_weights))
+    prob_est_unit <- mean(contrast_draws)
+    prob_se_unit <- stats::sd(contrast_draws)
 
     diag_res <- evaluate_stan_hmc_diagnostics(
       diag_draws, n_div = n_div, n_max_td = n_max_td, aux_vars = tau_vars
     )
     num_ok <- is.finite(est) && is.finite(se) && (se > 0) &&
-      is.finite(prob_est) && is.finite(prob_se) && (prob_se > 0)
+      is.finite(prob_est_unit) && is.finite(prob_se_unit) && (prob_se_unit > 0)
+    prob_est <- w_scale * prob_est_unit
+    prob_se <- w_scale * prob_se_unit
     conv <- isTRUE(diag_res$ok) && num_ok
 
     reason_txt <- if (conv) {

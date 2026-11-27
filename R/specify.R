@@ -155,9 +155,25 @@ specify_target <- function(
   effect_col <- resolve_effect_column(dgp$design, effect)
   true_beta <- unname(dgp$beta[[effect_col]])
   c_weights <- cell_contrast_weights(dgp$design, effect_col, custom_weights = contrast_weights)
-  if (scale != "logit" && !(any(c_weights > 0) && any(c_weights < 0)) &&
-      criterion %in% c("power", "both", "joint")) {
-    cli::cli_abort("An absolute probability target has no between-condition null difference. Use {.code criterion = 'ci_width'} for precision or {.code scale = 'logit'} to test a zero conditional coefficient.")
+  null_st <- probability_contrast_null_status(dgp, c_weights, scale, prob_estimand)
+  if (!null_st$ok && criterion %in% c("power", "both", "joint")) {
+    is_abs <- all(is.finite(c_weights)) && all(c_weights >= -1e-12) && abs(sum(c_weights) - 1.0) <= 1e-8
+    if (identical(null_st$kind, "single_sign") && is_abs) {
+      cli::cli_abort("An absolute probability target has no between-condition null difference. Use {.code criterion = 'ci_width'} for precision or {.code scale = 'logit'} to test a zero conditional coefficient.")
+    }
+    if (identical(null_st$kind, "single_sign")) {
+      cli::cli_abort("Probability-scale zero-exclusion criteria require contrast weights of both signs unless estimating an absolute probability with {.code criterion = 'ci_width'}.")
+    }
+    if (identical(null_st$kind, "numerical_boundary")) {
+      cli::cli_abort(c(
+        null_st$reason,
+        "i" = "Zero-exclusion {.arg criterion} ({.val {criterion}}) is outside reliable double-precision calibration at this extreme weight ratio; rescale weights to a moderate ratio or use {.code criterion = 'ci_width'} / {.code 'rope'}."
+      ))
+    }
+    cli::cli_abort(c(
+      null_st$reason,
+      "i" = "Zero-exclusion {.arg criterion} ({.val {criterion}}) is undefined when zero cannot occur under the model; use {.code criterion = 'ci_width'} or an attainable {.code 'rope'}."
+    ))
   }
   true_prob_diff <- true_prob_effect(dgp, weights = c_weights, estimand = prob_estimand)
   true_effect_target <- switch(
@@ -259,8 +275,11 @@ specify_target <- function(
       requested_engine = engine,
       engine = resolved_engine,
       engine_fallback = engine_fallback,
+      requested_stage1_engine = control$stage1_engine,
       stage1_engine = stage1_engine,
+      requested_stage1_re = stage1_re,
       stage1_re = resolved_stage1_re,
+      has_null_target = null_st$ok,
       on_singular = on_singular,
       requested_analysis_re = requested_analysis_re,
       analysis_re = analysis_re,
@@ -391,8 +410,18 @@ print.glmmplanr_spec <- function(x, ...) {
   } else {
     x$analysis_re
   }
-  probability_label <- if (can_define_null_target(x)) "difference" else "absolute probability"
-  probability_value <- if (can_define_null_target(x)) sprintf("%+.2f pp", x$true_prob_diff_pp) else sprintf("%.2f%%", x$true_prob_diff_pp)
+  p_kind <- prob_target_kind(x)
+  probability_label <- switch(
+    p_kind,
+    absolute = "absolute probability",
+    difference = "difference",
+    weighted_contrast = "weighted contrast"
+  )
+  probability_value <- if (identical(p_kind, "absolute")) {
+    sprintf("%.2f%%", x$true_prob_diff_pp)
+  } else {
+    sprintf("%+.2f pp", x$true_prob_diff_pp)
+  }
   cli::cli_ul(c(
     "Focal effect: {.val {x$effect_input}} (true beta = {round(x$true_beta, 4)} logit | {x$prob_estimand} {probability_label} = {probability_value})",
     "Target scale: {.val {x$scale}} | Criterion ({.val {x$criterion}}): {crit_desc}",

@@ -907,12 +907,13 @@ struct GLMMWorkspace {
       }
       return ll_data;
     }
+    const double eps_mu = std::min(1e-12, 0.01 * std::max(1.0 - chance, 0.0));
     for (int k = 0; k < N; ++k) {
       double eta = e0_ptr[k] + scale * de_ptr[k];
       eta = std::min(std::max(eta, -25.0), 25.0);
       double p = inv_logit(eta);
       double mu = chance + (1.0 - chance) * p;
-      mu = std::min(std::max(mu, chance + 1e-12), 1.0 - 1e-12);
+      mu = std::min(std::max(mu, chance + eps_mu), 1.0 - eps_mu);
       ll_data += (y_ptr[k] == 1) ? std::log(mu) : std::log1p(-mu);
     }
     return ll_data;
@@ -1324,11 +1325,12 @@ struct GLMMWorkspace {
       return ll_data;
     }
 
+    const double eps_mu = std::min(1e-12, 0.01 * std::max(1.0 - chance, 0.0));
     for (int k = 0; k < N; ++k) {
       const double eta = std::min(std::max(e0_ptr[k], -25.0), 25.0);
       const double p = inv_logit(eta);
       const double omp = 1.0 - p;
-      const double mu = std::min(std::max(chance + (1.0 - chance) * p, chance + 1e-12), 1.0 - 1e-12);
+      const double mu = std::min(std::max(chance + (1.0 - chance) * p, chance + eps_mu), 1.0 - eps_mu);
       const bool correct = (y_ptr[k] == 1);
       ll_data += correct ? std::log(mu) : std::log1p(-mu);
       g_ptr[k] = correct ? ((1.0 - chance) * p / mu) * omp : -p;
@@ -1938,7 +1940,10 @@ struct GLMMWorkspace {
 
     double sum_y = 0.0;
     for (int k = 0; k < N; ++k) sum_y += static_cast<double>(y_csr[k]);
-    double mean_y = std::min(std::max(sum_y / std::max(N, 1), chance + 0.05), 0.95);
+    const double span_p = std::max(1.0 - chance, 1e-15);
+    const double lo_p = chance + 0.05 * span_p;
+    const double hi_p = chance + 0.95 * span_p;
+    const double mean_y = std::min(std::max(sum_y / std::max(N, 1), lo_p), hi_p);
     Eigen::VectorXd beta = Eigen::VectorXd::Zero(P);
     beta(0) = std::log((mean_y - chance) / (1.0 - mean_y));
     if (init_beta != nullptr && init_beta->size() == P && init_beta->allFinite()) {
@@ -3380,16 +3385,23 @@ Rcpp::List cpp_fit_rasch_fixed_mml(
   obs_s.reserve(n_subj);
   std::vector<int> subj_to_row(n_subj, -1);
   bool all_obs = true;
+  bool has_multi_item_subj = false;
   for (int s = 0; s < n_subj; ++s) {
     if (subj_obs_cnt[s] > 0) {
       subj_to_row[s] = static_cast<int>(obs_s.size());
       obs_s.push_back(s);
+      if (subj_obs_cnt[s] >= 2) has_multi_item_subj = true;
       if (subj_obs_cnt[s] != J) all_obs = false;
     }
   }
   const int S_obs = static_cast<int>(obs_s.size());
   if (S_obs < 2) {
     return Rcpp::List::create(Rcpp::Named("error") = "Fewer than two observed participants");
+  }
+  if (!has_multi_item_subj) {
+    return Rcpp::List::create(
+      Rcpp::Named("error") = "Person variance is unidentifiable: no participant has two or more responses on estimable items"
+    );
   }
 
   Eigen::VectorXd n_sub = Eigen::VectorXd::Zero(J);

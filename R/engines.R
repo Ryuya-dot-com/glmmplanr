@@ -25,11 +25,11 @@ fit_single_dataset <- function(
   chance_fit <- if (spec$analysis_link == "match_dgp") spec$dgp$chance else 0.0
 
   cid <- df$cell_id
-  X <- des$X_cells[cid, , drop = FALSE]
-
-  if (!nrow(X) || (length(unique(cid)) < ncol(X))) {
-    return(make_failed_fit("insufficient_data", "Observed trials omit required design cells."))
+  id_chk <- assess_trial_identifiability(cid, des)
+  if (!id_chk$ok) {
+    return(make_failed_fit("insufficient_data", id_chk$reason))
   }
+  X <- des$X_cells[cid, , drop = FALSE]
   if (re_structure == "intercept_only") {
     Z_s <- matrix(1.0, nrow = nrow(df), ncol = 1L, dimnames = list(NULL, "(Intercept)"))
     Z_i <- matrix(1.0, nrow = nrow(df), ncol = 1L, dimnames = list(NULL, "(Intercept)"))
@@ -140,7 +140,7 @@ summarize_probability_fit <- function(
   n_i_obs <- length(unique(item))
   n_t_obs <- if (ncol(Z_t) > 0L && length(testlet) > 0L) length(unique(testlet)) else 0L
 
-  delta <- function(f, include_joint = TRUE) {
+  delta <- function(f, include_joint = TRUE, weights_override = spec$contrast_weights) {
     v_ts <- if (include_joint) f$var_log_tau_subj else NULL
     v_ti <- if (include_joint) f$var_log_tau_item else NULL
     v_tt <- if (include_joint) f$var_log_tau_testlet else NULL
@@ -154,7 +154,7 @@ summarize_probability_fit <- function(
     }
     estimate_prob_effect_delta(
       f$beta_full, f$vcov_full, f$Sigma_subj, f$Sigma_item, f$Sigma_testlet,
-      spec$dgp$design, chance, spec$contrast_weights, spec$prob_estimand,
+      spec$dgp$design, chance, weights_override, spec$prob_estimand,
       re_structure, spec$dgp$n_quad,
       var_log_tau_subj = v_ts, var_log_tau_item = v_ti,
       var_log_tau_testlet = v_tt, J_beta_theta = J_bt
@@ -172,6 +172,8 @@ summarize_probability_fit <- function(
     if (spec$prob_estimand == "marginal" && spec$scale != "logit" &&
         !fast_stage && identical(se_method, "bootstrap")) {
       B <- if (is.null(spec$prob_boot)) 99L else as.integer(spec$prob_boot)
+      w_scale <- max(abs(spec$contrast_weights))
+      w_unit <- unname(spec$contrast_weights) / w_scale
       if (!is.null(cpp_boot_ctx)) {
         des <- spec$dgp$design
         Zs_c <- if (re_structure == "intercept_only") matrix(1.0, des$n_cells, 1L) else des$Z_subj_cells
@@ -198,7 +200,7 @@ summarize_probability_fit <- function(
             Zs_cells = Zs_c,
             Zi_cells = Zi_c,
             Zt_cells = Zt_c,
-            contrast_weights = unname(spec$contrast_weights),
+            contrast_weights = w_unit,
             gh_nodes = q1$nodes,
             gh_weights = q1$weights,
             chance = chance,
@@ -235,7 +237,7 @@ summarize_probability_fit <- function(
             Zs_cells = Zs_c,
             Zi_cells = Zi_c,
             Zt_cells = Zt_c,
-            contrast_weights = unname(spec$contrast_weights),
+            contrast_weights = w_unit,
             gh_nodes = q1$nodes,
             gh_weights = q1$weights,
             chance = chance,
@@ -268,7 +270,7 @@ summarize_probability_fit <- function(
           y_star <- stats::rbinom(length(y), 1L, mafc_plogis(eta, chance))
           tryCatch({
             f <- refit(y_star)
-            if (isTRUE(f$converged)) delta(f, include_joint = FALSE)$est else NA_real_
+            if (isTRUE(f$converged)) delta(f, include_joint = FALSE, weights_override = w_unit)$est else NA_real_
           }, error = function(e) NA_real_)
         })
       }
@@ -276,8 +278,9 @@ summarize_probability_fit <- function(
       if (sum(ok) < max(2L, ceiling(0.9 * B))) {
         stop(sprintf("Marginal bootstrap: %d/%d valid refits", sum(ok), B))
       }
-      fit$prob_se <- stats::sd(boot[ok])
-      if (!is.finite(fit$prob_se) || fit$prob_se <= 0) stop("Invalid marginal bootstrap SE")
+      se_unit <- stats::sd(boot[ok])
+      if (!is.finite(se_unit) || se_unit <= 0) stop("Invalid marginal bootstrap SE")
+      fit$prob_se <- w_scale * se_unit
     }
     fit
   }, error = function(e) {
@@ -472,6 +475,12 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
   p_s <- ncol(des$Z_subj_cells)
   p_i <- ncol(des$Z_item_cells)
 
+  id_reason <- if ("identifiability_reason" %in% names(schedule)) {
+    schedule$identifiability_reason
+  } else {
+    assess_trial_identifiability(cid, des)$reason
+  }
+
   list(
     n_tr = n_tr,
     ns = ns,
@@ -484,6 +493,7 @@ prepare_cpp_schedule_cache <- function(spec, schedule) {
     scalar_dgp = (p_s == 1L && p_i == 1L &&
                     all(des$Z_subj_cells == 1.0) && all(des$Z_item_cells == 1.0)),
     cell_id = cid,
+    identifiability_reason = id_reason,
     sid = sid,
     iid = iid,
     tid = tid,
@@ -591,6 +601,9 @@ fit_via_cpp_cached <- function(
 
   ws_ptr <- NULL
   if (is.null(sim_dat$keep)) {
+    if (!is.null(cache$identifiability_reason)) {
+      return(make_failed_fit("insufficient_data", cache$identifiability_reason))
+    }
     X <- cache$X_full
     Z_s <- Z_s_full
     Z_i <- Z_i_full
@@ -604,8 +617,9 @@ fit_via_cpp_cached <- function(
     ws_ptr <- get_cached_cpp_ws(cache, re_structure)
   } else {
     kp <- sim_dat$keep
-    if (length(unique(cache$cell_id[kp])) < ncol(cache$X_full)) {
-      return(make_failed_fit("insufficient_data", "Observed trials omit required design cells."))
+    id_chk <- assess_trial_identifiability(cache$cell_id[kp], cache$design)
+    if (!id_chk$ok) {
+      return(make_failed_fit("insufficient_data", id_chk$reason))
     }
     X <- cache$X_full[kp, , drop = FALSE]
     Z_s <- Z_s_full[kp, , drop = FALSE]
@@ -677,18 +691,54 @@ validate_custom_data <- function(df_b, schedule) {
   if (!("y" %in% names(df_b))) {
     cli::cli_abort("{.arg data_fn} must return a {.cls data.frame} containing a binary {.field y} column.")
   }
+  y_raw <- df_b$y
+  if (is.factor(y_raw) || !is.null(dim(y_raw)) || !(is.numeric(y_raw) || is.logical(y_raw))) {
+    cli::cli_abort(
+      "{.field y} returned by {.arg data_fn} must be a numeric/integer 0/1 (or logical) vector, not {.cls {class(y_raw)[1L]}}."
+    )
+  }
   if (nrow(df_b) > 0L) {
-    y_num <- as.numeric(df_b$y)
-    if (any(!is.finite(y_num)) || any(!(y_num %in% c(0, 1)))) {
+    if (anyNA(y_raw) || (is.numeric(y_raw) && any(!is.finite(y_raw) | !(y_raw %in% c(0, 1))))) {
       cli::cli_abort("{.field y} returned by {.arg data_fn} must contain only 0 and 1 values.")
     }
-    df_b$y <- as.integer(y_num)
+    df_b$y <- as.integer(y_raw)
+  } else {
+    df_b$y <- integer(0)
   }
+  recover_scheduled_id <- function(col_val, sched_col, sched_ids, n_units, col_nm, id_nm) {
+    if (length(col_val) == 0L) return(integer(0))
+    lbl <- as.character(col_val)
+    if (anyNA(lbl) || any(!nzchar(lbl))) {
+      cli::cli_abort(
+        "{.field {col_nm}} returned by {.arg data_fn} cannot contain missing or empty labels."
+      )
+    }
+    sched_lbl <- as.character(sched_col)
+    m <- match(lbl, sched_lbl)
+    out_id <- sched_ids[m]
+    if (anyNA(out_id) && is.factor(sched_col) && length(levels(sched_col)) == n_units) {
+      miss <- is.na(out_id)
+      out_id[miss] <- match(lbl[miss], levels(sched_col))
+    }
+    if (anyNA(out_id)) {
+      bad_u <- unique(lbl[is.na(out_id)])
+      cli::cli_abort(c(
+        "{.field {col_nm}} returned by {.arg data_fn} contains label(s) not present in {.code schedule$trials${col_nm}}: {.val {bad_u}}.",
+        "i" = "Retain {.field {id_nm}} from {.code schedule$trials} or match scheduled {.field {col_nm}} labels."
+      ))
+    }
+    as.integer(out_id)
+  }
+
   if (!("subj_id" %in% names(df_b)) && ("subj" %in% names(df_b))) {
-    df_b$subj_id <- as.integer(as.factor(df_b$subj))
+    df_b$subj_id <- recover_scheduled_id(
+      df_b$subj, schedule$trials$subj, schedule$trials$subj_id, schedule$n_subj, "subj", "subj_id"
+    )
   }
   if (!("item_id" %in% names(df_b)) && ("item" %in% names(df_b))) {
-    df_b$item_id <- as.integer(as.factor(df_b$item))
+    df_b$item_id <- recover_scheduled_id(
+      df_b$item, schedule$trials$item, schedule$trials$item_id, schedule$n_item, "item", "item_id"
+    )
   }
   req_cols <- c("subj_id", "item_id", "cell_id")
   missing_cols <- setdiff(req_cols, names(df_b))
@@ -715,8 +765,22 @@ validate_custom_data <- function(df_b, schedule) {
   if (!("item" %in% names(df_b)) && ("item_id" %in% names(df_b))) {
     df_b$item <- factor(sprintf("I%04d", as.integer(df_b$item_id)))
   }
+  if (!is.null(schedule$cells) && is.data.frame(schedule$cells) && !is.null(schedule$factor_names)) {
+    for (fn in intersect(schedule$factor_names, names(df_b))) {
+      exp_lv <- as.character(schedule$cells[[fn]][df_b$cell_id])
+      act_lv <- as.character(df_b[[fn]])
+      if (anyNA(act_lv) || any(act_lv != exp_lv)) {
+        cli::cli_abort(
+          "{.field {fn}} returned by {.arg data_fn} disagrees with {.field cell_id} in {.code schedule$cells}."
+        )
+      }
+    }
+  }
   if (isTRUE(schedule$n_testlet > 0L)) {
     expected <- schedule$trials$testlet_id[match(df_b$item_id, schedule$trials$item_id)]
+    if (anyNA(expected) && !is.null(schedule$testlet_size) && schedule$testlet_size >= 1L) {
+      expected[is.na(expected)] <- ((df_b$item_id[is.na(expected)] - 1L) %/% as.integer(schedule$testlet_size)) + 1L
+    }
     if (anyNA(expected)) cli::cli_abort("Custom items must have a passage assignment in {.code schedule$trials}.")
     if (!is.null(df_b$testlet)) {
       labels <- as.character(schedule$trials$testlet)
@@ -866,6 +930,12 @@ execute_single_replication <- function(
 #'   columns must agree with that mapping.
 #' @param verbose Logical; display a live `cli` progress bar with ETA across
 #'   replications (default `FALSE`).
+#' @param true_target Optional finite numeric scalar (or `NA`) on `spec$scale`
+#'   giving the true target effect when `data_fn` modifies the data-generating
+#'   process. When `data_fn` is supplied and `true_target` is `NULL`,
+#'   truth-dependent diagnostics (`coverage`, `prob_coverage`, `bias`, `rmse`,
+#'   `type_m_error`, `type_s_error`, and `prob_diff_true_pp`) are returned as
+#'   `NA_real_` rather than evaluated against `spec$true_effect_target`.
 #' @return A single-row `data.frame` summarizing all evaluation and diagnostic
 #'   layers. `power` concerns the target-scale interval excluding zero.
 #'   `effective_logit_power` counts significant conditional coefficients among all
@@ -896,7 +966,8 @@ evaluate_design_point <- function(
   fast_stage = FALSE,
   stream_seeds = 1L,
   data_fn = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  true_target = NULL
 ) {
   if (uses_box_muller()) {
     return(isolated_seeded_call("evaluate_design_point", environment(), match.call()))
@@ -907,10 +978,33 @@ evaluate_design_point <- function(
   if (!is.null(data_fn) && !is.function(data_fn)) {
     cli::cli_abort("{.arg data_fn} must be NULL or a function of {.code (schedule, spec)}.")
   }
-  nsim <- as.integer(nsim)
+  if (!rlang::is_bool(fast_stage)) cli::cli_abort("{.arg fast_stage} must be TRUE or FALSE.")
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
+  n_subj <- validate_positive_int(n_subj, "n_subj", 1L)
+  n_item <- validate_positive_int(n_item, "n_item", 1L)
+  nsim <- validate_positive_int(nsim, "nsim", 1L)
   if (!is.list(stream_seeds)) {
+    stream_seeds <- validate_integer_seed(stream_seeds, "stream_seeds")
     base_st <- allocate_stage_point_streams(stream_seeds, stage_slot = 1L, grid_ids = 1L, stride = 1L)
     stream_seeds <- derive_rep_substreams(base_st[[1L]], nsim = nsim, offset = 0L)
+  } else if (length(stream_seeds) < nsim) {
+    cli::cli_abort("{.arg stream_seeds} list must contain at least {.arg nsim} substream seeds.")
+  }
+  true_override <- NULL
+  if (!is.null(true_target)) {
+    if (is.null(data_fn)) {
+      cli::cli_abort(
+        "{.arg true_target} can only be supplied with a custom {.arg data_fn}; built-in simulations use the calibrated truth in {.arg spec}."
+      )
+    }
+    if ((!is.numeric(true_target) && !identical(true_target, NA)) ||
+        !is.null(dim(true_target)) || length(true_target) != 1L ||
+        (is.numeric(true_target) && !is.na(true_target) && !is.finite(true_target))) {
+      cli::cli_abort("{.arg true_target} must be NULL, NA, or a single finite number on the {.val {spec$scale}} scale.")
+    }
+    true_override <- list(target = as.numeric(true_target))
+  } else if (!is.null(data_fn)) {
+    true_override <- list(target = NA_real_)
   }
 
   schedule <- generate_design_schedule(spec$dgp$design, n_subj = n_subj, n_item = n_item)
@@ -1002,7 +1096,8 @@ evaluate_design_point <- function(
     n_subj = schedule$n_subj,
     n_item = schedule$n_item,
     nsim = nsim,
-    engine_use = engine_use
+    engine_use = engine_use,
+    true_override = true_override
   )
 
   if (do_compare) {
@@ -1020,7 +1115,8 @@ evaluate_design_point <- function(
       n_subj = schedule$n_subj,
       n_item = schedule$n_item,
       nsim = nsim,
-      engine_use = engine_use
+      engine_use = engine_use,
+      true_override = true_override
     )
     out$reduced_power <- red_sum$power
     out$reduced_ci_width_mean <- red_sum$ci_width_mean
@@ -1054,12 +1150,36 @@ summarize_mc_metrics <- function(
   n_subj,
   n_item,
   nsim,
-  engine_use
+  engine_use,
+  true_override = NULL,
+  valid_gate_override = NULL
 ) {
   des <- spec$dgp$design
   z_crit <- stats::qnorm(1 - spec$alpha / 2)
-  true_b <- spec$true_beta
-  true_p <- spec$true_prob_diff
+  if (is.null(true_override)) {
+    true_b <- spec$true_beta
+    true_p <- spec$true_prob_diff
+    true_pp_out <- spec$true_prob_diff_pp
+  } else {
+    tt <- true_override$target
+    if (!is.finite(tt)) {
+      true_b <- NA_real_
+      true_p <- NA_real_
+      true_pp_out <- NA_real_
+    } else if (spec$scale == "logit") {
+      true_b <- tt
+      true_p <- NA_real_
+      true_pp_out <- NA_real_
+    } else if (spec$scale == "prob") {
+      true_b <- NA_real_
+      true_p <- tt
+      true_pp_out <- tt * 100.0
+    } else {
+      true_b <- NA_real_
+      true_p <- tt / 100.0
+      true_pp_out <- tt
+    }
+  }
 
   if (is.null(status)) {
     status <- ifelse(converged, "converged", "non_converged")
@@ -1099,7 +1219,13 @@ summarize_mc_metrics <- function(
   }
 
   if (n_valid == 0L) {
-    mc0 <- wilson_mc_ci(0L, nsim, conf_level = spec$mc_conf_level)
+    is_eff <- identical(spec$failure_policy, "effective")
+    mc0 <- if (is_eff) {
+      wilson_mc_ci(0L, nsim, conf_level = spec$mc_conf_level)
+    } else {
+      c(lo = NA_real_, hi = NA_real_)
+    }
+    has_w <- !is.null(spec$ci_width)
     out0 <- data.frame(
       n_subj = as.integer(n_subj),
       n_item = as.integer(n_item),
@@ -1113,37 +1239,41 @@ summarize_mc_metrics <- function(
       valid_rate = 0.0,
       engine = engine_use,
       scale = spec$scale,
-      power = if (spec$failure_policy == "effective") 0.0 else NA_real_,
+      power = if (is_eff) 0.0 else NA_real_,
       effective_power = 0.0,
       effective_logit_power = logit_detection,
       conditional_power = NA_real_,
-      power_mcse = 0.0,
+      power_mcse = if (is_eff) 0.0 else NA_real_,
       power_mc_lo = unname(mc0["lo"]),
       power_mc_hi = unname(mc0["hi"]),
       ci_width_mean = NA_real_,
       ci_width_q80 = NA_real_,
+      ci_width_q_assurance = NA_real_,
       logit_ci_width_mean = NA_real_,
-      prob_diff_true_pp = spec$true_prob_diff_pp,
+      prob_diff_true_pp = true_pp_out,
       prob_diff_est_pp = NA_real_,
       prob_ci_width_mean_pp = NA_real_,
       prob_coverage = NA_real_,
-      aipe_prob = if (!is.null(spec$ci_width) && spec$failure_policy == "effective") 0.0 else NA_real_,
-      effective_aipe_prob = if (!is.null(spec$ci_width)) 0.0 else NA_real_,
+      aipe_prob = if (has_w && is_eff) 0.0 else NA_real_,
+      effective_aipe_prob = if (has_w) 0.0 else NA_real_,
       conditional_aipe_prob = NA_real_,
-      aipe_mc_lo = if (!is.null(spec$ci_width)) unname(mc0["lo"]) else NA_real_,
-      aipe_mc_hi = if (!is.null(spec$ci_width)) unname(mc0["hi"]) else NA_real_,
-      k_joint = if (is.null(spec$ci_width)) NA_integer_ else 0L,
-      joint_prob = if (!is.null(spec$ci_width) && spec$failure_policy == "effective") 0.0 else NA_real_,
-      joint_mc_lo = if (!is.null(spec$ci_width) && spec$failure_policy == "effective") unname(mc0["lo"]) else NA_real_,
-      joint_mc_hi = if (!is.null(spec$ci_width) && spec$failure_policy == "effective") unname(mc0["hi"]) else NA_real_,
-      rope_excl_prob = if (spec$failure_policy == "effective") 0.0 else NA_real_,
+      aipe_mc_lo = if (has_w) unname(mc0["lo"]) else NA_real_,
+      aipe_mc_hi = if (has_w) unname(mc0["hi"]) else NA_real_,
+      k_joint = if (has_w) 0L else NA_integer_,
+      joint_prob = if (has_w && is_eff) 0.0 else NA_real_,
+      joint_mc_lo = if (has_w) unname(mc0["lo"]) else NA_real_,
+      joint_mc_hi = if (has_w) unname(mc0["hi"]) else NA_real_,
+      rope_excl_prob = if (is_eff) 0.0 else NA_real_,
       effective_rope_prob = 0.0,
       conditional_rope_prob = NA_real_,
       rope_mc_lo = unname(mc0["lo"]),
       rope_mc_hi = unname(mc0["hi"]),
       criterion_met = FALSE,
-      decision_status = compute_decision_status(spec, spec$failure_policy == "effective",
-                                                mc0, mc0, mc0, mc0),
+      decision_status = compute_decision_status(
+        spec,
+        if (is.null(valid_gate_override)) is_eff else isTRUE(valid_gate_override),
+        mc0, mc0, mc0, mc0
+      ),
       curtailed = FALSE,
       singular_rate = singular_rate,
       nonconv_rate = failure_rate,
@@ -1157,6 +1287,7 @@ summarize_mc_metrics <- function(
       rmse = NA_real_,
       type_m_error = NA_real_,
       type_s_error = NA_real_,
+      mc_conf_level_used = spec$mc_conf_level,
       stringsAsFactors = FALSE
     )
     attr(out0, "error_summary") <- err_tab
@@ -1179,7 +1310,7 @@ summarize_mc_metrics <- function(
     prob_width_v <- 2 * z_crit * ps_v
     prob_diff_est_pp <- mean(pe_v) * 100.0
     prob_ci_width_mean_pp <- mean(prob_width_v) * 100.0
-    prob_cov <- mean((prob_lo <= true_p) & (true_p <= prob_hi))
+    prob_cov <- if (is.finite(true_p)) mean((prob_lo <= true_p) & (true_p <= prob_hi)) else NA_real_
   } else {
     pe_v <- rep(NA_real_, n_valid)
     prob_lo <- rep(NA_real_, n_valid)
@@ -1242,7 +1373,7 @@ summarize_mc_metrics <- function(
     power_use <- conditional_power
     aipe_use <- conditional_aipe
     rope_use <- conditional_rope
-    valid_gate_ok <- (valid_rate >= spec$min_valid_rate)
+    valid_gate_ok <- if (is.null(valid_gate_override)) (valid_rate >= spec$min_valid_rate) else isTRUE(valid_gate_override)
   }
 
   power_mcse <- sqrt(power_use * (1.0 - power_use) / denom_mc)
@@ -1258,12 +1389,19 @@ summarize_mc_metrics <- function(
   mc_rope <- wilson_mc_ci(k_rope, denom_mc, conf_level = spec$mc_conf_level)
 
   ci_width_mean <- mean(target_width_v)
-  ci_width_q80 <- unname(stats::quantile(target_width_v, probs = spec$ci_assurance))
+  ci_width_q80 <- unname(stats::quantile(target_width_v, probs = 0.80))
+  ci_width_q_assurance <- unname(stats::quantile(target_width_v, probs = spec$ci_assurance))
   logit_ci_width_mean <- mean(logit_width_v)
 
-  coverage <- mean((target_lo <= true_target) & (true_target <= target_hi))
-  bias <- mean(est_target_v - true_target)
-  rmse <- sqrt(mean((est_target_v - true_target)^2))
+  if (is.finite(true_target)) {
+    coverage <- mean((target_lo <= true_target) & (true_target <= target_hi))
+    bias <- mean(est_target_v - true_target)
+    rmse <- sqrt(mean((est_target_v - true_target)^2))
+  } else {
+    coverage <- NA_real_
+    bias <- NA_real_
+    rmse <- NA_real_
+  }
 
   if (all(is.na(singular))) {
     power_nonsing <- NA_real_
@@ -1274,14 +1412,26 @@ summarize_mc_metrics <- function(
     if (any(nonsing_valid)) {
       ns <- not_sing[valid]
       power_nonsing <- mean(sig_v[ns])
-      cov_ns <- mean(target_lo[ns] <= true_target & true_target <= target_hi[ns])
+      cov_ns <- if (is.finite(true_target)) mean(target_lo[ns] <= true_target & true_target <= target_hi[ns]) else NA_real_
     } else {
       power_nonsing <- NA_real_
       cov_ns <- NA_real_
     }
   }
 
-  if (any(sig_v) && abs(true_target) > 1e-8) {
+  nonzero_truth <- if (!is.null(true_override)) {
+    is.finite(true_target) && (true_target != 0)
+  } else if (isTRUE(spec$calibrated_null)) {
+    FALSE
+  } else {
+    w_sc <- if (identical(spec$scale, "logit")) {
+      1.0
+    } else {
+      max(abs(spec$contrast_weights)) * (if (identical(spec$scale, "pp")) 100.0 else 1.0)
+    }
+    is.finite(true_target) && (abs(true_target) > 1e-10 * w_sc)
+  }
+  if (any(sig_v) && nonzero_truth) {
     e_sig <- est_target_v[sig_v]
     type_m <- mean(abs(e_sig) / abs(true_target))
     type_s <- mean(sign(e_sig) != sign(true_target))
@@ -1327,8 +1477,9 @@ summarize_mc_metrics <- function(
     power_mc_hi = unname(mc_pow["hi"]),
     ci_width_mean = ci_width_mean,
     ci_width_q80 = ci_width_q80,
+    ci_width_q_assurance = ci_width_q_assurance,
     logit_ci_width_mean = logit_ci_width_mean,
-    prob_diff_true_pp = spec$true_prob_diff_pp,
+    prob_diff_true_pp = true_pp_out,
     prob_diff_est_pp = prob_diff_est_pp,
     prob_ci_width_mean_pp = prob_ci_width_mean_pp,
     prob_coverage = prob_cov,
@@ -1359,6 +1510,7 @@ summarize_mc_metrics <- function(
     rmse = rmse,
     type_m_error = type_m,
     type_s_error = type_s,
+    mc_conf_level_used = spec$mc_conf_level,
     stringsAsFactors = FALSE
   )
   attr(out, "error_summary") <- err_tab
@@ -1410,8 +1562,126 @@ mask_undefined_detection <- function(out, spec) {
   out
 }
 
+probability_contrast_null_status <- function(dgp, weights, scale, prob_estimand = "marginal") {
+  if (identical(scale, "logit")) {
+    return(list(ok = TRUE, kind = "ok", reason = NULL))
+  }
+  weights <- align_cell_weights(dgp$design, weights, arg = "weights")
+  if (!(any(weights > 0) && any(weights < 0))) {
+    return(list(
+      ok = FALSE,
+      kind = "single_sign",
+      reason = "An absolute probability target has no between-condition null difference."
+    ))
+  }
+  w_scale <- max(abs(weights))
+  w_unit <- weights / w_scale
+  g <- dgp$chance
+  lower_u <- sum(w_unit[w_unit < 0]) + g * sum(w_unit[w_unit > 0])
+  upper_u <- sum(w_unit[w_unit > 0]) + g * sum(w_unit[w_unit < 0])
+  mult <- if (identical(scale, "pp")) 100.0 else 1.0
+  lower <- lower_u * w_scale * mult
+  upper <- upper_u * w_scale * mult
+  fmt_b <- if (min(abs(c(lower, upper))) >= 0.01 && max(abs(c(lower, upper))) < 1e4) "%.2f" else "%.4g"
+  if (lower_u >= 0.0 || upper_u <= 0.0) {
+    return(list(
+      ok = FALSE,
+      kind = "zero_unattainable",
+      lower = lower,
+      upper = upper,
+      reason = sprintf(
+        paste0("Zero is outside the attainable probability contrast (", fmt_b, " to ", fmt_b, " %s) for chance = %.4g and the supplied contrast weights."),
+        lower, upper, scale, g
+      )
+    ))
+  }
+  X <- dgp$design$X_cells
+  direction <- tryCatch(drop(qr.solve(X, w_unit)), error = function(e) NULL)
+  if (is.null(direction) || any(!is.finite(direction))) {
+    return(list(
+      ok = FALSE,
+      kind = "zero_unattainable",
+      reason = "Zero is outside the attainable probability contrast for this design and weights."
+    ))
+  }
+  contrast_at <- function(shift) {
+    trial <- dgp
+    trial$beta <- dgp$beta + shift * direction
+    true_prob_effect(trial, w_unit, prob_estimand)
+  }
+  limit <- 1.0
+  while (limit < 1024.0 && (contrast_at(-limit) >= 0.0 || contrast_at(limit) <= 0.0)) {
+    limit <- 2.0 * limit
+  }
+  f_lo <- contrast_at(-limit)
+  f_hi <- contrast_at(limit)
+  if (!is.finite(f_lo) || !is.finite(f_hi) || !(f_lo < 0.0 && f_hi > 0.0)) {
+    return(list(
+      ok = FALSE,
+      kind = "numerical_boundary",
+      lower = lower,
+      upper = upper,
+      reason = sprintf(
+        paste0("Zero lies within or on the machine-precision boundary of the contrast range (", fmt_b, " to ", fmt_b, " %s), where a zero-contrast null cannot be bracketed reliably in double precision for chance = %.4g and these extreme relative weights."),
+        lower, upper, scale, g
+      )
+    ))
+  }
+  rt <- tryCatch(
+    stats::uniroot(contrast_at, c(-limit, limit), f.lower = f_lo, f.upper = f_hi, tol = .Machine$double.eps, maxiter = 2000L),
+    error = function(e) NULL
+  )
+  if (is.null(rt) || !is.finite(rt$root)) {
+    return(list(
+      ok = FALSE,
+      kind = "numerical_boundary",
+      lower = lower,
+      upper = upper,
+      reason = "Zero lies too close to the probability boundary for reliable double-precision null calibration under these extreme relative weights."
+    ))
+  }
+  trial_null <- dgp
+  trial_null$beta <- dgp$beta + rt$root * direction
+  p_null <- dgp_cell_probabilities(trial_null, "marginal")
+  resid_tol <- min(1e-8, 0.01 * min(-lower_u, upper_u))
+  unit_null_resid <- abs(true_prob_effect(trial_null, w_unit, prob_estimand))
+  if (!is.finite(unit_null_resid) || unit_null_resid > resid_tol || any(p_null <= g | p_null >= 1.0)) {
+    return(list(
+      ok = FALSE,
+      kind = "numerical_boundary",
+      lower = lower,
+      upper = upper,
+      reason = sprintf(
+        paste0("Zero lies within the mathematical contrast range (", fmt_b, " to ", fmt_b, " %s), but calibrating a null requires extreme cell probabilities indistinguishable from %.4g or 1 in IEEE-754 double precision."),
+        lower, upper, scale, g
+      )
+    ))
+  }
+  list(ok = TRUE, kind = "ok", reason = NULL, limit = limit, direction = direction, shift = rt$root)
+}
+
+prob_target_kind <- function(spec) {
+  w <- spec$contrast_weights
+  if (length(w) == 0L ||
+      (all(is.finite(w)) && all(w >= -1e-12) && abs(sum(w) - 1.0) <= 1e-8)) {
+    return("absolute")
+  }
+  if (all(is.finite(w)) && any(abs(w) > 0)) {
+    w_u <- w / max(abs(w))
+    if (any(w_u > 0) && any(w_u < 0) && abs(sum(w_u)) <= 1e-8) {
+      return("difference")
+    }
+  }
+  "weighted_contrast"
+}
+
 can_define_null_target <- function(spec) {
+  if (!is.null(spec$has_null_target)) return(isTRUE(spec$has_null_target))
   if (identical(spec$scale, "logit")) return(TRUE)
+  if (!is.null(spec$dgp)) {
+    est <- if (is.null(spec$prob_estimand)) "marginal" else spec$prob_estimand
+    return(probability_contrast_null_status(spec$dgp, spec$contrast_weights, spec$scale, est)$ok)
+  }
   w <- spec$contrast_weights
   all(is.finite(w)) && any(w > 0) && any(w < 0)
 }
@@ -1422,32 +1692,18 @@ null_target_spec <- function(spec) {
   if (spec$scale == "logit") {
     dgp$beta[[spec$effect_col]] <- 0
   } else {
-    w <- spec$contrast_weights
-    if (!all(is.finite(w)) || !any(w > 0) || !any(w < 0)) {
+    w <- align_cell_weights(dgp$design, spec$contrast_weights, arg = "contrast_weights")
+    if (!any(w > 0) || !any(w < 0)) {
       cli::cli_abort(c(
         "A probability-scale null requires finite contrast weights of both signs (a difference between conditions).",
         "i" = "For a single-condition or absolute probability precision target, validate interval coverage and width attainment under the planned condition via {.fn validate_design_point} or {.fn evaluate_design_point}."
       ))
     }
-    lower <- sum(w[w < 0]) + dgp$chance * sum(w[w > 0])
-    upper <- sum(w[w > 0]) + dgp$chance * sum(w[w < 0])
-    if (lower >= 0 || upper <= 0) {
-      cli::cli_abort("Zero is outside the attainable probability contrast for this guessing floor and weights.")
+    null_st <- probability_contrast_null_status(dgp, w, spec$scale, spec$prob_estimand)
+    if (!null_st$ok) {
+      cli::cli_abort(null_st$reason)
     }
-    # Tilt cell logits along the contrast, preserving orthogonal logit contrasts.
-    direction <- drop(qr.solve(X, w / max(abs(w))))
-    contrast_at <- function(shift) {
-      trial <- dgp
-      trial$beta <- dgp$beta + shift * direction
-      true_prob_effect(trial, w, spec$prob_estimand)
-    }
-    limit <- 1
-    while (limit < 2^30 && (contrast_at(-limit) > 0 || contrast_at(limit) < 0)) limit <- 2 * limit
-    if (contrast_at(-limit) > 0 || contrast_at(limit) < 0) {
-      cli::cli_abort("Zero is outside the attainable probability contrast for this guessing floor and weights.")
-    }
-    shift <- stats::uniroot(contrast_at, c(-limit, limit), tol = 1e-12)$root
-    dgp$beta <- dgp$beta + shift * direction
+    dgp$beta <- dgp$beta + null_st$shift * null_st$direction
   }
   cells <- dgp$design$cells$cell_name
   dgp$mu_cells <- stats::setNames(drop(X %*% dgp$beta), cells)
@@ -1459,7 +1715,10 @@ null_target_spec <- function(spec) {
   spec$true_prob_diff_pp <- 100 * spec$true_prob_diff
   spec$true_effect_target <- switch(spec$scale, logit = spec$true_beta,
     prob = spec$true_prob_diff, pp = spec$true_prob_diff_pp)
-  if (abs(spec$true_effect_target) > 1e-8) cli::cli_abort("Failed to calibrate a zero target contrast.")
+  if (identical(spec$scale, "logit") && abs(spec$true_effect_target) > 1e-8) {
+    cli::cli_abort("Failed to calibrate a zero target contrast.")
+  }
+  spec$calibrated_null <- TRUE
   spec
 }
 
@@ -1470,16 +1729,30 @@ null_target_spec <- function(spec) {
 #' On the probability scale the null shifts cell logits along the supplied
 #' contrast until its probability difference is zero, holding the covariance
 #' structure fixed. On the logit scale it sets the focal coefficient to zero.
+#' For partial item presentation (`items_per_subject`), validation conditions
+#' on the fixed schedule determined by `design$item_seed` while drawing fresh
+#' participant/item effects, missingness, and responses; evaluate multiple
+#' `item_seed` values if item assignment will be re-randomized at execution.
 #' @inheritParams evaluate_design_point
 #' @param seed Integer seed for this independent fixed-size validation.
+#' @param true_target Optional numeric vector on `spec$scale` giving known true
+#'   target values when a custom `data_fn` modifies the data-generating process
+#'   (e.g., `c(null = 0, planned = 12)` or `c(planned = 12)`). Cannot be
+#'   supplied when `data_fn` is `NULL`. When `data_fn` is supplied and
+#'   `true_target` is `NULL`, `true_target` and `coverage` are set to `NA_real_`
+#'   because the custom generator's true targets are unverified.
 #' @return A data frame of class `glmmplanr_validation` with two rows
-#'   (`"null"` and `"planned"`) for contrasts
-#'   or logit targets, or one `"planned"` row when `spec` targets an absolute
-#'   probability (e.g., a single-condition design on `scale = "pp"` or `"prob"`
-#'   where no zero-difference null exists), including the true target, detection and
-#'   its Wilson interval under the chosen failure policy, valid-fit coverage
-#'   and its Wilson interval, and the valid-fit count. Null detection is the
-#'   Type I error. Response-pattern counts follow [evaluate_design_point()].
+#'   (`"null"` and `"planned"`) for contrasts with an attainable zero null
+#'   or logit targets, or one `"planned"` row when no zero null exists on the
+#'   probability scale (e.g., an absolute probability target or asymmetric
+#'   weights under nonzero guessing), including the true target, planned
+#'   `decision_status` under the same denominator and criterion as
+#'   [optimize_sample_size()], detection (`power`), interval coverage, width
+#'   attainment (`aipe_prob`), same-replication joint detection-and-width
+#'   attainment (`joint_prob`), and ROPE exclusion (`rope_excl_prob`) with their
+#'   Wilson Monte Carlo intervals, plus the valid-fit count. Null detection
+#'   equals Type I error when `true_target == 0`.
+#'   Response-pattern counts follow [evaluate_design_point()].
 #'   Use [plot.glmmplanr_validation()] to display these results. Prespecify
 #'   validation tolerances and replication counts.
 #' @examples
@@ -1487,9 +1760,18 @@ null_target_spec <- function(spec) {
 #' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
 #' spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
 #' r <- validate_design_point(spec, 16, 8, nsim = 5L)
-#' r[c("condition", "nsim", "n_valid", "detection", "coverage")]
+#' r[c("condition", "nsim", "n_valid", "decision_status", "detection", "coverage")]
 #' @export
-validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026L, data_fn = NULL, verbose = FALSE) {
+validate_design_point <- function(
+  spec,
+  n_subj,
+  n_item,
+  nsim = 200L,
+  seed = 2026L,
+  data_fn = NULL,
+  verbose = FALSE,
+  true_target = NULL
+) {
   if (uses_box_muller()) {
     return(isolated_seeded_call("validate_design_point", environment(), match.call()))
   }
@@ -1497,44 +1779,155 @@ validate_design_point <- function(spec, n_subj, n_item, nsim = 200L, seed = 2026
   if (!is.null(data_fn) && !is.function(data_fn)) {
     cli::cli_abort("{.arg data_fn} must be NULL or a function of {.code (schedule, spec)}.")
   }
-  if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) ||
-      nsim < 1 || nsim != floor(nsim)) cli::cli_abort("{.arg nsim} must be a positive integer.")
+  if (!is.null(true_target) && is.null(data_fn)) {
+    cli::cli_abort(
+      "{.arg true_target} can only be supplied with a custom {.arg data_fn}; built-in simulations use the calibrated truth in {.arg spec}."
+    )
+  }
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
+  n_subj <- validate_positive_int(n_subj, "n_subj", 1L)
+  n_item <- validate_positive_int(n_item, "n_item", 1L)
+  nsim <- validate_positive_int(nsim, "nsim", 1L)
+  seed <- validate_integer_seed(seed, "seed")
   bases_pair <- allocate_stage_point_streams(seed, stage_slot = 1L, grid_ids = 1:2, stride = 2L)
   has_null <- can_define_null_target(spec)
   if (has_null) {
     specs <- list(null = null_target_spec(spec), planned = spec)
     bases <- bases_pair
   } else {
-    cli::cli_inform(c(
-      "i" = "Target {.val {spec$effect_input}} on the {.val {spec$scale}} scale estimates an absolute probability rather than a between-condition difference.",
-      "i" = "No zero-difference null applies; validating interval coverage and width attainment under the {.val planned} condition only."
-    ))
+    p_kind <- prob_target_kind(spec)
+    null_st_v <- probability_contrast_null_status(
+      spec$dgp, spec$contrast_weights, spec$scale,
+      if (is.null(spec$prob_estimand)) "marginal" else spec$prob_estimand
+    )
+    if (identical(p_kind, "absolute")) {
+      cli::cli_inform(c(
+        "i" = "Target {.val {spec$effect_input}} on the {.val {spec$scale}} scale estimates an absolute probability rather than a between-condition difference.",
+        "i" = "No zero-difference null applies; validating interval coverage and width attainment under the {.val planned} condition only."
+      ))
+    } else if (identical(null_st_v$kind, "numerical_boundary")) {
+      cli::cli_inform(c(
+        "i" = "{null_st_v$reason}",
+        "i" = "Validating precision and coverage under the {.val planned} condition only."
+      ))
+    } else {
+      cli::cli_inform(c(
+        "i" = "Zero lies outside the attainable probability contrast for {.val {spec$effect_input}} on the {.val {spec$scale}} scale.",
+        "i" = "No zero-contrast null exists under this guessing floor and weights; validating precision and coverage under the {.val planned} condition only."
+      ))
+    }
     specs <- list(planned = spec)
     bases <- bases_pair[2L]
   }
+  true_targets <- resolve_validation_truth(true_target, specs, data_fn, spec$scale)
   rows <- lapply(seq_along(specs), function(i) {
+    cond_nm <- names(specs)[i]
     sp <- specs[[i]]
+    tt_i <- unname(true_targets[[cond_nm]])
     if (isTRUE(verbose)) {
-      cli::cli_inform("Validating {.val {names(specs)[i]}} condition at ({n_subj} x {n_item})...")
+      cli::cli_inform("Validating {.val {cond_nm}} condition at ({n_subj} x {n_item})...")
     }
-    ev <- evaluate_design_point(sp, n_subj, n_item, nsim,
-      stream_seeds = derive_rep_substreams(bases[[i]], nsim), data_fn = data_fn, verbose = verbose)
-    cover <- wilson_mc_ci(round(ev$coverage * ev$n_valid), ev$n_valid, sp$mc_conf_level)
-    data.frame(condition = names(specs)[i], scale = sp$scale, true_target = sp$true_effect_target,
-      nsim = nsim, n_valid = ev$n_valid, valid_rate = ev$valid_rate,
+    ev <- evaluate_design_point(
+      sp, n_subj, n_item, nsim,
+      stream_seeds = derive_rep_substreams(bases[[i]], nsim),
+      data_fn = data_fn,
+      verbose = verbose,
+      true_target = if (is.null(data_fn)) NULL else tt_i
+    )
+    cover <- if (is.finite(ev$coverage)) {
+      wilson_mc_ci(round(ev$coverage * ev$n_valid), ev$n_valid, sp$mc_conf_level)
+    } else {
+      c(lo = NA_real_, hi = NA_real_)
+    }
+    data.frame(
+      condition = cond_nm,
+      scale = sp$scale,
+      true_target = tt_i,
+      nsim = nsim,
+      n_valid = ev$n_valid,
+      valid_rate = ev$valid_rate,
+      decision_status = if (identical(cond_nm, "planned")) ev$decision_status else NA_character_,
       detection = ev$power,
       detection_lo = if (is.na(ev$power)) NA_real_ else ev$power_mc_lo,
       detection_hi = if (is.na(ev$power)) NA_real_ else ev$power_mc_hi,
-      coverage = ev$coverage, coverage_lo = unname(cover["lo"]), coverage_hi = unname(cover["hi"]),
-      width_attainment = ev$aipe_prob, joint_attainment = ev$joint_prob, ev[pattern_columns])
+      coverage = ev$coverage,
+      coverage_lo = unname(cover["lo"]),
+      coverage_hi = unname(cover["hi"]),
+      width_attainment = ev$aipe_prob,
+      width_attainment_lo = if (is.na(ev$aipe_prob)) NA_real_ else ev$aipe_mc_lo,
+      width_attainment_hi = if (is.na(ev$aipe_prob)) NA_real_ else ev$aipe_mc_hi,
+      joint_attainment = ev$joint_prob,
+      joint_attainment_lo = if (is.na(ev$joint_prob)) NA_real_ else ev$joint_mc_lo,
+      joint_attainment_hi = if (is.na(ev$joint_prob)) NA_real_ else ev$joint_mc_hi,
+      rope_attainment = ev$rope_excl_prob,
+      rope_attainment_lo = if (is.na(ev$rope_excl_prob)) NA_real_ else ev$rope_mc_lo,
+      rope_attainment_hi = if (is.na(ev$rope_excl_prob)) NA_real_ else ev$rope_mc_hi,
+      ev[pattern_columns],
+      stringsAsFactors = FALSE
+    )
   })
+  zero_truth_verified <- stats::setNames(vapply(names(specs), function(cnm) {
+    sp_c <- specs[[cnm]]
+    tt_c <- unname(true_targets[[cnm]])
+    if (!is.null(data_fn)) {
+      return(is.finite(tt_c) && (tt_c == 0))
+    }
+    if (isTRUE(sp_c$calibrated_null)) return(TRUE)
+    w_sc <- if (identical(sp_c$scale, "logit")) {
+      1.0
+    } else {
+      max(abs(sp_c$contrast_weights)) * (if (identical(sp_c$scale, "pp")) 100.0 else 1.0)
+    }
+    is.finite(tt_c) && (abs(tt_c) <= 1e-10 * w_sc)
+  }, logical(1L)), names(specs))
+  null_verified <- if ("null" %in% names(zero_truth_verified)) {
+    isTRUE(zero_truth_verified[["null"]])
+  } else {
+    FALSE
+  }
   design <- spec$dgp$design
   structure(do.call(rbind, rows), class = c("glmmplanr_validation", "data.frame"),
     validation_settings = list(n_subj = n_subj, n_item = n_item,
       items_per_subject = if (is.null(design$items_per_subject)) n_item else design$items_per_subject,
-      has_null = has_null, alpha = spec$alpha, mc_conf_level = spec$mc_conf_level,
+      has_null = has_null, null_verified = null_verified,
+      zero_truth_verified = zero_truth_verified,
+      alpha = spec$alpha, mc_conf_level = spec$mc_conf_level,
       failure_policy = spec$failure_policy, criterion = spec$criterion, power_min = spec$power_min,
-      ci_width = spec$ci_width, ci_assurance = spec$ci_assurance))
+      ci_width = spec$ci_width, ci_assurance = spec$ci_assurance, rope = spec$rope))
+}
+
+resolve_validation_truth <- function(true_target, specs, data_fn, scale) {
+  cond_nms <- names(specs)
+  if (is.null(true_target)) {
+    if (is.null(data_fn)) {
+      return(vapply(specs, `[[`, numeric(1L), "true_effect_target"))
+    }
+    cli::cli_inform(c(
+      "i" = "Custom {.arg data_fn} supplied without {.arg true_target}: true target effects are unverified ({.code NA}), so coverage is {.code NA} and null-row detection is not labeled as nominal Type I error.",
+      "i" = "Supply {.arg true_target} on the {.val {scale}} scale (e.g., {.code c(null = 0, planned = ...)} or {.code c(planned = ...)}) when the custom generator's true targets are known."
+    ))
+    return(stats::setNames(rep(NA_real_, length(cond_nms)), cond_nms))
+  }
+  if ((!is.numeric(true_target) && !all(is.na(true_target))) ||
+      !is.null(dim(true_target)) || !length(true_target) ||
+      any(!is.na(true_target) & !is.finite(as.numeric(true_target)))) {
+    cli::cli_abort("{.arg true_target} must contain finite numbers (or NA) on the {.val {scale}} scale.")
+  }
+  nms <- names(true_target)
+  if (!is.null(nms) && any(nzchar(nms))) {
+    if (any(!nzchar(nms)) || anyDuplicated(nms) || !all(nms %in% cond_nms)) {
+      cli::cli_abort("Names of {.arg true_target} must be unique entries from {.val {cond_nms}}.")
+    }
+    out <- stats::setNames(rep(NA_real_, length(cond_nms)), cond_nms)
+    out[nms] <- as.numeric(true_target)
+    return(out)
+  }
+  if (length(true_target) != length(cond_nms)) {
+    cli::cli_abort(
+      "Supply {.arg true_target} of length {length(cond_nms)} matching {.val {cond_nms}}, or a named vector (e.g., {.code c(planned = ...)} or {.code c(null = 0, planned = ...)})."
+    )
+  }
+  stats::setNames(as.numeric(true_target), cond_nms)
 }
 
 #' Stress-Test Analysis Models Under Maximal DGP Mismatch
@@ -1575,6 +1968,9 @@ stress_test_models <- function(
   if (!inherits(dgp, "glmmplanr_dgp")) {
     cli::cli_abort("{.arg dgp} must be a {.cls glmmplanr_dgp} object.")
   }
+  if (!rlang::is_bool(include_null)) cli::cli_abort("{.arg include_null} must be TRUE or FALSE.")
+  nsim <- validate_positive_int(nsim, "nsim", 1L)
+  seed <- validate_integer_seed(seed, "seed")
   candidates <- list(
     list(label = "Maximal ML", engine = "cpp_laplace", re = "maximal"),
     list(label = "Uncorrelated Slopes ML", engine = "cpp_laplace", re = "uncorrelated"),

@@ -11,7 +11,8 @@ validate_design_point(
   nsim = 200L,
   seed = 2026L,
   data_fn = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  true_target = NULL
 )
 }
 \arguments{
@@ -38,16 +39,27 @@ columns must agree with that mapping.}
 
 \item{verbose}{Logical; display a live \code{cli} progress bar with ETA across
 replications (default \code{FALSE}).}
+
+\item{true_target}{Optional numeric vector on \code{spec$scale} giving known true
+target values when a custom \code{data_fn} modifies the data-generating process
+(e.g., \code{c(null = 0, planned = 12)} or \code{c(planned = 12)}). Cannot be
+supplied when \code{data_fn} is \code{NULL}. When \code{data_fn} is supplied and
+\code{true_target} is \code{NULL}, \code{true_target} and \code{coverage} are set to \code{NA_real_}
+because the custom generator's true targets are unverified.}
 }
 \value{
 A data frame of class \code{glmmplanr_validation} with two rows
-(\code{"null"} and \code{"planned"}) for contrasts
-or logit targets, or one \code{"planned"} row when \code{spec} targets an absolute
-probability (e.g., a single-condition design on \code{scale = "pp"} or \code{"prob"}
-where no zero-difference null exists), including the true target, detection and
-its Wilson interval under the chosen failure policy, valid-fit coverage
-and its Wilson interval, and the valid-fit count. Null detection is the
-Type I error. Response-pattern counts follow \code{\link[=evaluate_design_point]{evaluate_design_point()}}.
+(\code{"null"} and \code{"planned"}) for contrasts with an attainable zero null
+or logit targets, or one \code{"planned"} row when no zero null exists on the
+probability scale (e.g., an absolute probability target or asymmetric
+weights under nonzero guessing), including the true target, planned
+\code{decision_status} under the same denominator and criterion as
+\code{\link[=optimize_sample_size]{optimize_sample_size()}}, detection (\code{power}), interval coverage, width
+attainment (\code{aipe_prob}), same-replication joint detection-and-width
+attainment (\code{joint_prob}), and ROPE exclusion (\code{rope_excl_prob}) with their
+Wilson Monte Carlo intervals, plus the valid-fit count. Null detection
+equals Type I error when \code{true_target == 0}.
+Response-pattern counts follow \code{\link[=evaluate_design_point]{evaluate_design_point()}}.
 Use \code{\link[=plot.glmmplanr_validation]{plot.glmmplanr_validation()}} to display these results. Prespecify
 validation tolerances and replication counts.
 }
@@ -57,11 +69,15 @@ effect and a null on the same target scale, using disjoint random streams.
 On the probability scale the null shifts cell logits along the supplied
 contrast until its probability difference is zero, holding the covariance
 structure fixed. On the logit scale it sets the focal coefficient to zero.
+For partial item presentation (\code{items_per_subject}), validation conditions
+on the fixed schedule determined by \code{design$item_seed} while drawing fresh
+participant/item effects, missingness, and responses; evaluate multiple
+\code{item_seed} values if item assignment will be re-randomized at execution.
 }
 \examples{
 des <- design_crossed(list(condition = c("a", "b")))
 dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
 spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
 r <- validate_design_point(spec, 16, 8, nsim = 5L)
-r[c("condition", "nsim", "n_valid", "detection", "coverage")]
+r[c("condition", "nsim", "n_valid", "decision_status", "detection", "coverage")]
 }

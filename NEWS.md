@@ -1,6 +1,124 @@
 # glmmplanr 0.1.0
 
 * Initial public release of `glmmplanr`.
+* Verify build-time `.glmmplanr_source_md5` across `mirai` worker pools (prepending
+  the caller's `glmmplanr` library path on newly started daemons and aborting
+  before stamping `simulation_version = 5L` when pre-existing daemons have a
+  different `glmmplanr` build loaded), bump `simulation_version` to `5L` so
+  `topup_verification()` blocks and `switch_preference()` warns on incompatible
+  pre-v5 saved candidate tables (including `simulation_version = 4` plans
+  affected by positive-`chance` clamping, non-0.80 `ci_assurance` quantiles in
+  `ci_width_q80`, or `n_valid == 0` conditional intervals, alongside pre-v4
+  unnormalized contrast weights), and extract global
+  bindings from default argument expressions in `formals(fn)` alongside `body(fn)`
+  when isolating Box-Muller RNG callbacks in child R sessions.
+* Align named random-effect SD vectors (`subj_sd`, `item_sd`, `testlet_sd`,
+  `slope_sd_ratio`) and named correlation matrices (`corr_structure`) by design
+  random-effect column/term name rather than positional order in `calibrate_dgp()`
+  (rejecting partial, duplicate, unknown, or mismatched row/column names), reject
+  duplicate, conflicting-alias, or `"(Intercept)"` effect specifications in
+  `cell_probs_from_diffs()`, enforce positive whole-integer design dimensions and
+  range bounds before integer coercion across `design_crossed()`,
+  `design_testlet()`, `valid_multiples()`, `evaluate_design_point()`, and
+  `validate_design_point()`, and validate schedule `allocation`, `between_subj`,
+  `between_item`, `items_per_subject`, trial counts, unit-ID ranges, per-subject
+  item quotas, distinct within-pair conditions (`(subj_id, item_id, cell_id)`),
+  and within-unit balance in `simulate_dgp_data()`.
+* Initialize above-chance starting intercepts on `[chance + 0.05(1 - chance),
+  chance + 0.95(1 - chance)]` with `(1 - chance)`-scaled boundary guards in
+  native C++ Laplace estimation, replace fixed `1e-6` / `1e-10` clamping in
+  `mafc_binomial()` with IEEE-754 machine-epsilon bounds on `(chance, 1)` (so
+  `linkfun(linkinv(eta))` round-trips accurately across both high `chance` near
+  `1` and extreme `eta` such as `-18`), and allow `chance` in `[0, 1)` in the
+  bundled Stan model;
+  return `NA` Monte Carlo intervals and `power_mcse` under
+  `failure_policy = "conditional"` when `n_valid == 0L`; keep `ci_width_q80`
+  fixed at the 80th percentile alongside `ci_width_q_assurance` at
+  `ci_assurance`; plot `"planned"` validation rows with verified zero truth as
+  `"Type I error"` against `alpha`; display `rope_ci` in `as_gt()` for
+  `criterion = "rope"` plans while rejecting uncomputed `"sensitivity"` or
+  `"robust"` table requests; and retain generating DGP, partial-presentation,
+  and missingness fields (`dgp`, `items_per_subject`, `item_seed`, `attrition`,
+  `participant_dropout`) on returned Rasch planning objects and reports.
+* Unify fixed-effect cell and rank identifiability checks across schedule
+  generation, the cached C++ simulation path (even without trial attrition),
+  and the data-frame path so schedules omitting required conditions fail
+  consistently rather than passing regularized width checks. Fixed-item Rasch
+  MML (`plan_rasch_fixed_bank(method = "fixed_item")`) marks replications
+  invalid when no examinee has two or more observed responses on estimable
+  (non-constant) items, and random-item Rasch (`plan_rasch_precision()` and
+  `plan_rasch_fixed_bank(method = "random_item")`) requires at least two
+  observed participants, two observed items, at least one participant with two
+  or more observed responses, and at least one item with two or more observed
+  responses so unidentifiable variance components cannot pass tolerance checks.
+  `plan_rasch_fixed_bank()` also retains input names on `item_difficulties` and
+  includes `item_name` in `item_summary`.
+* Reserve all internal schedule and formula identifiers (`subj`, `item`,
+  `testlet`, `subj_id`, `item_id`, `testlet_id`, `list_id`, `cell_id`,
+  `cell_name`, `trial_id`, `y`, `Z_subj_cells`, `Z_item_cells`,
+  `Z_testlet_cells`) against experimental factor name collisions in
+  `design_crossed()` and `design_testlet()`, and validate in
+  `simulate_dgp_data()` that supplied schedules match `dgp$design` factor
+  names, factor level order, cell mappings, and testlet nesting before
+  generating responses.
+* Check at `specify_target()` (and per scenario in `optimize_sample_size()`)
+  that zero lies strictly inside the unit-normalized attainable probability
+  contrast for `power`, `both`, and `joint` criteria given `chance` and
+  `contrast_weights` (distinguishing mathematical unattainability from
+  double-precision calibration limits on extreme weight ratios), and calibrate
+  probability-scale nulls and Type M / Type S diagnostics on the same
+  normalized scale so weight rescaling never alters null availability or
+  diagnostic availability. Share strict cell-name alignment across
+  `calibrate_dgp(cell_probs = ...)`, `specify_target()`,
+  `cell_contrast_weights()`, `true_prob_effect()`, and multi-scenario specs:
+  prefer exact matches against `design$cells$cell_name` (supporting spaces and
+  dots in factor levels) before separator-normalized fallbacks, and reject
+  partial or duplicate names. Reject all-zero or non-finite weights, compute
+  delta, bootstrap, and HMC standard errors on unit-normalized weights before
+  scaling back, and bump `simulation_version` to `4L` so `topup_verification()`
+  (under both `"independent"` and `"pooled"` policies) refuses to update or
+  merge incompatible pre-v4 candidate tables. Track the limiting scenario in
+  random-slope `sensitivity` tables across `switch_preference()` and
+  `topup_verification()`, display the selected scenario's target effect in
+  `as_gt()` headers, compute sensitivity ranges in `report_plan()` across all
+  evaluated slope levels (including `"standard"`), recover omitted custom
+  `subj_id` / `item_id` values in `validate_custom_data()` by matching
+  `schedule$trials` labels rather than re-numbering factor levels, and preserve
+  both library paths / MD5 verification and `.GlobalEnv` callback bindings when
+  isolating Box-Muller RNG calls in child R sessions. Validate custom `data_fn`
+  responses against factor coercion, validate integer replication/worker counts
+  before conversion, and allow `true_target` in `evaluate_design_point()` and
+  `validate_design_point()` only when a custom `data_fn` is supplied (recording
+  built-in null calibration explicitly so tiny non-zero custom `true_target`
+  values are never mislabeled as nominal `"Type I error"`).
+* Model `valid_rate` explicitly in monotone GP surrogate surfaces under
+  `failure_policy = "conditional"` so `min_valid_rate` gates candidate
+  acquisition and `pred_criterion_met` (preserving observed `valid_rate` at
+  evaluated points and aligning smoothed GP thresholds at `min_valid_rate >= 0.99`,
+  while retaining observed feasible candidates when predicted feasibility is
+  empty), resolve `stage1_re` and `stage1_engine` per scenario DGP in
+  multi-scenario `optimize_sample_size()`, require `n_eval_init >= 1` when
+  `method = "surrogate_gp"` explores a strict subset of the post-constraint
+  lattice, and solve non-negative monotone GP trend regressions via exact
+  centered active-set Cholesky rather than `L-BFGS-B` so 3-point collinear or
+  constant surfaces never fail with non-finite `optim` evaluations.
+* Return Wilson Monte Carlo intervals for `width_attainment`,
+  `joint_attainment`, and `rope_attainment` plus `decision_status` in
+  `validate_design_point()`. Preserve per-candidate Wilson levels across
+  `topup_verification()` in `report_plan()`, distinguish weighted probability
+  contrasts without an attainable zero from absolute probability targets in
+  specifications, tables, and reports, note fixed-`item_seed` schedule
+  conditioning under partial item presentation, and extract aligned responses
+  and cells from `model.frame()` with numeric optimizer-status checks in the
+  observed-data `lme4::bootMer()` workflow vignette.
+* Restrict interim `early_stop` validity-floor curtailment under
+  `failure_policy = "conditional"` to cases where remaining replications cannot
+  reach `min_valid_rate`; make `fewer_subj`, `fewer_items` and `fewer_trials`
+  strictly lexicographic; report scenario-specific trial counts when schedules
+  differ across scenarios; skip duplicate exploratory passes in full-grid
+  multi-scenario confirmation; synchronize `evaluated` and `surface` after
+  `topup_verification()`; and avoid `0.5` power placeholders on absolute
+  probability plots.
 * Skip random-slope sensitivity simulations when every slope SD is zero.
   Bonferroni-adjusted decisions now precede step-up, ceiling and top-up checks;
   multi-scenario confirmation uses fresh streams after selecting candidates.

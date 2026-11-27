@@ -7,7 +7,7 @@
 \method{plot}{glmmplanr_result}(
   x,
   type = c("contour", "surface3d", "pareto", "scenarios"),
-  metric = c("power", "ci_width", "prob_ci_width_pp"),
+  metric = c("power", "ci_width", "prob_ci_width_pp", "aipe_prob"),
   show_pareto_frontier = TRUE,
   ...,
   candidates = NULL,
@@ -32,9 +32,11 @@ targets show width attainment in place of detection. Shapes give the
 stored decision under the plan's criterion.
 }}
 
-\item{metric}{Surface metric for \code{"contour"} and \code{"surface3d"}: \code{"power"} (default), \code{"ci_width"}
-(on \code{x$spec$scale}), or \code{"prob_ci_width_pp"} (95\% CI width in percentage
-points).}
+\item{metric}{Surface metric for \code{"contour"} and \code{"surface3d"}: \code{"power"}
+(default for contrasts and logit targets), \code{"ci_width"} (default for
+absolute probability targets; on \code{x$spec$scale}), \code{"prob_ci_width_pp"}
+(95\% CI width in percentage points), or \code{"aipe_prob"} (width-attainment
+probability when \code{ci_width} is set).}
 
 \item{show_pareto_frontier}{Logical; overlay the non-dominated \verb{(N_subj, N_item)}
 Pareto frontier on \code{"contour"} plots (default \code{TRUE}).}

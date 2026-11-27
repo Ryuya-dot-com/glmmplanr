@@ -416,38 +416,49 @@ refits per valid simulated study in both `null` and `planned` conditions (at
 pilot first and scale by `nsim / 10`:
 
 ```{r final-check, eval=FALSE}
-final <- specify_target(model, "study_method", scale = "pp", engine = "bayes_laplace",
+final <- specify_target(model, "study_method", scale = "pp", criterion = "joint",
+                        ci_width = 10, engine = "bayes_laplace",
                         analysis_re = "intercept_only", prob_se_method = "bootstrap")
 # 1. Time a 10-rep pilot to estimate wall-clock time
 system.time(validate_design_point(final, n_subj = 54L, n_item = 30L, nsim = 10L, seed = 8200L))
 
 # 2. Run pre-specified confirmation (e.g., nsim = 200L-1000L depending on budget)
 val <- validate_design_point(final, n_subj = 54L, n_item = 30L, nsim = 200L, seed = 8201L)
-val[c("condition", "n_valid", "detection", "detection_lo", "detection_hi",
+val[c("condition", "n_valid", "decision_status",
+      "detection", "detection_lo", "detection_hi",
+      "width_attainment", "width_attainment_lo", "width_attainment_hi",
+      "joint_attainment", "joint_attainment_lo", "joint_attainment_hi",
       "coverage", "coverage_lo", "coverage_hi")]
 ```
 
 **How to decide (Adopt vs. Hold)**:
 
-Pre-specify numerical tolerances and judge them using the Monte Carlo intervals
-rather than point estimates alone:
+`validate_design_point()` evaluates `planned` under the exact same failure-policy
+denominator, target criterion, and Wilson Monte Carlo confidence level as
+`optimize_sample_size()`, returning `decision_status` alongside Wilson intervals
+for `detection`, `width_attainment`, `joint_attainment`, and `coverage`:
 
-- **Adopt** when `planned` meets your target lower bound (`detection_lo >= 0.80`),
-  `n_valid / nsim` meets your validity floor (e.g., `>= 0.90`), `coverage_lo`
-  meets your pre-specified coverage floor (e.g., `>= 0.90` or `>= 0.925`), and
-  `null$detection_hi` stays below your pre-specified Type I error ceiling (e.g.,
-  `<= 0.075` with sufficiently large `nsim`).
-- **Hold / revise** if `planned` is indeterminate (`detection_lo < 0.80` while
-  `detection_hi >= 0.80`: increase `nsim` or sample size), if `coverage_lo`
+- **Adopt** when `planned$decision_status == "pass"` (meaning `detection_lo`,
+  `width_attainment_lo`, and/or `joint_attainment_lo` clear your pre-specified
+  planning target under the chosen `failure_policy`), `n_valid / nsim` meets your
+  validity floor (e.g., `>= 0.90`), `coverage_lo` meets your pre-specified
+  coverage floor (e.g., `>= 0.90` or `>= 0.925`), and `null$detection_hi` stays
+  below your pre-specified Type I error ceiling (e.g., `<= 0.075` with
+  sufficiently large `nsim`).
+- **Hold / revise** if `planned$decision_status == "indeterminate"` (e.g., an
+  analytical `joint_delta` screen passed, but the confirmed bootstrap interval
+  straddles the 80% target: increase `nsim` or sample size), if `coverage_lo`
   falls below your floor, or if `null$detection_hi` exceeds your Type I error
   ceiling (increase `nsim` if merely uncertain, or revise the estimator /
   random-slope specification if truly miscalibrated).
 
 When analysing collected data, keep one row per trial with binary `y` and the
-learner (`subj`) and word (`item`) IDs. If unpenalized maximum likelihood via
-`lme4::glmer()` is your planned final analysis, set `engine = "lme4"` during
-planning as well. These calls show the exact formula, family, and marginal
-percentage-point recovery matching the planned estimand:
+learner (`subj`) and word (`item`) IDs. Match both the estimator and the
+interval method used during planning: if `lme4::glmer()` with parametric
+bootstrap (`prob_se_method = "bootstrap"`) is your planned final analysis, set
+`engine = "lme4"` during planning as well. These calls show the exact formula,
+family, marginal percentage-point point estimate, and matching `(1 - alpha)`
+parametric-bootstrap Wald interval:
 
 ```{r analysis-model}
 formula(target)
@@ -457,21 +468,69 @@ family(target)
 ```{r observed-analysis, eval=FALSE}
 responses$study_method <- factor(responses$study_method, levels = design$factors$study_method)
 contrasts(responses$study_method) <- design$contrasts$study_method
-fit <- lme4::glmer(formula(target), data = responses, family = family(target))
 
-# Recover the same population-averaged percentage-point difference
-b <- lme4::fixef(fit)
-vc <- lme4::VarCorr(fit)
-sd_tot <- sqrt(vc$subj[1, 1] + vc$item[1, 1])
-eta <- drop(design$X_cells %*% b)
+# Apply the same cell-separation and convergence checks used during planning
+valid_glmer_fit <- function(m) {
+  mf <- stats::model.frame(m)
+  y_m <- stats::model.response(mf)
+  if (is.matrix(y_m)) return(FALSE)
+  y_m <- as.integer(y_m)
+  cid_m <- match(
+    as.character(mf$study_method),
+    as.character(design$cells$study_method)
+  )
+  if (length(y_m) != length(cid_m) || anyNA(y_m) || anyNA(cid_m)) return(FALSE)
+  c0 <- tabulate(cid_m[y_m == 0L], nbins = design$n_cells)
+  c1 <- tabulate(cid_m[y_m == 1L], nbins = design$n_cells)
+  if (any(c0 == 0L | c1 == 0L)) return(FALSE)
+  msgs <- c(unlist(m@optinfo$conv$lme4$messages), unlist(m@optinfo$warnings))
+  opt_code <- m@optinfo$conv$opt
+  if (length(opt_code) != 1L || !is.finite(opt_code) || opt_code != 0 ||
+      any(grepl("failed to converge|degenerate|unable to evaluate|maximum number of function evaluations",
+                msgs, ignore.case = TRUE))) {
+    return(FALSE)
+  }
+  b <- lme4::fixef(m)
+  v_diag <- tryCatch(diag(as.matrix(stats::vcov(m))), error = function(e) NA_real_)
+  all(is.finite(b)) && length(v_diag) == length(b) && all(is.finite(v_diag) & v_diag > 0)
+}
+
+fit <- lme4::glmer(formula(target), data = responses, family = family(target))
+stopifnot(valid_glmer_fit(fit))
+
+# Recover the population-averaged percentage-point difference and 95% interval
 g <- 0  # replace with 1 / 3 if using a 3-choice guessing link
-marg_p <- vapply(eta, function(e) {
-  stats::integrate(
-    function(z) (g + (1 - g) * stats::plogis(e + sd_tot * z)) * stats::dnorm(z),
-    -8, 8
-  )$value
-}, numeric(1L))
-diff_pp <- 100 * (marg_p[2] - marg_p[1])
+w <- cell_contrast_weights(design, "study_method")
+marginal_diff_pp <- function(m) {
+  if (!valid_glmer_fit(m)) return(NA_real_)
+  b <- lme4::fixef(m)
+  vc <- lme4::VarCorr(m)
+  sd_tot <- sqrt(as.numeric(vc$subj[1, 1]) + as.numeric(vc$item[1, 1]))
+  eta <- drop(design$X_cells %*% b)
+  marg_p <- vapply(eta, function(e) {
+    stats::integrate(
+      function(z) (g + (1 - g) * stats::plogis(e + sd_tot * z)) * stats::dnorm(z),
+      -8, 8
+    )$value
+  }, numeric(1L))
+  100 * sum(w * marg_p)
+}
+
+diff_pp <- marginal_diff_pp(fit)
+boot <- lme4::bootMer(
+  fit, marginal_diff_pp, nsim = target$prob_boot,
+  use.u = FALSE, type = "parametric", seed = 8202L
+)
+ok <- is.finite(boot$t[, 1L])
+if (sum(ok) < max(2L, ceiling(0.9 * target$prob_boot))) {
+  stop(sprintf("Marginal bootstrap failed validity floor (%d/%d valid refits).",
+               sum(ok), target$prob_boot))
+}
+se_pp <- stats::sd(boot$t[ok, 1L])
+z_crit <- stats::qnorm(1 - target$alpha / 2)
+ci_pp <- diff_pp + c(-1, 1) * z_crit * se_pp
+c(estimate_pp = diff_pp, se_pp = se_pp, ci_lo_pp = ci_pp[1], ci_hi_pp = ci_pp[2],
+  width_pp = diff(ci_pp))
 ```
 
 ### Extending to the paper's `2 x 2` interaction (and a proficiency pretest)

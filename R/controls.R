@@ -131,6 +131,18 @@ target_control <- function(
   on_singular <- match.arg(on_singular)
   analysis_link <- match.arg(analysis_link)
 
+  if (!is.null(contrast_weights)) {
+    if (!is.numeric(contrast_weights) || length(contrast_weights) < 1L || any(!is.finite(contrast_weights))) {
+      cli::cli_abort("{.arg contrast_weights} must be a finite numeric vector.")
+    }
+    if (!any(abs(contrast_weights) > 0)) {
+      cli::cli_abort("At least one element of {.arg contrast_weights} must be non-zero.")
+    }
+    cw_nms <- names(contrast_weights)
+    if (!is.null(cw_nms) && any(is.na(cw_nms) | !nzchar(trimws(cw_nms)))) {
+      cli::cli_abort("Named {.arg contrast_weights} must name every element (or leave all elements unnamed).")
+    }
+  }
   if (!is.numeric(prob_boot) || length(prob_boot) != 1L || !is.finite(prob_boot) ||
       prob_boot < 2 || prob_boot > .Machine$integer.max || prob_boot != floor(prob_boot)) {
     cli::cli_abort("{.arg prob_boot} must be an integer of at least 2.")

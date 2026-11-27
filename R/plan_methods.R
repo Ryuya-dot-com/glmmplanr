@@ -86,6 +86,22 @@ rasch_report <- function(x) {
   } else {
     sprintf("Examinees and items were sampled anew in every replication (%s).", x$engine)
   }
+  sched_parts <- character(0)
+  if (!is.null(x$items_per_subject)) {
+    sched_parts <- c(
+      sched_parts,
+      sprintf("items_per_subject = %d (allocation seed = %s)", as.integer(x$items_per_subject), as.character(x$item_seed))
+    )
+  }
+  if (isTRUE(x$attrition > 0)) {
+    sched_parts <- c(sched_parts, sprintf("trial attrition = %.1f%%", 100 * x$attrition))
+  }
+  if (isTRUE(x$participant_dropout > 0)) {
+    sched_parts <- c(sched_parts, sprintf("participant dropout = %.1f%%", 100 * x$participant_dropout))
+  }
+  if (length(sched_parts) > 0L) {
+    setup <- paste(setup, sprintf("Schedule/missingness settings: %s.", paste(sched_parts, collapse = ", ")))
+  }
   # Report the smallest passing bank design or the non-dominated random-item pairs.
   # Without a pass, identify the tested candidate with the largest lower bound.
   selected <- if (!any(joint$decision == "pass")) {

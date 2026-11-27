@@ -60,7 +60,10 @@ or \code{"sequential"}).}
 \value{
 A \code{glmmplanr_rasch} list (see \link{rasch_plan_methods}) with \code{summary} (per-target and joint attainment, counts, Wilson
 bounds, and decision), \code{pareto} (non-dominated designs passing the joint
-criterion), \code{replications} (errors and fit diagnostics), and the settings.
+criterion), \code{replications} (errors and fit diagnostics), and the generating
+and allocation settings (\code{dgp}, \code{items_per_subject}, \code{item_seed},
+\code{attrition}, \code{participant_dropout}, \code{max_error}, \code{assurance}, \code{seed},
+\code{mc_conf_level}).
 The \code{rmse} column is the root mean square of the evaluable replication
 errors. A missing prediction for any planned unit makes that target
 unevaluable. Failed fits and unevaluable errors count as misses in the

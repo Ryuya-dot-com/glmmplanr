@@ -166,7 +166,10 @@ assess_boundary_sensitivity <- function(x) {
       better <- which(is.finite(m_more) & m_more > opt_margin + 0.01)
       if (length(better) > 0L) {
         sub_b <- pass_more[better, , drop = FALSE]
-        ord <- order(sub_b$n_trials_scheduled, sub_b$preference_score)
+        pref_rk <- integer(nrow(sub_b))
+        pref_rk[preference_order(sub_b, prefer = x$prefer)] <- seq_len(nrow(sub_b))
+        tr_col <- if ("n_trials_scheduled_max" %in% names(sub_b)) sub_b$n_trials_scheduled_max else sub_b$n_trials_scheduled
+        ord <- order(tr_col, pref_rk)
         buffer_row <- sub_b[ord[1L], , drop = FALSE]
         buffer_row$mc_margin <- margin_of_row(buffer_row)
       }
@@ -225,6 +228,7 @@ as_gt.glmmplanr_result <- function(
     n_trials_expected = ver$n_trials_expected,
     decision = toupper(ver$decision_status),
     eff_power_ci = fmt_mc_pow(ver$power, ver$power_mc_lo, ver$power_mc_hi),
+    rope_ci = if ("rope_excl_prob" %in% names(ver)) fmt_mc_pow(ver$rope_excl_prob, ver$rope_mc_lo, ver$rope_mc_hi) else rep("-", nrow(ver)),
     conditional_power = ver$conditional_power,
     prob_ci_width_pp = ver$prob_ci_width_mean_pp,
     logit_ci_width = ver$logit_ci_width_mean,
@@ -244,10 +248,20 @@ as_gt.glmmplanr_result <- function(
     s <- x$sensitivity
     cap <- paste0(toupper(substring(s$scenario, 1L, 1L)), substring(s$scenario, 2L))
     s_cov <- if (x$spec$scale == "logit") s$coverage else s$prob_coverage
+    sens_src_lbl <- attr(s, "source_scenario")
+    if ((is.null(sens_src_lbl) || !length(sens_src_lbl)) && "source_scenario" %in% names(s)) {
+      sens_src_lbl <- as.character(s$source_scenario[1L])
+    }
+    sens_scen_tag <- if (!is.null(sens_src_lbl) && length(sens_src_lbl) > 0L &&
+                         !is.na(sens_src_lbl[1L]) && nzchar(sens_src_lbl[1L])) {
+      sprintf(" [scenario: %s]", sens_src_lbl[1L])
+    } else {
+      ""
+    }
     sens_clean <- data.frame(
       section = sprintf(
-        "Random-Slope Sensitivity at (N_subj = %d, N_item = %d)",
-        x$optimal$n_subj, x$optimal$n_item
+        "Random-Slope Sensitivity at (N_subj = %d, N_item = %d)%s",
+        x$optimal$n_subj, x$optimal$n_item, sens_scen_tag
       ),
       label = sprintf("%s (%.2fx slope SD)", cap, s$slope_multiplier),
       n_subj = s$n_subj,
@@ -256,6 +270,7 @@ as_gt.glmmplanr_result <- function(
       n_trials_expected = s$n_trials_expected,
       decision = toupper(s$decision_status),
       eff_power_ci = fmt_mc_pow(s$power, s$power_mc_lo, s$power_mc_hi),
+      rope_ci = if ("rope_excl_prob" %in% names(s)) fmt_mc_pow(s$rope_excl_prob, s$rope_mc_lo, s$rope_mc_hi) else rep("-", nrow(s)),
       conditional_power = s$conditional_power,
       prob_ci_width_pp = s$prob_ci_width_mean_pp,
       logit_ci_width = s$logit_ci_width_mean,
@@ -295,6 +310,7 @@ as_gt.glmmplanr_result <- function(
         n_trials_expected = pick_rows$n_trials_expected,
         decision = toupper(pick_rows$decision_status),
         eff_power_ci = fmt_mc_pow(pick_rows$power, pick_rows$power_mc_lo, pick_rows$power_mc_hi),
+        rope_ci = if ("rope_excl_prob" %in% names(pick_rows)) fmt_mc_pow(pick_rows$rope_excl_prob, pick_rows$rope_mc_lo, pick_rows$rope_mc_hi) else rep("-", nrow(pick_rows)),
         conditional_power = pick_rows$conditional_power,
         prob_ci_width_pp = pick_rows$prob_ci_width_mean_pp,
         logit_ci_width = pick_rows$logit_ci_width_mean,
@@ -309,12 +325,25 @@ as_gt.glmmplanr_result <- function(
     }
   }
 
+  if (identical(which, "sensitivity") && is.null(sens_clean)) {
+    cli::cli_abort(c(
+      "Random-slope sensitivity analysis was not run for {.arg x} (stored {.code sensitivity} is NULL).",
+      "i" = "Run {.fn optimize_sample_size} with {.code nsim_sensitivity > 0} on a DGP with non-zero random slopes, or use {.code which = 'verified'} / {.code 'combined'}."
+    ))
+  }
+  if (identical(which, "robust") && is.null(rob_clean)) {
+    cli::cli_abort(c(
+      "Multi-scenario robustness analysis was not run for {.arg x} (stored {.code robust} is NULL).",
+      "i" = "Supply {.arg scenarios} to {.fn optimize_sample_size}, or use {.code which = 'verified'} / {.code 'combined'}."
+    ))
+  }
+
   tbl_df <- switch(
     which,
     verified = ver_clean,
     pareto = pareto_only,
-    sensitivity = if (!is.null(sens_clean)) sens_clean else ver_clean,
-    robust = if (!is.null(rob_clean)) rob_clean else ver_clean,
+    sensitivity = sens_clean,
+    robust = rob_clean,
     combined = do.call(rbind, Filter(Negate(is.null), list(ver_clean, rob_clean, sens_clean)))
   )
 
@@ -327,13 +356,50 @@ as_gt.glmmplanr_result <- function(
 
   size_cols <- c("n_subj", "n_item", "n_trials_scheduled", "n_trials_expected")
 
+  sp_hdr <- x$spec
+  scen_hdr_suffix <- ""
+  if (!is.null(x$robust$specs) && !is.null(x$optimal$scenario) &&
+      length(x$optimal$scenario) > 0L && (x$optimal$scenario[1L] %in% names(x$robust$specs))) {
+    opt_sc <- as.character(x$optimal$scenario[1L])
+    sp_hdr <- x$robust$specs[[opt_sc]]
+    scen_hdr_suffix <- sprintf(
+      " | scenario = %s [evaluated: %s]",
+      opt_sc, paste(names(x$robust$specs), collapse = ", ")
+    )
+  }
+
+  has_rope <- identical(sp_hdr$criterion, "rope")
+  if (!has_rope) {
+    tbl_df$rope_ci <- NULL
+  }
+
+  crit_hdr <- switch(
+    sp_hdr$criterion,
+    power = sprintf("criterion = power >= %.0f%%", sp_hdr$power_min * 100),
+    ci_width = sprintf("criterion = ci_width <= %g %s (>= %.0f%%)", sp_hdr$ci_width, sp_hdr$scale, sp_hdr$ci_assurance * 100),
+    both = sprintf("criterion = power >= %.0f%% & width <= %g %s (>= %.0f%%)", sp_hdr$power_min * 100, sp_hdr$ci_width, sp_hdr$scale, sp_hdr$ci_assurance * 100),
+    joint = sprintf("criterion = joint detect & width <= %g %s >= %.0f%%", sp_hdr$ci_width, sp_hdr$scale, sp_hdr$power_min * 100),
+    rope = sprintf("criterion = ROPE [%g, %g %s] excl. >= %.0f%%", sp_hdr$rope[1L], sp_hdr$rope[2L], sp_hdr$scale, sp_hdr$power_min * 100)
+  )
+  hdr_tail <- paste0(" | ", crit_hdr, scen_hdr_suffix)
+
+  p_kind_gt <- prob_target_kind(sp_hdr)
+  gt_sub_fmt <- if (identical(p_kind_gt, "absolute")) {
+    "Focal target: %s (%s absolute probability = %.1f%% | cond. beta = %.3f logit | scale = %s | prefer = %s%s)"
+  } else if (identical(p_kind_gt, "difference")) {
+    "Focal effect: %s (%s diff = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s%s)"
+  } else if (can_define_null_target(sp_hdr)) {
+    "Focal effect: %s (%s weighted contrast = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s%s)"
+  } else {
+    "Focal target: %s (%s weighted contrast = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s%s)"
+  }
   gt_obj <- gt::gt(tbl_df, groupname_col = "section", rowname_col = "label") |>
     gt::tab_header(
       title = "Two-Dimensional GLMM Sample Size Plan & Trustworthiness Summary",
       subtitle = sprintf(
-        if (can_define_null_target(x$spec)) "Focal effect: %s (%s diff = %+.1f pp | cond. beta = %.3f logit | scale = %s | prefer = %s)" else "Focal target: %s (%s absolute probability = %.1f%% | cond. beta = %.3f logit | scale = %s | prefer = %s)",
-        x$spec$effect_input, x$spec$prob_estimand, x$spec$true_prob_diff_pp,
-        x$spec$true_beta, x$spec$scale, x$prefer
+        gt_sub_fmt,
+        sp_hdr$effect_input, sp_hdr$prob_estimand, sp_hdr$true_prob_diff_pp,
+        sp_hdr$true_beta, sp_hdr$scale, x$prefer, hdr_tail
       )
     ) |>
     gt::cols_label(
@@ -342,14 +408,14 @@ as_gt.glmmplanr_result <- function(
       n_trials_scheduled = "Sched. Trials",
       n_trials_expected = "Exp. Obs",
       decision = "Target Status",
-      eff_power_ci = if (x$spec$failure_policy == "effective") "Effective Power [MC CI]" else "Conditional Power [MC CI]",
+      eff_power_ci = if (sp_hdr$failure_policy == "effective") "Effective Power [MC CI]" else "Conditional Power [MC CI]",
       conditional_power = "Cond. Power",
       prob_ci_width_pp = "CI (pp)",
       logit_ci_width = "CI (logit)",
       validity_status = "Inferential Validity",
       valid_rate = "Valid",
       singular_rate = "Singular",
-      coverage = if (can_define_null_target(x$spec)) "H1 Coverage" else "Coverage"
+      coverage = if (can_define_null_target(sp_hdr)) "H1 Coverage" else "Coverage"
     ) |>
     gt::tab_spanner(
       label = "Balanced Sample Size",
@@ -372,31 +438,54 @@ as_gt.glmmplanr_result <- function(
     gt::fmt_number(columns = "logit_ci_width", decimals = 3) |>
     gt::sub_missing(missing_text = "-")
 
+  if (has_rope) {
+    rope_lbl <- sprintf(
+      "%s ROPE Excl. [%g, %g %s] [MC CI]",
+      if (sp_hdr$failure_policy == "effective") "Effective" else "Conditional",
+      sp_hdr$rope[1L], sp_hdr$rope[2L], sp_hdr$scale
+    )
+    gt_obj <- gt::cols_label(gt_obj, rope_ci = rope_lbl)
+  }
+
+  dec_cols <- c(
+    "decision", "eff_power_ci",
+    if (has_rope) "rope_ci",
+    "conditional_power", "prob_ci_width_pp", "logit_ci_width",
+    if (has_aipe) c("aipe_prob", "joint_prob")
+  )
   if (has_aipe) {
     gt_obj <- gt_obj |>
       gt::cols_label(aipe_prob = "Width attainment", joint_prob = "Detect and meet width") |>
-      gt::fmt_percent(columns = c("aipe_prob", "joint_prob"), decimals = 1) |>
-      gt::tab_spanner(
-        label = if (can_define_null_target(x$spec)) "Power, Precision & MC Decision" else "Precision & MC Decision",
-        columns = c("decision", "eff_power_ci", "conditional_power", "prob_ci_width_pp", "logit_ci_width", "aipe_prob", "joint_prob")
-      )
-  } else {
-    gt_obj <- gt_obj |>
-      gt::tab_spanner(
-        label = if (can_define_null_target(x$spec)) "Power, Precision & MC Decision" else "Precision & MC Decision",
-        columns = c("decision", "eff_power_ci", "conditional_power", "prob_ci_width_pp", "logit_ci_width")
-      )
+      gt::fmt_percent(columns = c("aipe_prob", "joint_prob"), decimals = 1)
   }
+  gt_obj <- gt_obj |>
+    gt::tab_spanner(
+      label = if (can_define_null_target(sp_hdr)) "Power, Precision & MC Decision" else "Precision & MC Decision",
+      columns = intersect(dec_cols, names(tbl_df))
+    )
 
-  if (!can_define_null_target(x$spec)) {
+  if (!can_define_null_target(sp_hdr)) {
     gt_obj <- gt::cols_hide(gt_obj, columns = intersect(c("eff_power_ci", "conditional_power", "joint_prob"), names(tbl_df)))
+  }
+  opt_sections_note <- if (identical(which, "combined")) {
+    omitted <- c(
+      if (is.null(rob_clean)) "multi-scenario robustness",
+      if (is.null(sens_clean)) "random-slope sensitivity"
+    )
+    if (length(omitted) > 0L) {
+      sprintf(" Not run in this plan: %s.", paste(omitted, collapse = ", "))
+    } else {
+      ""
+    }
+  } else {
+    ""
   }
   sing_note <- if (any(is.na(tbl_df$singular_rate))) {
     " Boundary singularity ('Singular') is not applicable ('-') under regularized/Bayesian estimation."
   } else {
     ""
   }
-  exp_regimes <- detect_exploratory_regimes(x$spec)
+  exp_regimes <- detect_exploratory_regimes(sp_hdr)
   exp_note <- if (length(exp_regimes) > 0L) {
     sprintf(
       " Exploratory regime (%s): nominal coverage and null Type I error are not pre-benchmarked across schedules; confirm at the chosen design via validate_design_point().",
@@ -405,13 +494,24 @@ as_gt.glmmplanr_result <- function(
   } else {
     ""
   }
+  sched_note <- if (!is.null(x$robust) && isTRUE(x$robust$schedules_differ)) {
+    sprintf(
+      " Scheduled trials differ across scenarios (at selected design: %s).",
+      format_scenario_counts(x$robust$robust_trials_by_scenario)
+    )
+  } else {
+    ""
+  }
   gt_obj |>
     gt::tab_source_note(
       source_note = sprintf(
-        "Target Status uses %.0f%% Wilson intervals (Morris et al., 2019) for power/width/ROPE targets only: PASS (MC lower >= target), INDETERMINATE (straddles target), FAIL (MC upper < target). Target PASS does not confirm interval coverage or null Type I error; verify inferential validity with validate_design_point().%s%s Seed = %d.",
-        x$spec$mc_conf_level * 100,
+        "Target Status uses %.0f%% Wilson intervals (Morris et al., 2019) for %s: PASS (MC lower >= target), INDETERMINATE (straddles target), FAIL (MC upper < target). Target PASS does not confirm interval coverage or null Type I error; verify inferential validity with validate_design_point().%s%s%s%s Seed = %d.",
+        sp_hdr$mc_conf_level * 100,
+        crit_hdr,
+        opt_sections_note,
         sing_note,
         exp_note,
+        sched_note,
         x$search_meta$seed
       )
     )
@@ -472,9 +572,11 @@ style_plot_annotations <- function(p, show_annotations) {
 #'     interval and mean interval width in separate panels. Absolute probability
 #'     targets show width attainment in place of detection. Shapes give the
 #'     stored decision under the plan's criterion.
-#' @param metric Surface metric for `"contour"` and `"surface3d"`: `"power"` (default), `"ci_width"`
-#'   (on `x$spec$scale`), or `"prob_ci_width_pp"` (95% CI width in percentage
-#'   points).
+#' @param metric Surface metric for `"contour"` and `"surface3d"`: `"power"`
+#'   (default for contrasts and logit targets), `"ci_width"` (default for
+#'   absolute probability targets; on `x$spec$scale`), `"prob_ci_width_pp"`
+#'   (95% CI width in percentage points), or `"aipe_prob"` (width-attainment
+#'   probability when `ci_width` is set).
 #' @param show_pareto_frontier Logical; overlay the non-dominated `(N_subj, N_item)`
 #'   Pareto frontier on `"contour"` plots (default `TRUE`).
 #' @param ... Additional arguments (unused).
@@ -498,17 +600,29 @@ style_plot_annotations <- function(p, show_annotations) {
 plot.glmmplanr_result <- function(
   x,
   type = c("contour", "surface3d", "pareto", "scenarios"),
-  metric = c("power", "ci_width", "prob_ci_width_pp"),
+  metric = c("power", "ci_width", "prob_ci_width_pp", "aipe_prob"),
   show_pareto_frontier = TRUE,
   ...,
   candidates = NULL,
   show_annotations = FALSE
 ) {
   type <- match.arg(type)
+  metric_missing <- missing(metric)
   if (type == "scenarios") {
     p <- plot_scenario_comparison(x, candidates)
   } else {
-    metric <- match.arg(metric)
+    has_null <- can_define_null_target(x$spec)
+    if (metric_missing) {
+      metric <- if (has_null) "power" else "ci_width"
+    } else {
+      metric <- match.arg(metric)
+      if (metric == "power" && !has_null) {
+        cli::cli_abort("Detection power is undefined when the target has no attainable zero null; use {.code metric = 'ci_width'}, {.code 'prob_ci_width_pp'}, or {.code 'aipe_prob'}.")
+      }
+      if (metric == "aipe_prob" && is.null(x$spec$ci_width)) {
+        cli::cli_abort("{.code metric = 'aipe_prob'} requires a specification with a finite {.arg ci_width} bound.")
+      }
+    }
     p <- switch(type,
       contour = plot_contour_2d(x, metric = metric, show_pareto_frontier = show_pareto_frontier),
       surface3d = plot_surface_3d(x, metric = metric),
@@ -624,28 +738,108 @@ plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...,
     data.frame(panel, studies, rate, lo, hi, target)
   }
   coverage <- make_panel("Interval coverage", x$coverage, x$coverage_lo, x$coverage_hi, 1 - settings$alpha)
+  width_bounds <- function(df) {
+    if (all(c("width_attainment_lo", "width_attainment_hi") %in% names(df))) {
+      list(lo = df$width_attainment_lo, hi = df$width_attainment_hi)
+    } else {
+      denom <- if (settings$failure_policy == "effective") df$nsim else df$n_valid
+      ci <- vapply(seq_len(nrow(df)), function(i) {
+        k_i <- if (is.finite(df$width_attainment[i]) && denom[i] > 0L) {
+          round(df$width_attainment[i] * denom[i])
+        } else {
+          NA_integer_
+        }
+        wilson_mc_ci(k_i, denom[i], settings$mc_conf_level)
+      }, numeric(2L))
+      list(lo = unname(ci["lo", ]), hi = unname(ci["hi", ]))
+    }
+  }
   if (settings$has_null) {
     power_target <- if (settings$criterion %in% c("power", "both")) settings$power_min else NA_real_
-    detection <- make_panel(ifelse(x$condition == "null", "Type I error", "Power"),
-      x$detection, x$detection_lo, x$detection_hi,
-      ifelse(x$condition == "null", settings$alpha, power_target))
+    row_zero <- vapply(seq_len(nrow(x)), function(i) {
+      cnm <- as.character(x$condition[i])
+      if (!is.null(settings$zero_truth_verified) && (cnm %in% names(settings$zero_truth_verified))) {
+        return(isTRUE(settings$zero_truth_verified[[cnm]]))
+      }
+      if (identical(cnm, "null") && !is.null(settings$null_verified)) {
+        return(isTRUE(settings$null_verified))
+      }
+      is.finite(x$true_target[i]) && (x$true_target[i] == 0)
+    }, logical(1L))
+    det_panel <- ifelse(
+      row_zero,
+      "Type I error",
+      ifelse(x$condition == "null", "Null-input detection", "Power")
+    )
+    det_target <- ifelse(
+      row_zero,
+      settings$alpha,
+      ifelse(
+        x$condition == "null" | is.na(x$true_target),
+        NA_real_,
+        power_target
+      )
+    )
+    detection <- make_panel(det_panel, x$detection, x$detection_lo, x$detection_hi, det_target)
     points <- rbind(detection, coverage)
+    p_idx <- which(x$condition == "planned")
+    if (length(p_idx) > 0L) {
+      xp <- x[p_idx, , drop = FALSE]
+      sp_p <- studies[p_idx]
+      if (!is.null(settings$ci_width) && settings$criterion %in% c("ci_width", "both")) {
+        wb <- width_bounds(xp)
+        points <- rbind(points, data.frame(
+          panel = "Width attainment", studies = sp_p,
+          rate = xp$width_attainment, lo = wb$lo, hi = wb$hi,
+          target = settings$ci_assurance
+        ))
+      } else if (!is.null(settings$ci_width) && settings$criterion == "joint" &&
+                 all(c("joint_attainment", "joint_attainment_lo", "joint_attainment_hi") %in% names(xp))) {
+        points <- rbind(points, data.frame(
+          panel = "Joint attainment", studies = sp_p,
+          rate = xp$joint_attainment, lo = xp$joint_attainment_lo, hi = xp$joint_attainment_hi,
+          target = settings$power_min
+        ))
+      } else if (settings$criterion == "rope" &&
+                 all(c("rope_attainment", "rope_attainment_lo", "rope_attainment_hi") %in% names(xp))) {
+        points <- rbind(points, data.frame(
+          panel = "ROPE exclusion", studies = sp_p,
+          rate = xp$rope_attainment, lo = xp$rope_attainment_lo, hi = xp$rope_attainment_hi,
+          target = settings$power_min
+        ))
+      }
+    }
   } else {
     points <- coverage
     if (!is.null(settings$ci_width)) {
-      ci <- wilson_mc_ci(round(x$width_attainment * detection_denom), detection_denom, settings$mc_conf_level)
-      points <- rbind(coverage, make_panel("Width attainment", x$width_attainment,
-        unname(ci["lo"]), unname(ci["hi"]), settings$ci_assurance))
+      wb <- width_bounds(x)
+      points <- rbind(points, make_panel("Width attainment", x$width_attainment,
+        wb$lo, wb$hi, settings$ci_assurance))
+    }
+    if (settings$criterion == "rope" &&
+        all(c("rope_attainment", "rope_attainment_lo", "rope_attainment_hi") %in% names(x))) {
+      points <- rbind(points, make_panel("ROPE exclusion", x$rope_attainment,
+        x$rope_attainment_lo, x$rope_attainment_hi, settings$power_min))
     }
   }
-  points$panel <- factor(points$panel, levels = c("Power", "Type I error", "Interval coverage", "Width attainment"))
+  points$panel <- factor(
+    points$panel,
+    levels = c("Power", "Type I error", "Null-input detection", "Interval coverage",
+               "Width attainment", "Joint attainment", "ROPE exclusion")
+  )
   points$studies <- factor(points$studies, levels = rev(unique(studies[order(x$condition != "null")])))
   ranges <- points[is.finite(points$rate) & is.finite(points$lo) & is.finite(points$hi), ]
   targets <- unique(points[is.finite(points$target), c("panel", "target")])
   rate_denom <- if (settings$failure_policy == "effective") "all scheduled studies" else "valid fits"
-  rate_label <- if (settings$has_null) "Detection" else "Width attainment"
+  rate_label <- if (settings$has_null) {
+    "Detection"
+  } else if (settings$criterion == "rope") {
+    "ROPE exclusion"
+  } else {
+    "Width attainment"
+  }
   caption <- sprintf("%g%% Wilson Monte Carlo intervals. Coverage uses valid fits.", 100 * settings$mc_conf_level)
-  if (settings$has_null || !is.null(settings$ci_width)) {
+  if (settings$has_null || !is.null(settings$ci_width) || settings$criterion == "rope") {
     caption <- paste(caption, sprintf("%s uses %s.", rate_label, rate_denom), sep = "\n")
   }
   p <- ggplot2::ggplot(points, ggplot2::aes(x = .data$rate, y = .data$studies)) +
@@ -726,13 +920,15 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
     metric,
     power = "pred_power",
     ci_width = "pred_ci_width",
-    prob_ci_width_pp = "pred_prob_ci_width_pp"
+    prob_ci_width_pp = "pred_prob_ci_width_pp",
+    aipe_prob = "pred_aipe_prob"
   )
   fill_lbl <- switch(
     metric,
     power = "Predicted\nPower",
     ci_width = sprintf("CI\n(%s)", x$spec$scale),
-    prob_ci_width_pp = "CI\n(pp)"
+    prob_ci_width_pp = "CI\n(pp)",
+    aipe_prob = "Predicted\nWidth Attainment"
   )
 
   ux <- sort(unique(surf$n_subj))
@@ -781,7 +977,7 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
     coord_expand <- TRUE
   }
 
-  if (metric == "power") {
+  if (metric %in% c("power", "aipe_prob")) {
     p <- p + ggplot2::scale_fill_viridis_c(
       name = fill_lbl,
       limits = c(0, 1),
@@ -797,27 +993,29 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
   }
 
   if (length(unique(surf$n_subj)) > 1L && length(unique(surf$n_item)) > 1L) {
-    p_rng <- range(surf$pred_power, na.rm = TRUE)
-    gen_brks <- setdiff(seq(0.20, 0.95, by = 0.10), x$spec$power_min)
-    gen_brks <- gen_brks[gen_brks > p_rng[1L] & gen_brks < p_rng[2L]]
-    if (length(gen_brks) > 0L) {
-      p <- p + ggplot2::geom_contour(
-        ggplot2::aes(z = .data$pred_power),
-        breaks = gen_brks,
-        color = "white",
-        alpha = 0.55,
-        linewidth = 0.45
-      )
-    }
+    if (any(is.finite(surf$pred_power))) {
+      p_rng <- range(surf$pred_power, na.rm = TRUE)
+      gen_brks <- setdiff(seq(0.20, 0.95, by = 0.10), x$spec$power_min)
+      gen_brks <- gen_brks[gen_brks > p_rng[1L] & gen_brks < p_rng[2L]]
+      if (length(gen_brks) > 0L) {
+        p <- p + ggplot2::geom_contour(
+          ggplot2::aes(z = .data$pred_power),
+          breaks = gen_brks,
+          color = "white",
+          alpha = 0.55,
+          linewidth = 0.45
+        )
+      }
 
-    if (x$spec$criterion %in% c("power", "both") &&
-        x$spec$power_min > p_rng[1L] && x$spec$power_min < p_rng[2L]) {
-      p <- p + ggplot2::geom_contour(
-        ggplot2::aes(z = .data$pred_power),
-        breaks = x$spec$power_min,
-        color = "#ffffff",
-        linewidth = 1.25
-      )
+      if (x$spec$criterion %in% c("power", "both") &&
+          x$spec$power_min > p_rng[1L] && x$spec$power_min < p_rng[2L]) {
+        p <- p + ggplot2::geom_contour(
+          ggplot2::aes(z = .data$pred_power),
+          breaks = x$spec$power_min,
+          color = "#ffffff",
+          linewidth = 1.25
+        )
+      }
     }
 
     if (x$spec$criterion %in% c("joint", "rope")) {
@@ -868,6 +1066,17 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
     )
   }
 
+  has_null <- can_define_null_target(x$spec)
+  att_sub <- if (has_null && is.finite(opt$power)) {
+    sprintf("Power = %.1f%% [%.1f, %.1f]", opt$power * 100, opt$power_mc_lo * 100, opt$power_mc_hi * 100)
+  } else if (!is.na(opt$aipe_prob)) {
+    sprintf("Width attainment = %.1f%% [%.1f, %.1f]", opt$aipe_prob * 100, opt$aipe_mc_lo * 100, opt$aipe_mc_hi * 100)
+  } else if (!is.na(opt$rope_excl_prob)) {
+    sprintf("ROPE excl. = %.1f%% [%.1f, %.1f]", opt$rope_excl_prob * 100, opt$rope_mc_lo * 100, opt$rope_mc_hi * 100)
+  } else {
+    sprintf("Valid = %.1f%%", opt$valid_rate * 100)
+  }
+
   p <- p +
     ggplot2::geom_point(
       data = ev,
@@ -901,10 +1110,9 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
         x$spec$effect_input, toupper(opt$decision_status)
       ),
       subtitle = sprintf(
-        "Selected candidate (%s): N_subj = %d, N_item = %d | Power = %.1f%% [%.1f, %.1f] | CI = %.2f pp",
+        "Selected candidate (%s): N_subj = %d, N_item = %d | %s | CI = %.2f pp",
         x$prefer, opt$n_subj, opt$n_item,
-        opt$power * 100, opt$power_mc_lo * 100, opt$power_mc_hi * 100,
-        opt$prob_ci_width_mean_pp
+        att_sub, opt$prob_ci_width_mean_pp
       ),
       x = sprintf("Number of Subjects (N_subj, multiples of %d)", x$spec$dgp$design$k_subj),
       y = sprintf("Number of Items (N_item, multiples of %d)", x$spec$dgp$design$k_item),
@@ -949,19 +1157,22 @@ plot_surface_3d <- function(x, metric = "power") {
     metric,
     power = "pred_power",
     ci_width = "pred_ci_width",
-    prob_ci_width_pp = "pred_prob_ci_width_pp"
+    prob_ci_width_pp = "pred_prob_ci_width_pp",
+    aipe_prob = "pred_aipe_prob"
   )
   z_title <- switch(
     metric,
     power = "Power",
     ci_width = sprintf("CI Width (%s)", x$spec$scale),
-    prob_ci_width_pp = "CI Width (pp)"
+    prob_ci_width_pp = "CI Width (pp)",
+    aipe_prob = "Width Attainment"
   )
 
   Z_mat <- matrix(NA_real_, nrow = length(i_vals), ncol = length(s_vals))
   Tr_mat <- matrix(NA_integer_, nrow = length(i_vals), ncol = length(s_vals))
   W_pp_mat <- matrix(NA_real_, nrow = length(i_vals), ncol = length(s_vals))
   P_mat <- matrix(NA_real_, nrow = length(i_vals), ncol = length(s_vals))
+  A_mat <- matrix(NA_real_, nrow = length(i_vals), ncol = length(s_vals))
 
   r_ix <- match(surf$n_item, i_vals)
   c_ix <- match(surf$n_subj, s_vals)
@@ -969,17 +1180,26 @@ plot_surface_3d <- function(x, metric = "power") {
   Tr_mat[cbind(r_ix, c_ix)] <- surf$n_trials_scheduled
   W_pp_mat[cbind(r_ix, c_ix)] <- surf$pred_prob_ci_width_pp
   P_mat[cbind(r_ix, c_ix)] <- surf$pred_power
+  A_mat[cbind(r_ix, c_ix)] <- surf$pred_aipe_prob
 
   key_mat <- outer(i_vals, s_vals, function(ii, ss) paste(ss, ii))
   idx_mat <- match(key_mat, paste(surf$n_subj, surf$n_item))
+  has_null <- can_define_null_target(x$spec)
+  rate_line <- if (has_null) {
+    sprintf("Power: %.1f%%<br>", as.numeric(P_mat) * 100)
+  } else if (any(is.finite(A_mat))) {
+    sprintf("Width Attainment: %.1f%%<br>", as.numeric(A_mat) * 100)
+  } else {
+    rep("", length(idx_mat))
+  }
 
   hover_txt <- matrix(
     sprintf(
-      "N_subj: %d<br>N_item: %d<br>Sched. Trials: %s<br>Power: %.1f%%<br>CI Width: %.2f pp",
+      "N_subj: %d<br>N_item: %d<br>Sched. Trials: %s<br>%sCI Width: %.2f pp",
       surf$n_subj[idx_mat],
       surf$n_item[idx_mat],
       format(as.numeric(Tr_mat), big.mark = ","),
-      as.numeric(P_mat) * 100,
+      rate_line,
       as.numeric(W_pp_mat)
     ),
     nrow = length(i_vals),
@@ -990,10 +1210,13 @@ plot_surface_3d <- function(x, metric = "power") {
     metric,
     power = opt$power,
     ci_width = opt$ci_width_mean,
-    prob_ci_width_pp = opt$prob_ci_width_mean_pp
+    prob_ci_width_pp = opt$prob_ci_width_mean_pp,
+    aipe_prob = opt$aipe_prob
   )
   thr_val <- if (metric == "power") {
     x$spec$power_min
+  } else if (metric == "aipe_prob") {
+    x$spec$ci_assurance
   } else if (metric == "ci_width") {
     x$spec$ci_width
   } else if (x$spec$scale == "pp") {
@@ -1009,17 +1232,20 @@ plot_surface_3d <- function(x, metric = "power") {
       z = Z_mat,
       text = hover_txt,
       hoverinfo = "text",
-      colorscale = if (metric == "power") "Viridis" else "Magma",
+      colorscale = if (metric %in% c("power", "aipe_prob")) "Viridis" else "Magma",
       opacity = 0.90,
       name = z_title
-    ) |>
-    plotly::add_markers(
-      x = opt$n_subj,
-      y = opt$n_item,
-      z = z_opt,
-      marker = list(size = 7, color = "#ef4444", symbol = "diamond"),
-      name = sprintf("Selected candidate (%d, %d)", opt$n_subj, opt$n_item)
     )
+  if (length(z_opt) == 1L && is.finite(z_opt)) {
+    fig <- fig |>
+      plotly::add_markers(
+        x = opt$n_subj,
+        y = opt$n_item,
+        z = z_opt,
+        marker = list(size = 7, color = "#ef4444", symbol = "diamond"),
+        name = sprintf("Selected candidate (%d, %d)", opt$n_subj, opt$n_item)
+      )
+  }
 
   if (!is.null(thr_val) && is.finite(thr_val)) {
     Plane_mat <- matrix(thr_val, nrow = length(i_vals), ncol = length(s_vals))
@@ -1135,8 +1361,15 @@ report_plan <- function(x, print_output = TRUE) {
   unit_lbl <- switch(sp$scale, logit = "logit", pp = "percentage points", prob = "probability units")
 
   one_cell <- des$n_cells == 1L
-  absolute_target <- !can_define_null_target(sp)
-  prob_label <- if (one_cell || absolute_target) "accuracy" else "accuracy difference"
+  no_null_target <- !can_define_null_target(sp)
+  p_kind <- prob_target_kind(sp)
+  is_abs_prob <- identical(p_kind, "absolute")
+  prob_label <- switch(
+    p_kind,
+    absolute = "accuracy",
+    difference = "accuracy difference",
+    weighted_contrast = "weighted accuracy contrast"
+  )
   details <- character()
   if (!is.null(x$search_meta$n_grid_verified)) {
     total <- x$search_meta$n_grid_total
@@ -1159,7 +1392,7 @@ report_plan <- function(x, print_output = TRUE) {
   if (identical(x$search_meta$mc_adjustment, "bonferroni") &&
       !is.null(x$search_meta$mc_conf_level_effective)) {
     details <- c(details, sprintf(
-      "Stage-2 Wilson intervals used Bonferroni multiplicity adjustment across %d verified decisions (per-decision level %.2f%%).",
+      "Stage-2 Wilson intervals used Bonferroni multiplicity adjustment across %d verified decisions (initial Stage-2 level %.2f%%).",
       as.integer(x$search_meta$n_stage2_decisions),
       100 * x$search_meta$mc_conf_level_effective
     ))
@@ -1211,15 +1444,23 @@ report_plan <- function(x, print_output = TRUE) {
         cov_summary
       ))
     } else {
+      null_st_rep <- probability_contrast_null_status(sp$dgp, sp$contrast_weights, sp$scale, sp$prob_estimand)
+      no_null_reason <- if (is_abs_prob) {
+        "no zero-difference null applies to an absolute probability target"
+      } else if (identical(null_st_rep$kind, "numerical_boundary")) {
+        "a zero-contrast null lies beyond reliable double-precision calibration for these extreme relative weights"
+      } else {
+        "zero lies outside the attainable range of this weighted probability contrast"
+      }
       details <- c(details, sprintf(
-        "Target attainment status reflects only the specified precision target and does not verify inferential validity (Stage-2 coverage was %s; no zero-difference null applies to an absolute probability target). Confirm interval coverage and width attainment in independent simulations at the selected design with validate_design_point().",
-        cov_summary
+        "Target attainment status reflects only the specified precision target and does not verify inferential validity (Stage-2 coverage was %s; %s). Confirm interval coverage and width attainment in independent simulations at the selected design with validate_design_point().",
+        cov_summary, no_null_reason
       ))
     }
   }
   if (!is.null(des$items_per_subject)) {
     details <- c(details, sprintf(
-      "Each participant is assigned %2$d distinct items from a bank of %1$d (allocation seed %3$d).",
+      "Each participant is assigned %2$d distinct items from a bank of %1$d (allocation seed %3$d); reported operating characteristics and validate_design_point() condition on this fixed schedule (vary item_seed across scenarios if item subsets will be re-randomized at execution).",
       opt$n_item, des$items_per_subject, des$item_seed))
   }
   if (dropout_rate(des) > 0 && !is.null(opt$n_subj_expected)) {
@@ -1309,8 +1550,14 @@ report_plan <- function(x, print_output = TRUE) {
       "%s, and mean %s interval width was %.2f percentage points (%.3f logit)."),
       opt$n_subj, opt$n_item, opt$decision_status, opt$nsim, infeas_att, prob_label, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean)
     if (!is.null(x$robust)) {
-      txt <- paste(txt,
-        "The all-scenario sample-size increment is undetermined.")
+      if (isTRUE(x$robust$schedules_differ)) {
+        txt <- paste(txt, sprintf(
+          "Scheduled trials at this candidate by scenario: %s. The all-scenario sample-size increment is undetermined.",
+          format_scenario_counts(x$robust$robust_trials_by_scenario)
+        ))
+      } else {
+        txt <- paste(txt, "The all-scenario sample-size increment is undetermined.")
+      }
     }
     txt <- paste(c(txt, details), collapse = " ")
     if (print_output) {
@@ -1340,32 +1587,42 @@ report_plan <- function(x, print_output = TRUE) {
   }
 
   sens_txt <- ""
-  if (!is.null(x$sensitivity) && nrow(x$sensitivity) >= 3L) {
+  if (!is.null(x$sensitivity) && nrow(x$sensitivity) >= 2L) {
     s <- x$sensitivity
-    p_opt <- s$effective_power[s$scenario == "optimistic"]
-    p_con <- s$effective_power[s$scenario == "conservative"]
-    w_opt <- s$prob_ci_width_mean_pp[s$scenario == "optimistic"]
-    w_con <- s$prob_ci_width_mean_pp[s$scenario == "conservative"]
-    sens_txt <- sprintf(
-      " Across three random-slope sensitivity levels (0.70x optimistic to 1.35x conservative), effective power ranged from %.1f%% to %.1f%% (mean CI width: %.2f to %.2f percentage points).",
-      min(p_con, p_opt) * 100, max(p_con, p_opt) * 100,
-      min(w_opt, w_con), max(w_opt, w_con)
-    )
-  }
-
-  if (absolute_target && !is.null(x$sensitivity)) {
-    sens_txt <- sprintf(" Across three random-slope sensitivity levels, mean CI width ranged from %.2f to %.2f percentage points.",
-      min(w_opt, w_con), max(w_opt, w_con))
+    w_all <- s$prob_ci_width_mean_pp[is.finite(s$prob_ci_width_mean_pp)]
+    lvl_word <- if (nrow(s) == 3L) "three" else as.character(nrow(s))
+    if (length(w_all) > 0L) {
+      if (no_null_target) {
+        sens_txt <- sprintf(
+          " Across %s random-slope sensitivity levels, mean CI width ranged from %.2f to %.2f percentage points.",
+          lvl_word, min(w_all), max(w_all)
+        )
+      } else {
+        p_all <- s$effective_power[is.finite(s$effective_power)]
+        if (length(p_all) > 0L) {
+          sens_txt <- sprintf(
+            " Across %s random-slope sensitivity levels (0.70x optimistic to 1.35x conservative), effective power ranged from %.1f%% to %.1f%% (mean CI width: %.2f to %.2f percentage points).",
+            lvl_word, min(p_all) * 100, max(p_all) * 100,
+            min(w_all), max(w_all)
+          )
+        }
+      }
+    }
   }
 
   rob_txt <- ""
   if (!is.null(x$robust)) {
     rc <- x$robust
+    rob_trials_clause <- if (isTRUE(rc$schedules_differ)) {
+      sprintf("scheduled trials at the robust design by scenario: %s", format_scenario_counts(rc$robust_trials_by_scenario))
+    } else {
+      sprintf("%+d scheduled trials", rc$delta_trials)
+    }
     rob_txt <- sprintf(
-      " Compared against the standard-assumption plan (`%s`: N_subj = %d, N_item = %d, %s scheduled trials), ensuring robustness across all evaluated scenarios required %+d participants and %+d items (%+d scheduled trials).",
+      " Compared against the standard-assumption plan (`%s`: N_subj = %d, N_item = %d, %s scheduled trials), ensuring robustness across all evaluated scenarios required %+d participants and %+d items (%s).",
       rc$standard_scenario, rc$optimal_standard$n_subj, rc$optimal_standard$n_item,
       format(rc$optimal_standard$n_trials_scheduled, big.mark = ","),
-      rc$delta_subj, rc$delta_item, rc$delta_trials
+      rc$delta_subj, rc$delta_item, rob_trials_clause
     )
   }
 
@@ -1416,18 +1673,45 @@ report_plan <- function(x, print_output = TRUE) {
   } else {
     sprintf("singular-fit rate = %.1f%%", opt$singular_rate * 100)
   }
-  if (absolute_target) crit_att <- sub(" [(]power = [^)]*[)]", "", crit_att)
+  if (no_null_target) crit_att <- sub(" [(]power = [^)]*[)]", "", crit_att)
+  opt_mc_lvl <- if ("mc_conf_level_used" %in% names(opt) &&
+                    length(opt$mc_conf_level_used) == 1L &&
+                    is.finite(opt$mc_conf_level_used)) {
+    opt$mc_conf_level_used
+  } else if (!is.null(x$search_meta$mc_conf_level_effective) &&
+             is.finite(x$search_meta$mc_conf_level_effective)) {
+    x$search_meta$mc_conf_level_effective
+  } else {
+    sp$mc_conf_level
+  }
+  opt_mc_pct <- 100 * opt_mc_lvl
+  opt_mc_str <- if (abs(opt_mc_pct - round(opt_mc_pct)) < 1e-6) {
+    sprintf("%.0f%%", opt_mc_pct)
+  } else {
+    sprintf("%.2f%%", opt_mc_pct)
+  }
   mc_clause <- sprintf(
-    "Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (valid-fit conditional power = %s across %.1f%% strictly converged replications; %s).",
-    sp$mc_conf_level * 100, toupper(opt$decision_status),
+    "Monte Carlo decision status (Morris et al., 2019; %s Wilson CI) was `%s`: %s (valid-fit conditional power = %s across %.1f%% strictly converged replications; %s).",
+    opt_mc_str, toupper(opt$decision_status),
     crit_att,
     fmt_pct_or_na(opt$conditional_power),
     opt$valid_rate * 100, sing_clause
   )
 
-  if (absolute_target) {
-    mc_clause <- sprintf("Monte Carlo decision status (Morris et al., 2019; %.0f%% Wilson CI) was `%s`: %s (%.1f%% strictly converged replications; %s).",
-      sp$mc_conf_level * 100, toupper(opt$decision_status), crit_att, opt$valid_rate * 100, sing_clause)
+  if (no_null_target) {
+    mc_clause <- sprintf("Monte Carlo decision status (Morris et al., 2019; %s Wilson CI) was `%s`: %s (%.1f%% strictly converged replications; %s).",
+      opt_mc_str, toupper(opt$decision_status), crit_att, opt$valid_rate * 100, sing_clause)
+  }
+
+  sched_clause <- if (!is.null(x$robust) && isTRUE(x$robust$schedules_differ)) {
+    sprintf("scheduled trials by scenario: %s", format_scenario_counts(x$robust$robust_trials_by_scenario))
+  } else {
+    sprintf("%s scheduled trials", format(opt$n_trials_scheduled, big.mark = ","))
+  }
+  exp_clause <- if (!is.null(x$robust) && isTRUE(x$robust$expected_differ) && !is.null(x$robust$robust_expected_by_scenario)) {
+    sprintf("expected post-attrition observations by scenario: %s", format_scenario_counts(x$robust$robust_expected_by_scenario))
+  } else {
+    sprintf("%s expected post-attrition observations", format(opt$n_trials_expected, big.mark = ","))
   }
 
   txt <- paste0(
@@ -1440,17 +1724,17 @@ report_plan <- function(x, print_output = TRUE) {
     sprintf(
       "Expected marginal cell accuracies (%s) corresponded to a focal `%s` %s %s of %s (calibrated conditional beta = %.3f logit via %d-node Gauss-Hermite quadrature%s). Random-effect SDs were %s for participants and %s for items.\n\n",
       cell_str, sp$effect_input, sp$prob_estimand, prob_label,
-      if (one_cell || absolute_target) sprintf("%.2f%%", sp$true_prob_diff_pp) else sprintf("%+.2f percentage points", sp$true_prob_diff_pp),
+      if (is_abs_prob) sprintf("%.2f%%", sp$true_prob_diff_pp) else sprintf("%+.2f percentage points", sp$true_prob_diff_pp),
       sp$true_beta, dgp$n_quad, chance,
       fmt_re_sds(dgp$tau_subj),
       fmt_re_sds(dgp$tau_item)
     ),
     sprintf(
-      "Targeting %s under `%s` failure accounting (`%s` engine, `%s` search, `prefer = \"%s\"`, %d Stage-2 replications), the recommended balanced design was N_subj = %d participants and N_item = %d items (%s scheduled trials; %s expected post-attrition observations). %s Mean interval width for the %s %s was %.2f percentage points (%.3f logit; %s = %s).%s%s%s\n",
+      "Targeting %s under `%s` failure accounting (`%s` engine, `%s` search, `prefer = \"%s\"`, %d Stage-2 replications), the recommended balanced design was N_subj = %d participants and N_item = %d items (%s; %s). %s Mean interval width for the %s %s was %.2f percentage points (%.3f logit; %s = %s).%s%s%s\n",
       crit, sp$failure_policy, sp$engine, x$search_meta$method, x$prefer, opt$nsim,
       opt$n_subj, opt$n_item,
-      format(opt$n_trials_scheduled, big.mark = ","),
-      format(opt$n_trials_expected, big.mark = ","),
+      sched_clause,
+      exp_clause,
       mc_clause, sp$prob_estimand, prob_label, opt$prob_ci_width_mean_pp,
       opt$logit_ci_width_mean, cov_lbl, fmt_pct_or_na(cov_val),
       pareto_txt, rob_txt, sens_txt

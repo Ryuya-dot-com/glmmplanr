@@ -91,12 +91,22 @@ fit_monotone_gp_prob <- function(
   s_vals <- sort(unique(grid_df$n_subj))
   i_vals <- sort(unique(grid_df$n_item))
 
+  if (n_obs == 0L) {
+    return(list(
+      mean_prob = rep(NA_real_, nrow(grid_df)),
+      sd_probit = rep(1.0, nrow(grid_df)),
+      mean_probit = rep(0.0, nrow(grid_df)),
+      n_ref = NA_real_
+    ))
+  }
   if (n_obs < 3L) {
-    p_bar <- if (n_obs > 0L) mean(ev[[prob_col]]) else 0.5
+    p_bar <- mean(ev[[prob_col]])
+    n_med <- stats::median(pmax(ev[[nsim_col]], 5))
     return(list(
       mean_prob = rep(p_bar, nrow(grid_df)),
       sd_probit = rep(1.0, nrow(grid_df)),
-      mean_probit = rep(stats::qnorm(pmin(pmax(p_bar, 0.01), 0.99)), nrow(grid_df))
+      mean_probit = rep(stats::qnorm(pmin(pmax(p_bar, 0.01), 0.99)), nrow(grid_df)),
+      n_ref = n_med
     ))
   }
 
@@ -149,8 +159,17 @@ fit_monotone_gp_prob <- function(
   list(
     mean_probit = mono_probit,
     sd_probit = pmax(gp_pred$sd, 0.015),
-    mean_prob = stats::pnorm(mono_probit)
+    mean_prob = stats::pnorm(mono_probit),
+    n_ref = stats::median(n_i)
   )
+}
+
+smooth_prob_threshold <- function(p, n_ref = NA_real_) {
+  if (!is.finite(n_ref) || n_ref <= 0) {
+    return(min(max(p, 0.005), 0.995))
+  }
+  p_sm <- (p * n_ref + 0.75) / (n_ref + 1.5)
+  min(max(p_sm, 0.005), 0.995)
 }
 
 #' Fit a Monotone GP Surrogate for Expected 95% CI Width
@@ -161,8 +180,11 @@ fit_monotone_gp_width <- function(eval_df, grid_df, width_col = "ci_width_mean")
   s_vals <- sort(unique(grid_df$n_subj))
   i_vals <- sort(unique(grid_df$n_item))
 
+  if (nrow(ev) == 0L) {
+    return(list(mean_width = rep(NA_real_, nrow(grid_df)), sd_logw = rep(0.2, nrow(grid_df))))
+  }
   if (nrow(ev) < 3L) {
-    w_bar <- if (nrow(ev) > 0L) mean(ev[[width_col]]) else 1.0
+    w_bar <- mean(ev[[width_col]])
     return(list(mean_width = rep(w_bar, nrow(grid_df)), sd_logw = rep(0.2, nrow(grid_df))))
   }
 
@@ -212,23 +234,55 @@ fit_monotone_gp_width <- function(eval_df, grid_df, width_col = "ci_width_mean")
 
 fit_nonneg_slope_wls <- function(H, y, w) {
   p <- ncol(H)
-  obj <- function(b) {
-    r <- y - as.numeric(H %*% b)
-    0.5 * sum(w * (r^2)) + 1e-4 * sum(b[-1L]^2)
+  w_sum <- sum(w)
+  if (!is.finite(w_sum) || w_sum <= 0) {
+    return(c(mean(y), rep(0.0, max(0L, p - 1L))))
   }
-  gr <- function(b) {
-    r <- y - as.numeric(H %*% b)
-    g <- -as.numeric(crossprod(H, w * r))
-    g[-1L] <- g[-1L] + 2e-4 * b[-1L]
-    g
+  y_bar <- sum(w * y) / w_sum
+  if (p <= 1L) {
+    return(y_bar)
   }
-  init <- c(stats::weighted.mean(y, w), rep(0.1, p - 1L))
-  lo <- c(-Inf, rep(0, p - 1L))
-  opt <- stats::optim(
-    par = init, fn = obj, gr = gr,
-    method = "L-BFGS-B", lower = lo
-  )
-  opt$par
+  q <- p - 1L
+  H_sl <- H[, -1L, drop = FALSE]
+  h_bar <- as.numeric(crossprod(H_sl, w)) / w_sum
+  H_c <- sweep(H_sl, 2L, h_bar, "-")
+  y_c <- y - y_bar
+  A <- crossprod(H_c, H_c * w) + diag(2e-4, nrow = q, ncol = q)
+  rhs <- as.numeric(crossprod(H_c, w * y_c))
+
+  best_b <- rep(0.0, q)
+  best_val <- 0.0
+  if (q <= 12L) {
+    n_masks <- bitwShiftL(1L, q) - 1L
+    for (mask in seq_len(n_masks)) {
+      S <- which(as.logical(intToBits(mask)[seq_len(q)]))
+      ch <- tryCatch(chol(A[S, S, drop = FALSE]), error = function(e) NULL)
+      if (is.null(ch)) next
+      b_S <- backsolve(ch, forwardsolve(t(ch), rhs[S]))
+      if (any(!is.finite(b_S)) || any(b_S < -1e-10)) next
+      b_S <- pmax(b_S, 0.0)
+      b_cand <- rep(0.0, q)
+      b_cand[S] <- b_S
+      val <- 0.5 * sum(b_cand * as.numeric(A %*% b_cand)) - sum(rhs * b_cand)
+      if (is.finite(val) && val < best_val) {
+        best_val <- val
+        best_b <- b_cand
+      }
+    }
+  } else {
+    # Projected coordinate descent fallback for high-dimensional bases
+    d_A <- pmax(diag(A), 2e-4)
+    for (iter in seq_len(200L)) {
+      b_prev <- best_b
+      for (j in seq_len(q)) {
+        r_j <- rhs[j] - sum(A[j, -j] * best_b[-j])
+        best_b[j] <- max(0.0, r_j / d_A[j])
+      }
+      if (max(abs(best_b - b_prev)) < 1e-12) break
+    }
+  }
+  b0 <- y_bar - sum(h_bar * best_b)
+  c(b0, best_b)
 }
 
 matern52_cov <- function(U1, U2, sigma_f, l1, l2) {
@@ -240,7 +294,8 @@ matern52_cov <- function(U1, U2, sigma_f, l1, l2) {
 }
 
 fit_predict_matern52 <- function(U_obs, y_resid, noise_var, U_pred, H_obs = NULL, H_pred = NULL) {
-  sd_emp <- max(stats::sd(y_resid), 0.08)
+  sd_r <- stats::sd(y_resid)
+  sd_emp <- max(if (is.finite(sd_r)) sd_r else 0.0, 0.08)
 
   neg_log_marg_lik <- function(par) {
     sf <- exp(par[1L])
@@ -253,15 +308,20 @@ fit_predict_matern52 <- function(U_obs, y_resid, noise_var, U_pred, H_obs = NULL
     alpha <- backsolve(ch, forwardsolve(t(ch), y_resid))
     logdet <- 2 * sum(log(diag(ch)))
     prior_pen <- 0.5 * ((par[2L] - log(0.45))^2 + (par[3L] - log(0.45))^2)
-    0.5 * sum(y_resid * alpha) + 0.5 * logdet + prior_pen
+    val <- 0.5 * sum(y_resid * alpha) + 0.5 * logdet + prior_pen
+    if (!is.finite(val)) 1e10 else val
   }
 
-  opt <- stats::optim(
-    par = c(log(sd_emp), log(0.45), log(0.45)),
-    fn = neg_log_marg_lik,
-    method = "L-BFGS-B",
-    lower = c(log(0.01), log(0.12), log(0.12)),
-    upper = c(log(3.0), log(3.0), log(3.0))
+  init_par <- c(log(sd_emp), log(0.45), log(0.45))
+  opt <- tryCatch(
+    stats::optim(
+      par = init_par,
+      fn = neg_log_marg_lik,
+      method = "L-BFGS-B",
+      lower = c(log(0.01), log(0.12), log(0.12)),
+      upper = c(log(3.0), log(3.0), log(3.0))
+    ),
+    error = function(e) list(par = init_par)
   )
 
   sf <- exp(opt$par[1L])
@@ -350,6 +410,14 @@ project_2d_monotone_grid <- function(
   sgn * X[cbind(r_idx, c_idx)]
 }
 
+min_positive_step <- function(u) {
+  vals <- sort(unique(u[is.finite(u)]))
+  if (length(vals) <= 1L) return(1.0)
+  diffs <- diff(vals)
+  pos <- diffs[diffs > 1e-12]
+  if (!length(pos)) 1.0 else min(pos)
+}
+
 #' Compute Sample-Size Effort Score for `prefer` Ranking
 #' @noRd
 compute_preference_score <- function(
@@ -359,14 +427,59 @@ compute_preference_score <- function(
   prefer <- match.arg(prefer)
   u_s <- normalize_unit(grid_df$n_subj)
   u_i <- normalize_unit(grid_df$n_item)
-  u_t <- normalize_unit(grid_df$n_trials_scheduled)
+  trials_col <- if ("n_trials_scheduled_max" %in% names(grid_df)) {
+    "n_trials_scheduled_max"
+  } else {
+    "n_trials_scheduled"
+  }
+  u_t <- normalize_unit(grid_df[[trials_col]])
+
+  eps_s <- min(0.02, 0.25 * min_positive_step(u_s))
+  eps_i <- min(0.02, 0.25 * min_positive_step(u_i))
+  eps_t <- min(0.02, 0.25 * min_positive_step(u_t))
 
   switch(
     prefer,
     balanced = sqrt(0.5 * (u_s^2 + u_i^2)) + 0.01 * u_t,
-    fewer_subj = u_s + 0.02 * u_i,
-    fewer_items = u_i + 0.02 * u_s,
-    fewer_trials = u_t + 0.02 * sqrt(0.5 * (u_s^2 + u_i^2))
+    fewer_subj = u_s + eps_s * u_i,
+    fewer_items = u_i + eps_i * u_s,
+    fewer_trials = u_t + eps_t * sqrt(0.5 * (u_s^2 + u_i^2))
+  )
+}
+
+preference_order <- function(
+  df,
+  prefer = NULL,
+  tie1 = NULL,
+  tie2 = NULL
+) {
+  n <- nrow(df)
+  if (n <= 1L) return(seq_len(n))
+  t1 <- if (is.null(tie1)) rep(0.0, n) else ifelse(is.na(tie1), Inf, tie1)
+  t2 <- if (is.null(tie2)) rep(0.0, n) else ifelse(is.na(tie2), Inf, tie2)
+  pref_sc <- if ("preference_score" %in% names(df)) {
+    ifelse(is.na(df$preference_score), Inf, df$preference_score)
+  } else {
+    rep(0.0, n)
+  }
+  tr_max <- if ("n_trials_scheduled_max" %in% names(df)) {
+    df$n_trials_scheduled_max
+  } else if ("n_trials_scheduled" %in% names(df)) {
+    df$n_trials_scheduled
+  } else {
+    as.numeric(df$n_subj) * as.numeric(df$n_item)
+  }
+  tr_mean <- if ("n_trials_scheduled_mean" %in% names(df)) df$n_trials_scheduled_mean else tr_max
+  if (is.null(prefer)) {
+    return(order(pref_sc, t1, t2, df$n_subj, df$n_item))
+  }
+  prefer <- match.arg(prefer, c("balanced", "fewer_subj", "fewer_items", "fewer_trials"))
+  switch(
+    prefer,
+    fewer_subj = order(df$n_subj, df$n_item, tr_max, t1, t2),
+    fewer_items = order(df$n_item, df$n_subj, tr_max, t1, t2),
+    fewer_trials = order(tr_max, tr_mean, pref_sc, df$n_subj, df$n_item, t1, t2),
+    balanced = order(pref_sc, tr_max, df$n_subj, df$n_item, t1, t2)
   )
 }
 
@@ -380,7 +493,8 @@ compute_surrogate_acquisition <- function(
   gp_rope,
   evaluated_mask,
   prefer = "balanced",
-  gp_joint = NULL
+  gp_joint = NULL,
+  gp_valid = NULL
 ) {
   if (spec$criterion %in% c("joint", "power")) {
     if (spec$criterion == "joint") gp_power <- gp_joint
@@ -402,6 +516,15 @@ compute_surrogate_acquisition <- function(
     thr <- stats::qnorm(spec$power_min)
     p_feas <- stats::pnorm((gp_rope$mean_probit - thr) / gp_rope$sd_probit)
     unc <- gp_rope$sd_probit
+  }
+
+  if (identical(spec$failure_policy, "conditional") &&
+      !is.null(gp_valid) && any(is.finite(gp_valid$mean_prob))) {
+    n_ref_v <- if (!is.null(gp_valid$n_ref)) gp_valid$n_ref else NA_real_
+    thr_v <- stats::qnorm(smooth_prob_threshold(spec$min_valid_rate, n_ref_v))
+    pf_v <- stats::pnorm((gp_valid$mean_probit - thr_v) / gp_valid$sd_probit)
+    p_feas <- p_feas * pf_v
+    unc <- 0.5 * (unc + gp_valid$sd_probit)
   }
 
   eff_score <- compute_preference_score(grid_df, prefer = prefer)

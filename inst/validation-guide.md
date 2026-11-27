@@ -85,20 +85,57 @@ coverage and precision remain meaningful. Reports distinguish accuracy from
 an accuracy difference, rather than interpreting an interval above 0% as power.
 
 Custom `data_fn` responses must use positive integer subject, item and cell IDs
-within the schedule. For testlets, omitted passage IDs are recovered from the
+within the schedule (when `subj_id` or `item_id` is omitted, character/factor
+`subj` and `item` labels are matched against `schedule$trials` rather than
+re-numbered within observed rows). Experimental factor names cannot use
+reserved internal schedule or formula identifiers (`subj_id`, `item_id`,
+`testlet_id`, etc.), positive integer sample-size ranges and `testlet_size` /
+`items_per_subject` counts are validated before coercion, and schedules passed to
+`simulate_dgp_data()` must match `dgp$design`'s factor levels, cell ordering,
+testlet structure, allocation (`crossed`, `latin_square`, `between_subj`,
+`between_item`), `items_per_subject`, trial counts, per-subject item quotas,
+distinct within-pair conditions (`(subj_id, item_id, cell_id)`), and
+between/within-unit balance. Named random-effect SD vectors (`subj_sd`,
+`item_sd`, `testlet_sd`, `slope_sd_ratio`) and named correlation matrices in
+`calibrate_dgp()` are aligned by random-effect column or single-df term name
+rather than position, `mafc_binomial()` uses IEEE-754 machine-precision bounds
+strictly inside `(chance, 1)` rather than fixed `1e-6` / `1e-10` clamping, and
+`cell_probs_from_diffs()` rejects duplicate, conflicting, or `"(Intercept)"`
+specifications. Parallel `mirai` execution verifies that all active daemons load
+the exact `.glmmplanr_source_md5` build of the parent session before returning
+results, and `simulation_version = 5L` ensures `topup_verification()` blocks and
+`switch_preference()` warns when re-ranking incompatible pre-v5 saved candidate
+tables (including `simulation_version = 4` positive-`chance` plans). Under `failure_policy = "conditional"`, `n_valid == 0` returns
+`NA` for conditional rates, `power_mcse`, and Wilson intervals while keeping
+effective rates at `0` (`fail`); `ci_width_q80` remains fixed at the 80th
+percentile alongside `ci_width_q_assurance` at `ci_assurance`; `as_gt()`
+displays ROPE exclusion rates for `criterion = "rope"` plans and aborts if
+uncomputed `"sensitivity"` or `"robust"` tables are requested; and validation
+figures plot `"planned"` rows with verified zero truth as `"Type I error"`
+against `alpha`. For testlets, omitted passage IDs are recovered from the
 scheduled item mapping; supplied labels/IDs must agree with it. Fixed-bank MML
-requires unique person-item rows and nonconstant responses for items marked
-estimable. Public fixed-bank planning still diagnoses constant/unobserved items
-and retains them as failures of a full-bank precision requirement.
+requires unique person-item rows, nonconstant responses for items marked
+estimable, and at least one participant with two or more observed responses on
+estimable items; random-item Rasch requires at least two observed participants,
+two observed items, and within-unit replication (`>= 2` observed responses) on
+at least one participant and at least one item so variance components are
+identifiable. Public Rasch planning objects retain generating DGP,
+partial-presentation (`items_per_subject`, `item_seed`) and missingness
+(`attrition`, `participant_dropout`) metadata, preserve input item names in
+`item_difficulties` and `item_summary$item_name`, diagnose constant/unobserved
+items, and retain them as failures of a full-bank precision requirement.
 
 Native GLMM polishing and derivative calculations require unmodified observed
-curvature. Failed checks return `non_pd_hessian`, `converged = FALSE` and
-`logLik = NA`; ordinary iteration nonconvergence remains a separate diagnosis.
-The additional repair leaves all 2,048 saved native fits and 84 selected
-profiles numerically unchanged from the preceding curvature repair (point/SE
-differences zero, no decision changes). This is a regression check, not new
-evidence of nominal coverage or null rejection. Details and reproduction are in
-the repository's `validation/README.md`, section `planning-contract-repair`.
+curvature, and starting intercepts initialize strictly inside the above-chance
+probability interval `[chance + 0.05(1 - chance), chance + 0.95(1 - chance)]`
+for all `chance` in `[0, 1)`. Failed curvature checks return `non_pd_hessian`,
+`converged = FALSE` and `logLik = NA`; ordinary iteration nonconvergence remains
+a separate diagnosis. A fresh isolated replay of all 2,048 saved native fits,
+168 reference fits and 84 selected profiles leaves point estimates, SEs and
+decisions numerically unchanged from the preceding curvature repair (maximum
+point/SE difference zero, no decision changes). This is a regression check, not
+new evidence of nominal coverage or null rejection. Details and reproduction are
+in the repository's `validation/README.md`, section `planning-contract-repair`.
 
 ## Focused Check of Covariance Paths
 
@@ -691,7 +728,7 @@ Built-in simulation and calibration (`calibrate_dgp()`, `simulate_dgp_data()`, `
 1. **Multivariate normal random effects**: Participant and item random intercepts and slopes are drawn from zero-mean multivariate normal distributions (`MASS`/Cholesky draws). Heavy-tailed, skewed, or mixture ability/difficulty distributions are not generated by the built-in DGP.
 2. **Shared guessing floor (`chance`) and zero upper lapse**: All items share one fixed lower asymptote $g = \text{chance}$ and an upper asymptote of $1.0$ (no item-specific guessing parameters, no 2PL/3PL discrimination heterogeneity, and no attentional lapses).
 3. **Missingness independent of ability and responses (MCAR)**: Trial-level missingness (`attrition`), whole-participant dropout (`participant_dropout`), and partial item assignment (`items_per_subject`) are sampled independently of latent random effects and trial outcomes. Ability-dependent dropout (MNAR) or adaptive routing is outside the built-in DGP.
-4. **Scope of `scenario_dgps()` and custom `data_fn` testing**: Multi-scenario planning varies effect sizes, variance components, or missingness rates *within this same parametric family*. Passing across multiple scenarios does not guarantee robustness when the structural assumptions above are violated. To stress-test structural misspecification (e.g., ability-dependent dropout or item-specific guessing) directly under your planned analysis model, pass a custom `data_fn(schedule, spec)` function to `evaluate_design_point()` or `validate_design_point()`:
+4. **Scope of `scenario_dgps()` and custom `data_fn` testing**: Multi-scenario planning varies effect sizes, variance components, or missingness rates *within this same parametric family*. Passing across multiple scenarios does not guarantee robustness when the structural assumptions above are violated. To stress-test structural misspecification (e.g., ability-dependent dropout or item-specific guessing) directly under your planned analysis model, pass a custom `data_fn(schedule, spec)` function to `evaluate_design_point()` or `validate_design_point()`. Because a custom generator can change the true marginal contrast (or depart from zero under `null_target_spec(spec)`), truth-dependent metrics (`true_target`, `coverage`, `bias`, `rmse`) default to `NA` and `null`-row detection is not labeled as nominal Type I error unless you supply the verified `true_target` on `spec$scale`:
 
 ```r
 # Example: evaluate robustness to ability-dependent (MNAR) dropout via data_fn
@@ -701,14 +738,18 @@ mnar_dropout <- function(schedule, spec) {
   keep <- as.integer(names(subj_acc)[subj_acc >= stats::quantile(subj_acc, 0.20)])
   df[df$subj_id %in% keep, , drop = FALSE]
 }
+# Detection/width/valid-fit diagnostics without assuming built-in truth:
 # evaluate_design_point(spec, n_subj = 48, n_item = 24, nsim = 100, data_fn = mnar_dropout)
+# Coverage & Type I error when true targets of the custom generator are known:
+# validate_design_point(spec, n_subj = 48, n_item = 24, nsim = 200,
+#                       data_fn = mnar_dropout, true_target = c(null = 0, planned = 10))
 ```
 
 ### Sparse responses and the limits of a converged fit
 
 Check the number of observed responses for each learner and each item. A correct or incorrect response contributes even when it is the only one recorded for that unit. In a three-choice task at chance, five independent responses are all wrong with probability $(2/3)^5 = 0.132$. With 32 responses the probability is about 0.00000232. These are upper bounds under the fitted guessing model with conditionally independent trials. A mechanism that forces a particular item to be wrong on every presentation would fall outside that model.
 
-The ceiling and the guessing floor are two different limits. Write the conditional correct probability as $p=g+(1-g)s$, with $g=1/m$ and $s=\operatorname{logit}^{-1}(\eta)$. The contribution of one binary response to expected information about $\eta$ is $[(1-g)s(1-s)]^2/[p(1-p)]$. This approaches zero near either limit. Few responses per learner, few per item, or little within-unit variation in condition can leave variances and slope correlations weakly determined. First-order Laplace approximation uses local curvature, and increasing the total trial count while keeping each unit sparse can leave appreciable approximation error. Its direction and size depend on the design. [Joe (2008)](https://doi.org/10.1016/j.csda.2008.05.002)
+The ceiling and the guessing floor are two different limits. Write the conditional correct probability as $p=g+(1-g)s$, with $g=1/m$ and $s=\operatorname{logit}^{-1}(\eta)$. The contribution of one binary response to expected information about $\eta$ is $[(1-g)s(1-s)]^2/[p(1-p)]$. This approaches zero near either limit. Few responses per learner, few per item, or little within-unit variation in condition can leave variances and slope correlations weakly determined. Cell balance and fixed-effect rank checks verify fixed-effect estimability, not variance-component identifiability: for example, fixed-item Rasch MML with a free person ability SD is unidentifiable unless at least one examinee responds to two or more estimable (non-constant) items, and `plan_rasch_fixed_bank()` marks replications violating that condition invalid. Likewise, partial-presentation evaluations (`items_per_subject`) and `validate_design_point()` condition on the fixed allocation schedule generated from `design$item_seed`; to assess robustness across re-randomized item subsets, pass multiple `design_crossed(..., item_seed = ...)` schedules via `scenario_dgps()`. First-order Laplace approximation uses local curvature, and increasing the total trial count while keeping each unit sparse can leave appreciable approximation error. Its direction and size depend on the design. [Joe (2008)](https://doi.org/10.1016/j.csda.2008.05.002)
 
 In the initial 32-dataset partial-presentation pilot (`64` people each seeing `5` of `20` items = `320` trials, between-subject, random intercepts, `chance = 0`, true marginal difference $-5$ percentage points, `29` bootstrap refits), `bayes_laplace` covered the truth in `30/32` datasets (`93.8%`, exact 95% CI `79.2–99.2%`). A subsequent pre-specified 96-dataset paired confirmation (`validation/sparse_and_testlet_recheck.R`, `99` bootstrap refits, seeds `30001–31096`) yielded `89/96` (`92.7%`, `[85.6%, 97.0%]`) planned coverage and `6/96` (`6.2%`, `[2.3%, 13.1%]`) null Type I error under `bayes_laplace` (`5/96` with `joint_delta`), closely matching `lme4::glmer` (`88/96 = 91.7%` planned coverage; `48/96` singular ML fits), while leaving the 90% floor `indeterminate` at $N = 96$. On a `64 x 24` within-unit Latin-square schedule (`8` items/person = `512` trials) with correlated random slopes (`slope_sd_ratio = 0.30`, `corr = 0.20`), `bayes_laplace` achieved `94/96`–`95/96` (`97.9–99.0%`) coverage (`2/96` null detection), whereas a between-passage testlet design with only `6` passages (`48 x 24 = 1,152` trials) suffered small-cluster Wald undercoverage under both `lme4::glmer` (`20/96 = 20.8%` null Type I error, `below_floor`) and `bayes_laplace` (`14/96 = 14.6%`), worsening further under unmodeled participant-by-passage local dependence (`SD = 0.4`, planned coverage `76.0–82.3%`, `below_floor`). Always inspect `n_valid`, coverage, and null detection from `validate_design_point()` for your specific sparse or clustered schedule, and note that `bayes_laplace` reports boundary singularity as not applicable (`NA`) because Half-$t$ priors prevent zero-variance boundary collapse even when data provide little variance information.
 
@@ -778,7 +819,13 @@ one preselected item with uniform DIF of 0.70 logits and 15 invariant
 anchors, TAM and mfrmr detected DIF in 329/384 complete and 213/384
 booklet datasets at 480 persons. The benchmark computes EAP and
 residual diagnostics from the fitted models and compares them with
-package-reported values. The glmmplanr DIF comparison uses the
+package-reported values (note that Winsteps defines separation $G = \text{True P.SD} / \text{RMSE}$,
+strata $H = (4G + 1)/3$, and separation reliability $R = G^2 / (1 + G^2) = \max(0, \text{P.SD}^2 - \text{RMSE}^2) / \text{P.SD}^2$
+using population variance $\text{P.SD}^2$ with divisor $N$ and $\text{Real SE} = \text{Model SE}\sqrt{\max(1, \text{INFIT MnSq})}$
+on direct measures, whereas marginal EAP reliability $\text{Var}(\hat{\theta}_{\text{EAP}}) / \{\text{Var}(\hat{\theta}_{\text{EAP}}) + \overline{\text{PV}}\}$
+decomposes shrunk posterior moments; `mfrmr` 0.3.2's `diagnose_mfrm()` uses sample variance $N - 1$
+and plugs misfit-inflated `RealSE` into the additive EAP denominator, departing from Winsteps's Real
+separation/reliability/strata definitions). The glmmplanr DIF comparison uses the
 validation script's Laplace GLMM. [Rasch fit, separation, and anchored DIF benchmark](https://github.com/Ryuya-dot-com/glmmplanr/tree/main/validation#4l-rasch-calibration-fit-separation-and-anchored-dif)
 
 <a id="related-packages"></a>
@@ -797,7 +844,7 @@ To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 
 | **simr** | Evaluates power via `powerSim()` and 1D `powerCurve()` from either fitted `lme4` models or synthetic `makeGlmer()` objects given an external schedule, fixed effects, and variance components. | Standard reference for canonical binomial GLMMs without pilot data when supplied with calibrated conditional parameters and explicit schedule data frames ([Green & MacLeod, 2016](https://doi.org/10.1111/2041-210X.12504); [from-scratch vignette](https://CRAN.R-project.org/package=simr/vignettes/fromscratch.html)). |
 | **mixedpower** | Computes simulation-based power for fixed effects and interactions from a fitted `lme4` model and pilot dataset; `R2power()` scans a second random factor while holding the first at a specified size. | Direct precedent for participant-by-stimulus trade-offs when pilot data and fitted `lme4` models are available ([Kumle et al., 2021](https://doi.org/10.3758/s13428-021-01546-0); [manual](https://lkumle.github.io/power_notebooks/intro/Introduction_to_mixedpower.pdf)). |
 | **mlpwr** | Accepts a user-written binary simulation function in `find.design()` to search multi-parameter design spaces via surrogate modeling, with IRT and multilevel examples. | Surrogate-search counterpart that can use glmmplanr's native simulation as its callback. The [matched comparison](#item-pool-package-comparison) applies the same independent Wilson confirmation to both methods; glmmplanr supplies the declarative schedules and effect/precision targets ([Zimmer et al., 2024](https://doi.org/10.3758/s13428-023-02269-0); [manual](https://CRAN.R-project.org/package=mlpwr/refman/mlpwr.html)). |
-| **glmmrOptim** | Selects $c$-optimal observation subsets from candidate schedules by minimizing asymptotic linear-contrast variance via the GLMM information matrix. | Useful for optimal condition-level observation allocation; asymptotic variance criteria complement simulation-verified finite-sample CI-width assurance and coverage ([glmmrOptim manual](https://samuel-watson.r-universe.dev/glmmrOptim/doc/manual.html)). |
+| **glmmrOptim** | Selects $c$-optimal observation subsets from candidate schedules by minimizing asymptotic linear-contrast variance via the GLMM information matrix. | Useful for optimal condition-level observation allocation; asymptotic variance criteria complement simulation-verified finite-sample CI-width assurance and coverage ([glmmrOptim CRAN page](https://CRAN.R-project.org/package=glmmrOptim)). |
 | **pilotr** | Generates crossed participant-by-item experimental datasets (including Bernoulli outcomes) and evaluates Type S/M errors, mean CI width, and ROPE metrics. | Precision-reporting counterpart; `power_mixed()` in v0.3.1 targets linear mixed models via `lmerTest`/Satterthwaite rather than binary GLMM refitting ([pilotr manual](https://CRAN.R-project.org/package=pilotr/refman/pilotr.html); [precision & ROPE vignette](https://CRAN.R-project.org/package=pilotr/vignettes/precision-rope.html)). |
 | **simglm** | Simulates configurable regression/multilevel data-generating and fitting models, summarizing power, Type I error, and parameter precision via `compute_statistics()`. | Flexible engine for custom covariate distributions and misspecification stress tests when conditional coefficients are specified directly ([simglm manual](https://CRAN.R-project.org/package=simglm/refman/simglm.html)). |
 
@@ -826,7 +873,7 @@ To situate `glmmplanr` 0.1.0 within the R ecosystem, the tables below summarize 
 
 1. **Marginal vs. Conditional Input Probabilities.** Under a canonical logit GLMM with a $\mathcal{N}(0, 1^2)$ random intercept, setting $\beta_0 = \text{qlogis}(0.80) = 1.3863$ yields $80\%$ accuracy at zero random effect (`conditional_prob`) but shrinks the population-averaged accuracy (`quad_prob`) to $76.13\%$; achieving an $80\%$ population-averaged rate requires $\beta_0 = 1.6497$. Always verify simulated cell means when passing nominal percentages across packages.
 2. **Success Criteria and Failure Denominators.** Hypothesis-test power, mean CI width, CI-width assurance ($\Pr(\text{width} \le w)$), and empirical interval coverage answer distinct questions ([Pargent et al., 2024](https://doi.org/10.1177/25152459241287132)). Align link functions, contrast coding, interval estimators, and whether non-convergent replications remain in the denominator ([see 3AFC comparison above](#three-choice-precision)).
-3. **Target Item Population.** Calibrating a fixed 16-word list keeps item difficulties fixed across replications (`plan_rasch_fixed_bank()`), whereas generalizing to new lexical samples redraws item difficulties on every replication (`plan_rasch_precision()`; [Dunn, 2024](https://www.sciencedirect.com/science/article/pii/S2772766124000491)). Report both bank-average RMSE and all-item worst-case attainment.
+3. **Target Item Population.** Calibrating a fixed 16-word list keeps item difficulties fixed across replications (`plan_rasch_fixed_bank()`), whereas generalizing to new lexical samples redraws item difficulties on every replication (`plan_rasch_precision()`; [Dunn, 2024](https://doi.org/10.1016/j.rmal.2024.100143)). Report both bank-average RMSE and all-item worst-case attainment.
 
 <a id="package-calibration"></a>
 

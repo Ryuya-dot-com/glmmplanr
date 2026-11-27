@@ -13,7 +13,8 @@ evaluate_design_point(
   fast_stage = FALSE,
   stream_seeds = 1L,
   data_fn = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  true_target = NULL
 )
 }
 \arguments{
@@ -46,6 +47,13 @@ columns must agree with that mapping.}
 
 \item{verbose}{Logical; display a live \code{cli} progress bar with ETA across
 replications (default \code{FALSE}).}
+
+\item{true_target}{Optional finite numeric scalar (or \code{NA}) on \code{spec$scale}
+giving the true target effect when \code{data_fn} modifies the data-generating
+process. When \code{data_fn} is supplied and \code{true_target} is \code{NULL},
+truth-dependent diagnostics (\code{coverage}, \code{prob_coverage}, \code{bias}, \code{rmse},
+\code{type_m_error}, \code{type_s_error}, and \code{prob_diff_true_pp}) are returned as
+\code{NA_real_} rather than evaluated against \code{spec$true_effect_target}.}
 }
 \value{
 A single-row \code{data.frame} summarizing all evaluation and diagnostic

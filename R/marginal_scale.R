@@ -26,19 +26,7 @@ cell_contrast_weights <- function(design, effect_col, custom_weights = NULL) {
   }
   cell_nms <- design$cells$cell_name
   if (!is.null(custom_weights)) {
-    if (!is.numeric(custom_weights) || length(custom_weights) != length(cell_nms) ||
-        anyNA(custom_weights)) {
-      cli::cli_abort("{.arg custom_weights} must be a numeric vector of length {length(cell_nms)}.")
-    }
-    if (!is.null(names(custom_weights)) && all(nzchar(names(custom_weights)))) {
-      norm_nms <- gsub("[:./\\s]+", "_", trimws(names(custom_weights)), perl = TRUE)
-      idx <- match(cell_nms, norm_nms)
-      if (anyNA(idx)) {
-        cli::cli_abort("Names of {.arg custom_weights} must match {.val {cell_nms}}.")
-      }
-      return(stats::setNames(as.numeric(custom_weights[idx]), cell_nms))
-    }
-    return(stats::setNames(as.numeric(custom_weights), cell_nms))
+    return(align_cell_weights(design, custom_weights, arg = "custom_weights"))
   }
 
   X <- design$X_cells
@@ -48,6 +36,51 @@ cell_contrast_weights <- function(design, effect_col, custom_weights = NULL) {
   proj <- qr.solve(crossprod(X), t(X))
   w <- as.numeric(proj[effect_col, ])
   stats::setNames(w, cell_nms)
+}
+
+# Internal cell-vector alignment helper shared by cell_probs and contrast weights
+align_named_cell_vector <- function(design, values, arg = "weights", require_nonzero = FALSE) {
+  if (!inherits(design, "glmmplanr_design")) {
+    cli::cli_abort("{.arg design} must be a {.cls glmmplanr_design} object.")
+  }
+  cell_nms <- as.character(design$cells$cell_name)
+  if (!is.numeric(values) || length(values) != length(cell_nms) || any(!is.finite(values))) {
+    cli::cli_abort(
+      "{.arg {arg}} must be a finite numeric vector of length {length(cell_nms)} matching the design cells: {.val {cell_nms}}."
+    )
+  }
+  if (isTRUE(require_nonzero) && !any(abs(values) > 0)) {
+    cli::cli_abort("At least one element of {.arg {arg}} must be non-zero.")
+  }
+  nms <- names(values)
+  if (!is.null(nms)) {
+    nms_trim <- trimws(nms)
+    if (any(is.na(nms) | !nzchar(nms_trim))) {
+      cli::cli_abort(
+        "Named {.arg {arg}} must name every element (or leave all elements unnamed in {.code design$cells$cell_name} order)."
+      )
+    }
+    if (!anyDuplicated(nms_trim) && setequal(nms_trim, cell_nms)) {
+      idx <- match(cell_nms, nms_trim)
+      return(stats::setNames(as.numeric(values[idx]), cell_nms))
+    }
+    norm_fn <- function(s) gsub("[:./\\s]+", "_", trimws(s), perl = TRUE)
+    norm_nms <- norm_fn(nms_trim)
+    norm_cells <- norm_fn(cell_nms)
+    if (!anyDuplicated(norm_nms) && !anyDuplicated(norm_cells) && setequal(norm_nms, norm_cells)) {
+      idx <- match(norm_cells, norm_nms)
+      return(stats::setNames(as.numeric(values[idx]), cell_nms))
+    }
+    cli::cli_abort(c(
+      "Names of {.arg {arg}} must match {.val {cell_nms}} without duplicates.",
+      "x" = "Provided: {.val {nms}}"
+    ))
+  }
+  stats::setNames(as.numeric(values), cell_nms)
+}
+
+align_cell_weights <- function(design, weights, arg = "weights", require_nonzero = TRUE) {
+  align_named_cell_vector(design, weights, arg = arg, require_nonzero = require_nonzero)
 }
 
 #' Compute True Population-Marginal or Conditional Probability Contrast from DGP
@@ -70,7 +103,11 @@ true_prob_effect <- function(
   weights,
   estimand = c("marginal", "conditional")
 ) {
-  sum(weights * dgp_cell_probabilities(dgp, match.arg(estimand)))
+  if (!inherits(dgp, "glmmplanr_dgp")) {
+    cli::cli_abort("{.arg dgp} must be a {.cls glmmplanr_dgp} object.")
+  }
+  w_aligned <- align_cell_weights(dgp$design, weights, arg = "weights")
+  sum(w_aligned * dgp_cell_probabilities(dgp, match.arg(estimand)))
 }
 
 dgp_cell_probabilities <- function(dgp, estimand) {
@@ -127,6 +164,9 @@ estimate_prob_effect_delta <- function(
   J_beta_theta = NULL
 ) {
   estimand <- match.arg(estimand)
+  weights <- align_cell_weights(design, weights, arg = "weights")
+  w_scale <- max(abs(weights))
+  w_unit <- weights / w_scale
   X_c <- design$X_cells
   mu_c <- as.numeric(X_c %*% beta)
 
@@ -134,10 +174,10 @@ estimate_prob_effect_delta <- function(
     p_in <- stats::plogis(mu_c)
     p_c <- chance + (1.0 - chance) * p_in
     d_c <- (1.0 - chance) * p_in * (1.0 - p_in)
-    est_diff <- sum(weights * p_c)
-    grad_beta <- as.numeric(crossprod(X_c, weights * d_c))
-    var_diff <- as.numeric(crossprod(grad_beta, vcov_beta %*% grad_beta))
-    return(list(est = est_diff, se = sqrt(max(var_diff, 1e-16))))
+    est_unit <- sum(w_unit * p_c)
+    grad_beta <- as.numeric(crossprod(X_c, w_unit * d_c))
+    var_unit <- as.numeric(crossprod(grad_beta, vcov_beta %*% grad_beta))
+    return(list(est = w_scale * est_unit, se = w_scale * sqrt(max(var_unit, 1e-16))))
   }
 
   Z_s_c <- if (re_structure == "intercept_only") {
@@ -176,15 +216,15 @@ estimate_prob_effect_delta <- function(
   deriv_in <- (1.0 - chance) * p_in * (1.0 - p_in)
   d_c <- as.numeric(deriv_in %*% q1$weights)
 
-  est_diff <- sum(weights * p_c)
-  grad_beta <- as.numeric(crossprod(X_c, weights * d_c))
+  est_unit <- sum(w_unit * p_c)
+  grad_beta <- as.numeric(crossprod(X_c, w_unit * d_c))
   var_diff <- as.numeric(crossprod(grad_beta, vcov_beta %*% grad_beta))
 
   # Joint delta propagation wrt random-effect log-SDs theta = log(tau)
   if (!is.null(var_log_tau_subj) && !is.null(var_log_tau_item)) {
     dP_dsd <- as.numeric(deriv_in %*% (q1$weights * q1$nodes))
     inv_sd <- ifelse(sd_tot > 1e-8, 1.0 / sd_tot, 0.0)
-    w_dsd <- weights * dP_dsd * inv_sd
+    w_dsd <- w_unit * dP_dsd * inv_sd
 
     g_theta_s <- if (!is.null(ZS_s)) as.numeric(crossprod(Z_s_c * ZS_s, w_dsd)) else numeric(0)
     g_theta_i <- if (!is.null(ZS_i)) as.numeric(crossprod(Z_i_c * ZS_i, w_dsd)) else numeric(0)
@@ -217,8 +257,8 @@ estimate_prob_effect_delta <- function(
     }
   }
 
-  se_diff <- sqrt(max(var_diff, 1e-16))
-  list(est = est_diff, se = se_diff)
+  se_unit <- sqrt(max(var_diff, 1e-16))
+  list(est = w_scale * est_unit, se = w_scale * se_unit)
 }
 
 #' Construct Cell Probabilities Directly from Percentage-Point Effects
@@ -255,12 +295,39 @@ cell_probs_from_diffs <- function(design, baseline_prob, effects_pp = numeric(0)
   b_prob[1L] <- baseline_prob
 
   if (length(effects_pp) > 0L) {
-    if (is.null(names(effects_pp)) || any(!nzchar(names(effects_pp)))) {
+    if (!is.numeric(effects_pp) || !is.null(dim(effects_pp)) || any(!is.finite(effects_pp))) {
+      cli::cli_abort("{.arg effects_pp} must be a named finite numeric vector of percentage-point differences.")
+    }
+    raw_nms <- names(effects_pp)
+    if (is.null(raw_nms) || any(is.na(raw_nms) | !nzchar(trimws(raw_nms)))) {
       cli::cli_abort("{.arg effects_pp} must be a named numeric vector of percentage-point differences.")
     }
-    for (nm in names(effects_pp)) {
-      col_nm <- resolve_effect_column(design, nm)
-      b_prob[[col_nm]] <- as.numeric(effects_pp[[nm]]) / 100.0
+    raw_trim <- trimws(raw_nms)
+    if (anyDuplicated(raw_trim)) {
+      dup <- unique(raw_trim[duplicated(raw_trim)])
+      cli::cli_abort("Duplicate effect name(s) in {.arg effects_pp}: {.val {dup}}.")
+    }
+    resolved_cols <- character(length(raw_trim))
+    for (k in seq_along(raw_trim)) {
+      col_nm <- resolve_effect_column(design, raw_trim[k])
+      if (identical(col_nm, "(Intercept)")) {
+        cli::cli_abort(c(
+          "{.arg effects_pp} cannot specify {.val (Intercept)} (supplied as {.val {raw_nms[k]}}).",
+          "i" = "Set the grand-mean or reference-cell probability via {.arg baseline_prob} instead."
+        ))
+      }
+      resolved_cols[k] <- col_nm
+    }
+    if (anyDuplicated(resolved_cols)) {
+      dup_col <- unique(resolved_cols[duplicated(resolved_cols)])
+      clash <- raw_nms[resolved_cols %in% dup_col]
+      cli::cli_abort(c(
+        "Conflicting entries in {.arg effects_pp} refer to the same model effect ({.val {dup_col}}): {.val {clash}}.",
+        "i" = "Specify each effect only once."
+      ))
+    }
+    for (k in seq_along(resolved_cols)) {
+      b_prob[[resolved_cols[k]]] <- as.numeric(effects_pp[[k]]) / 100.0
     }
   }
 

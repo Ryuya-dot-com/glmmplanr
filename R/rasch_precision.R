@@ -35,7 +35,10 @@
 #' @param verbose Logical; display live progress bar with ETA (default `FALSE`).
 #' @return A `glmmplanr_rasch` list (see [rasch_plan_methods]) with `summary` (per-target and joint attainment, counts, Wilson
 #'   bounds, and decision), `pareto` (non-dominated designs passing the joint
-#'   criterion), `replications` (errors and fit diagnostics), and the settings.
+#'   criterion), `replications` (errors and fit diagnostics), and the generating
+#'   and allocation settings (`dgp`, `items_per_subject`, `item_seed`,
+#'   `attrition`, `participant_dropout`, `max_error`, `assurance`, `seed`,
+#'   `mc_conf_level`).
 #'   The `rmse` column is the root mean square of the evaluable replication
 #'   errors. A missing prediction for any planned unit makes that target
 #'   unevaluable. Failed fits and unevaluable errors count as misses in the
@@ -71,7 +74,8 @@ plan_rasch_precision <- function(
   }
   engine <- match.arg(engine)
   parallel_backend <- match.arg(parallel_backend)
-  workers <- max(1L, as.integer(workers))
+  workers <- validate_positive_int(workers, "workers", 1L)
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
 
   targets <- c("ability", "difficulty", "difficulty_max_abs_error", "person_sd",
                "item_sd", "person_variance", "item_variance")
@@ -205,6 +209,11 @@ plan_rasch_precision <- function(
     engine = engine,
     pareto = extract_2d_pareto(summary[passing, , drop = FALSE]),
     replications = do.call(rbind, samples),
+    dgp = dgp,
+    items_per_subject = dgp$design$items_per_subject,
+    item_seed = dgp$design$item_seed,
+    attrition = dgp$design$attrition,
+    participant_dropout = dgp$design$participant_dropout,
     max_error = max_error,
     assurance = assurance,
     seed = seed,
@@ -259,6 +268,30 @@ draw_rasch_trials_light <- function(dgp, schedule) {
 }
 
 fit_rasch_random_intercept_model <- function(trials, n_subj, n_item, engine = "cpp_laplace", control = NULL, rasch_ctx = NULL) {
+  subj_obs <- tabulate(trials$subj_id, nbins = n_subj)
+  item_obs <- tabulate(trials$item_id, nbins = n_item)
+  if (sum(subj_obs > 0L) < 2L) {
+    return(list(error = "Fewer than two observed participants"))
+  }
+  if (sum(item_obs > 0L) < 2L) {
+    return(list(error = "Fewer than two observed items"))
+  }
+  if (!any(subj_obs >= 2L) && !any(item_obs >= 2L)) {
+    return(list(
+      error = "Person and item variances are unidentifiable: no participant or item has two or more observed responses"
+    ))
+  }
+  if (!any(subj_obs >= 2L)) {
+    return(list(
+      error = "Person variance is unidentifiable: no participant has two or more observed responses"
+    ))
+  }
+  if (!any(item_obs >= 2L)) {
+    return(list(
+      error = "Item variance is unidentifiable: no item has two or more observed responses"
+    ))
+  }
+
   if (identical(engine, "cpp_laplace")) {
     n_obs <- length(trials$y)
     use_ctx <- !is.null(rasch_ctx) && !isTRUE(trials$has_keep) && cpp_glmm_workspace_valid(rasch_ctx$ws)
@@ -456,15 +489,20 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "cpp_lapla
 #' @param method Calibration model:
 #'   * `"fixed_item"` (default): Marginal Maximum Likelihood with fixed item
 #'     parameters identified by centering person abilities at mean zero
-#'     (`constraint = "cases"`). Items with 0% or 100% observed correct
-#'     responses have no finite fixed-item MLE (`NA_real_`), rendering bank-wide
-#'     difficulty targets unevaluable (counted as misses in the `nsim`
-#'     assurance denominator).
+#'     (`constraint = "cases"`). Requires at least one participant with two or
+#'     more observed responses on estimable (non-constant) items so the free
+#'     person ability variance is identifiable from the data. Items with 0% or
+#'     100% observed correct responses have no finite fixed-item MLE
+#'     (`NA_real_`), rendering bank-wide difficulty targets unevaluable (counted
+#'     as misses in the `nsim` assurance denominator).
 #'   * `"random_item"`: Crossed random-intercept GLMM (`y ~ 1 + (1 | subj) + (1 | item)`),
 #'     estimating person and item effects by empirical Bayes conditional modes.
-#'     When the fit succeeds, an administered item with zero correct or zero
-#'     incorrect responses receives a finite difficulty. Shrinkage toward the
-#'     bank mean can be substantial for extreme items.
+#'     Requires at least two observed participants, two observed items, at least
+#'     one participant with two or more observed responses, and at least one
+#'     item with two or more observed responses so person and item variances are
+#'     identifiable. When the fit succeeds, an administered item with zero
+#'     correct or zero incorrect responses receives a finite difficulty.
+#'     Shrinkage toward the bank mean can be substantial for extreme items.
 #' @param engine Estimation engine: `"auto"` (default; selects `"mml"` for
 #'   `method = "fixed_item"` and `"cpp_laplace"` for `method = "random_item"`),
 #'   `"mml"` (built-in 21-point Gauss-Hermite MML-EM solver with safeguarded
@@ -486,11 +524,15 @@ rasch_recovery_errors <- function(draw, dgp, control = NULL, engine = "cpp_lapla
 #'     `n_evaluable`, `rmse`, Wilson bounds (`mc_lo`, `mc_hi`), and `decision`.
 #'   * `recommended_n_subj`: Smallest candidate `n_subj` achieving `PASS` on
 #'     `target == "joint"` (`NA_integer_` if none pass).
-#'   * `item_summary`: Per-item bias, RMSE, MAE, finite-estimate count, and
-#'     all-zero / all-one counts across replications at each `n_subj`.
-#'     `n_scheduled` and `component` describe the pre-missingness schedule
-#'     (see [generate_design_schedule()]).
+#'   * `item_summary`: Per-item `item_id`, `item_name` (preserving names from
+#'     `item_difficulties` when supplied, otherwise character item indices),
+#'     bias, RMSE, MAE, finite-estimate count, and all-zero / all-one counts
+#'     across replications at each `n_subj`. `n_scheduled` and `component`
+#'     describe the pre-missingness schedule (see [generate_design_schedule()]).
 #'   * `replications`: Replication-level error and diagnostic table.
+#'   * `item_difficulties`: True item difficulties (retaining input names when supplied).
+#'   * `items_per_subject`, `item_seed`, `attrition`, `participant_dropout`, `design`:
+#'     Retained item-allocation and missingness settings used to generate trials.
 #' @examples
 #' bank <- seq(-2.0, 2.0, length.out = 12)
 #' fb <- plan_rasch_fixed_bank(
@@ -527,13 +569,25 @@ plan_rasch_fixed_bank <- function(
   method <- match.arg(method)
   engine <- match.arg(engine)
   parallel_backend <- match.arg(parallel_backend)
-  workers <- max(1L, as.integer(workers))
+  workers <- validate_positive_int(workers, "workers", 1L)
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
 
   if (!is.numeric(item_difficulties) || !is.null(dim(item_difficulties)) ||
       length(item_difficulties) < 2L || any(!is.finite(item_difficulties))) {
     cli::cli_abort("{.arg item_difficulties} must be a numeric vector of at least two finite item difficulties.")
   }
+  item_nms <- names(item_difficulties)
+  if (!is.null(item_nms)) {
+    item_nms <- as.character(item_nms)
+    if (any(is.na(item_nms) | !nzchar(trimws(item_nms))) || anyDuplicated(item_nms)) {
+      cli::cli_abort(
+        "Names of {.arg item_difficulties}, when supplied, must be unique and non-empty."
+      )
+    }
+  }
   b_true <- as.numeric(item_difficulties)
+  b_out <- if (!is.null(item_nms)) stats::setNames(b_true, item_nms) else b_true
+  item_labels <- if (!is.null(item_nms)) item_nms else as.character(seq_len(length(b_true)))
   n_item <- length(b_true)
 
   if (!is.numeric(person_sd) || length(person_sd) != 1L || !is.finite(person_sd) || person_sd < 0) {
@@ -740,6 +794,7 @@ plan_rasch_fixed_bank <- function(
     item_summaries[[i]] <- data.frame(
       n_subj = ns,
       item_id = seq_len(n_item),
+      item_name = item_labels,
       n_scheduled = exposure[[i]]$n_scheduled,
       component = exposure[[i]]$component,
       true_difficulty = b_true,
@@ -768,8 +823,13 @@ plan_rasch_fixed_bank <- function(
     recommended_n_subj = rec_n,
     item_summary = do.call(rbind, item_summaries),
     replications = do.call(rbind, samples),
-    item_difficulties = b_true,
+    item_difficulties = b_out,
     person_sd = person_sd,
+    items_per_subject = des$items_per_subject,
+    item_seed = des$item_seed,
+    attrition = des$attrition,
+    participant_dropout = des$participant_dropout,
+    design = des,
     method = method,
     engine = engine,
     max_error = max_error,
@@ -857,6 +917,16 @@ eval_fixed_bank_replication <- function(sim, b_true, person_sd, method, engine, 
   estimable <- (n_obs_item > 0L) & !item_zero & !item_all1
   if (!any(estimable)) {
     metrics$fit_error <- "No item has both response categories"
+    return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
+  }
+  est_mask <- estimable[tr$item_id]
+  subj_est_obs <- tabulate(tr$subj_id[est_mask], nbins = ns)
+  if (sum(subj_est_obs > 0L) < 2L) {
+    metrics$fit_error <- "Fewer than two observed participants"
+    return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
+  }
+  if (!any(subj_est_obs >= 2L)) {
+    metrics$fit_error <- "Person variance is unidentifiable: no participant has two or more responses on estimable items"
     return(list(metrics = metrics, b_est = rep(NA_real_, ni), item_zero = item_zero, item_all1 = item_all1))
   }
 

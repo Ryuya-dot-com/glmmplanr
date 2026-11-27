@@ -115,6 +115,9 @@ calibrate_dgp <- function(
   p_subj <- ncol(design$Z_subj_cells)
   p_item <- ncol(design$Z_item_cells)
 
+  subj_re_map <- build_effect_map(design$subj_rhs, design$cells, design$Z_subj_cells)
+  item_re_map <- build_effect_map(design$item_rhs, design$cells, design$Z_item_cells)
+
   tau_subj <- resolve_re_sds(
     prob_range = subj_prob_range,
     direct_sd = subj_sd,
@@ -122,7 +125,8 @@ calibrate_dgp <- function(
     slope_sd_ratio = slope_sd_ratio,
     chance = chance,
     re_names = colnames(design$Z_subj_cells),
-    label = "subj"
+    label = "subj",
+    re_map = subj_re_map
   )
   tau_item <- resolve_re_sds(
     prob_range = item_prob_range,
@@ -131,7 +135,8 @@ calibrate_dgp <- function(
     slope_sd_ratio = slope_sd_ratio,
     chance = chance,
     re_names = colnames(design$Z_item_cells),
-    label = "item"
+    label = "item",
+    re_map = item_re_map
   )
 
   corr_subj_spec <- if (is.list(corr_structure) && !is.null(corr_structure$subj)) {
@@ -145,8 +150,8 @@ calibrate_dgp <- function(
     corr_structure
   }
 
-  R_subj <- build_corr_matrix(p_subj, corr_subj_spec, colnames(design$Z_subj_cells), "subj")
-  R_item <- build_corr_matrix(p_item, corr_item_spec, colnames(design$Z_item_cells), "item")
+  R_subj <- build_corr_matrix(p_subj, corr_subj_spec, colnames(design$Z_subj_cells), "subj", re_map = subj_re_map)
+  R_item <- build_corr_matrix(p_item, corr_item_spec, colnames(design$Z_item_cells), "item", re_map = item_re_map)
 
   Sigma_subj <- diag(tau_subj, nrow = p_subj) %*% R_subj %*% diag(tau_subj, nrow = p_subj)
   Sigma_item <- diag(tau_item, nrow = p_item) %*% R_item %*% diag(tau_item, nrow = p_item)
@@ -158,8 +163,9 @@ calibrate_dgp <- function(
 
   if (design$has_testlet) {
     p_testlet <- ncol(design$Z_testlet_cells)
+    testlet_re_map <- build_effect_map(design$testlet_rhs, design$cells, design$Z_testlet_cells)
     if (is.null(testlet_prob_range) && is.null(testlet_sd)) {
-      testlet_sd <- 0.5 * tau_item[1L]
+      testlet_sd <- 0.5 * unname(tau_item[1L])
     }
     tau_testlet <- resolve_re_sds(
       prob_range = testlet_prob_range,
@@ -168,7 +174,8 @@ calibrate_dgp <- function(
       slope_sd_ratio = slope_sd_ratio,
       chance = chance,
       re_names = colnames(design$Z_testlet_cells),
-      label = "testlet"
+      label = "testlet",
+      re_map = testlet_re_map
     )
     corr_testlet_spec <- if (is.list(corr_structure) && !is.null(corr_structure$testlet)) {
       corr_structure$testlet
@@ -176,7 +183,8 @@ calibrate_dgp <- function(
       corr_structure
     }
     R_testlet <- build_corr_matrix(
-      p_testlet, corr_testlet_spec, colnames(design$Z_testlet_cells), "testlet"
+      p_testlet, corr_testlet_spec, colnames(design$Z_testlet_cells), "testlet",
+      re_map = testlet_re_map
     )
     Sigma_testlet <- diag(tau_testlet, nrow = p_testlet) %*% R_testlet %*%
       diag(tau_testlet, nrow = p_testlet)
@@ -346,23 +354,65 @@ align_cell_probs <- function(design, cell_probs, chance) {
     cli::cli_abort(hints)
   }
 
-  canonical <- design$cells$cell_name
-  nms <- names(cell_probs)
-  if (!is.null(nms) && all(nzchar(nms))) {
-    norm_nms <- gsub("[:./\\s]+", "_", trimws(nms), perl = TRUE)
-    idx <- match(canonical, norm_nms)
-    if (anyNA(idx)) {
-      cli::cli_abort(c(
-        "Names of {.arg cell_probs} do not match expected design cells.",
-        "i" = "Expected: {.val {canonical}}",
-        "x" = "Provided: {.val {nms}}"
-      ))
+  align_named_cell_vector(design, cell_probs, arg = "cell_probs", require_nonzero = FALSE)
+}
+
+resolve_single_re_name <- function(nm, re_names, re_map, arg_desc) {
+  nm_t <- trimws(nm)
+  if (nm_t %in% re_names) return(nm_t)
+  if (!is.null(re_map)) {
+    if (nm_t %in% names(re_map)) {
+      cols <- re_map[[nm_t]]
+      if (length(cols) == 1L) return(cols[1L])
+      cli::cli_abort(
+        "Random-effect term {.val {nm}} in {arg_desc} spans {length(cols)} columns ({.val {cols}}); name each column explicitly."
+      )
     }
-    out <- stats::setNames(as.numeric(cell_probs[idx]), canonical)
-  } else {
-    out <- stats::setNames(as.numeric(cell_probs), canonical)
+    if (grepl(":", nm_t, fixed = TRUE)) {
+      parts <- sort(trimws(strsplit(nm_t, ":", fixed = TRUE)[[1L]]))
+      for (cand in names(re_map)) {
+        if (grepl(":", cand, fixed = TRUE) &&
+            identical(sort(trimws(strsplit(cand, ":", fixed = TRUE)[[1L]])), parts)) {
+          cols <- re_map[[cand]]
+          if (length(cols) == 1L) return(cols[1L])
+          cli::cli_abort(
+            "Random-effect term {.val {nm}} in {arg_desc} spans {length(cols)} columns ({.val {cols}}); name each column explicitly."
+          )
+        }
+      }
+    }
   }
-  out
+  cli::cli_abort(c(
+    "Unknown random-effect name {.val {nm}} in {arg_desc}.",
+    "i" = "Expected random-effect terms: {.val {re_names}}"
+  ))
+}
+
+align_re_named_vector <- function(vec, target_names, re_map, arg_desc) {
+  nms <- names(vec)
+  if (is.null(nms)) return(as.numeric(vec))
+  if (any(is.na(nms) | !nzchar(trimws(nms)))) {
+    cli::cli_abort(
+      "Named {arg_desc} must name every element (or leave all elements unnamed in {.val {target_names}} order)."
+    )
+  }
+  resolved <- vapply(
+    nms,
+    resolve_single_re_name,
+    character(1L),
+    re_names = target_names,
+    re_map = re_map,
+    arg_desc = arg_desc,
+    USE.NAMES = FALSE
+  )
+  if (anyDuplicated(resolved) || !setequal(resolved, target_names)) {
+    cli::cli_abort(c(
+      "Names of {arg_desc} must match {.val {target_names}} without duplicates.",
+      "x" = "Provided: {.val {nms}}"
+    ))
+  }
+  idx <- match(target_names, resolved)
+  as.numeric(vec[idx])
 }
 
 resolve_re_sds <- function(
@@ -372,17 +422,29 @@ resolve_re_sds <- function(
   slope_sd_ratio,
   chance,
   re_names,
-  label
+  label,
+  re_map = NULL
 ) {
+  arg_desc <- sprintf("`%s_sd`", label)
   if (!is.null(direct_sd)) {
-    if (!is.numeric(direct_sd) || any(!is.finite(direct_sd)) || any(direct_sd < 0)) {
+    if (!is.numeric(direct_sd) || !is.null(dim(direct_sd)) ||
+        any(!is.finite(direct_sd)) || any(direct_sd < 0)) {
       cli::cli_abort("{.arg {label}_sd} must contain non-negative numeric SD values.")
     }
     if (length(direct_sd) == 1L) {
-      tau0 <- direct_sd
-      tau <- build_tau_from_ratio(tau0, n_re, slope_sd_ratio)
+      nms1 <- names(direct_sd)
+      if (!is.null(nms1)) {
+        if (is.na(nms1[1L]) || !nzchar(trimws(nms1[1L])) ||
+            !identical(resolve_single_re_name(nms1[1L], re_names, re_map, arg_desc), "(Intercept)")) {
+          cli::cli_abort(
+            "A length-1 {.arg {label}_sd} specifies the random intercept SD ({.val (Intercept)}); supply all {n_re} random-effect SDs ({.val {re_names}}) to set slopes directly."
+          )
+        }
+      }
+      tau0 <- unname(as.numeric(direct_sd))
+      tau <- build_tau_from_ratio(tau0, n_re, slope_sd_ratio, re_names = re_names, re_map = re_map)
     } else if (length(direct_sd) == n_re) {
-      tau <- as.numeric(direct_sd)
+      tau <- align_re_named_vector(direct_sd, re_names, re_map, arg_desc)
     } else {
       cli::cli_abort(
         "{.arg {label}_sd} must have length 1 (intercept SD) or {n_re} (all RE terms: {.val {re_names}})."
@@ -390,7 +452,7 @@ resolve_re_sds <- function(
     }
   } else if (!is.null(prob_range)) {
     tau0 <- prob_range_to_sd(prob_range, chance = chance)
-    tau <- build_tau_from_ratio(tau0, n_re, slope_sd_ratio)
+    tau <- build_tau_from_ratio(tau0, n_re, slope_sd_ratio, re_names = re_names, re_map = re_map)
   } else {
     cli::cli_abort(
       "Supply either {.arg {label}_prob_range} or {.arg {label}_sd} to define {label} random-effect variability."
@@ -399,15 +461,32 @@ resolve_re_sds <- function(
   stats::setNames(tau, re_names)
 }
 
-build_tau_from_ratio <- function(tau0, n_re, slope_sd_ratio) {
+build_tau_from_ratio <- function(tau0, n_re, slope_sd_ratio, re_names = NULL, re_map = NULL) {
   if (n_re == 1L) return(as.numeric(tau0))
-  if (!is.numeric(slope_sd_ratio) || anyNA(slope_sd_ratio) || any(slope_sd_ratio < 0)) {
+  if (!is.numeric(slope_sd_ratio) || !is.null(dim(slope_sd_ratio)) ||
+      any(!is.finite(slope_sd_ratio)) || any(slope_sd_ratio < 0)) {
     cli::cli_abort("{.arg slope_sd_ratio} must be non-negative numeric.")
   }
   if (length(slope_sd_ratio) == 1L) {
-    c(tau0, rep(tau0 * slope_sd_ratio, n_re - 1L))
+    nms_r <- names(slope_sd_ratio)
+    if (!is.null(nms_r) && n_re > 2L) {
+      cli::cli_abort(
+        "Named {.arg slope_sd_ratio} must supply all {n_re - 1L} slope ratios ({.val {re_names[-1L]}}) or be an unnamed scalar."
+      )
+    }
+    if (!is.null(nms_r) && n_re == 2L && !is.null(re_names)) {
+      slope_sd_ratio <- align_re_named_vector(
+        slope_sd_ratio, re_names[-1L], re_map, "`slope_sd_ratio`"
+      )
+    }
+    c(tau0, rep(unname(as.numeric(slope_sd_ratio)), n_re - 1L))
   } else if (length(slope_sd_ratio) == n_re - 1L) {
-    c(tau0, tau0 * slope_sd_ratio)
+    ratios <- if (!is.null(re_names)) {
+      align_re_named_vector(slope_sd_ratio, re_names[-1L], re_map, "`slope_sd_ratio`")
+    } else {
+      as.numeric(slope_sd_ratio)
+    }
+    c(tau0, tau0 * ratios)
   } else {
     cli::cli_abort(
       "{.arg slope_sd_ratio} must have length 1 or {n_re - 1L} (matching the number of random slopes)."
@@ -415,8 +494,18 @@ build_tau_from_ratio <- function(tau0, n_re, slope_sd_ratio) {
   }
 }
 
-build_corr_matrix <- function(n_re, corr_spec, re_names, label) {
+build_corr_matrix <- function(n_re, corr_spec, re_names, label, re_map = NULL) {
   if (n_re == 1L) {
+    if (is.matrix(corr_spec)) {
+      if (!all(dim(corr_spec) == c(1L, 1L)) || !is.numeric(corr_spec) ||
+          !is.finite(corr_spec[1L, 1L]) || abs(corr_spec[1L, 1L] - 1.0) > 1e-8) {
+        cli::cli_abort("Correlation matrix for {label} must be 1 x 1 with unit diagonal.")
+      }
+      rn1 <- rownames(corr_spec)
+      cn1 <- colnames(corr_spec)
+      if (!is.null(rn1)) align_re_named_vector(stats::setNames(1.0, rn1), re_names, re_map, sprintf("correlation matrix rownames for `%s`", label))
+      if (!is.null(cn1)) align_re_named_vector(stats::setNames(1.0, cn1), re_names, re_map, sprintf("correlation matrix colnames for `%s`", label))
+    }
     R <- matrix(1, nrow = 1L, ncol = 1L, dimnames = list(re_names, re_names))
     return(R)
   }
@@ -433,12 +522,49 @@ build_corr_matrix <- function(n_re, corr_spec, re_names, label) {
     R <- matrix(rho, nrow = n_re, ncol = n_re)
     diag(R) <- 1
   } else if (is.matrix(corr_spec)) {
-    if (!all(dim(corr_spec) == c(n_re, n_re))) {
+    if (!is.numeric(corr_spec) || !all(dim(corr_spec) == c(n_re, n_re)) || any(!is.finite(corr_spec))) {
       cli::cli_abort(
-        "Correlation matrix for {label} must have dimensions {n_re} x {n_re}."
+        "Correlation matrix for {label} must be a finite numeric {n_re} x {n_re} matrix."
       )
     }
     R <- corr_spec
+    rn <- rownames(R)
+    cn <- colnames(R)
+    if (!is.null(rn) || !is.null(cn)) {
+      res_r <- if (!is.null(rn)) {
+        if (any(is.na(rn) | !nzchar(trimws(rn)))) {
+          cli::cli_abort("Row names of correlation matrix for {label} cannot be partial or empty.")
+        }
+        vapply(rn, resolve_single_re_name, character(1L),
+               re_names = re_names, re_map = re_map,
+               arg_desc = sprintf("correlation matrix for `%s`", label), USE.NAMES = FALSE)
+      } else {
+        NULL
+      }
+      res_c <- if (!is.null(cn)) {
+        if (any(is.na(cn) | !nzchar(trimws(cn)))) {
+          cli::cli_abort("Column names of correlation matrix for {label} cannot be partial or empty.")
+        }
+        vapply(cn, resolve_single_re_name, character(1L),
+               re_names = re_names, re_map = re_map,
+               arg_desc = sprintf("correlation matrix for `%s`", label), USE.NAMES = FALSE)
+      } else {
+        NULL
+      }
+      active_res <- if (!is.null(res_r)) res_r else res_c
+      if (!is.null(res_r) && !is.null(res_c) && !identical(res_r, res_c)) {
+        cli::cli_abort(
+          "Row and column names of correlation matrix for {label} must list the same random-effect terms in the same order."
+        )
+      }
+      if (anyDuplicated(active_res) || !setequal(active_res, re_names)) {
+        cli::cli_abort(
+          "Dimension names of correlation matrix for {label} must match {.val {re_names}} without duplicates."
+        )
+      }
+      idx <- match(re_names, active_res)
+      R <- R[idx, idx, drop = FALSE]
+    }
     if (max(abs(R - t(R))) > 1e-8 || max(abs(diag(R) - 1)) > 1e-8) {
       cli::cli_abort("Correlation matrix for {label} must be symmetric with unit diagonal.")
     }
@@ -722,8 +848,291 @@ simulate_dgp_data <- function(dgp, schedule = NULL, n_subj = NULL, n_item = NULL
       cli::cli_abort("Supply either {.arg schedule} or both {.arg n_subj} and {.arg n_item}.")
     }
     schedule <- generate_design_schedule(des, n_subj = n_subj, n_item = n_item)
+  } else {
+    validate_schedule_for_design(schedule, des)
   }
   draw_dgp_trials(dgp, schedule)
+}
+
+validate_schedule_for_design <- function(schedule, des) {
+  if (!is.list(schedule) || !is.data.frame(schedule$trials)) {
+    cli::cli_abort("{.arg schedule} must be a schedule returned by {.fn generate_design_schedule}.")
+  }
+  tr <- schedule$trials
+  req <- c("subj_id", "item_id", "cell_id")
+  if (!all(req %in% names(tr))) {
+    cli::cli_abort("{.code schedule$trials} must contain columns {.val {req}}.")
+  }
+  ns <- schedule$n_subj
+  ni <- schedule$n_item
+  if (!is.numeric(ns) || length(ns) != 1L || !is.finite(ns) || ns != floor(ns) || ns < 1L ||
+      !is.numeric(ni) || length(ni) != 1L || !is.finite(ni) || ni != floor(ni) || ni < 1L) {
+    cli::cli_abort("{.arg schedule} must contain positive integer {.field n_subj} and {.field n_item}.")
+  }
+  ns <- as.integer(ns)
+  ni <- as.integer(ni)
+  if (ns %% des$k_subj != 0L) {
+    cli::cli_abort(
+      "{.code schedule$n_subj} ({ns}) must be a multiple of {des$k_subj} for {.code dgp$design}."
+    )
+  }
+  if (ni %% des$k_item != 0L) {
+    cli::cli_abort(
+      "{.code schedule$n_item} ({ni}) must be a multiple of {des$k_item} for {.code dgp$design}."
+    )
+  }
+  if (!is.null(des$items_per_subject) && ni < as.integer(des$items_per_subject)) {
+    cli::cli_abort(
+      "{.code schedule$n_item} ({ni}) must be at least {.arg items_per_subject} ({des$items_per_subject})."
+    )
+  }
+  sid <- tr$subj_id
+  iid <- tr$item_id
+  if (!is.numeric(sid) || any(!is.finite(sid)) || any(sid != floor(sid) | sid < 1L | sid > ns)) {
+    cli::cli_abort("{.code schedule$trials$subj_id} must contain integer IDs in 1..{ns}.")
+  }
+  if (!is.numeric(iid) || any(!is.finite(iid)) || any(iid != floor(iid) | iid < 1L | iid > ni)) {
+    cli::cli_abort("{.code schedule$trials$item_id} must contain integer IDs in 1..{ni}.")
+  }
+  sid <- as.integer(sid)
+  iid <- as.integer(iid)
+  if ("subj" %in% names(tr)) {
+    if (is.factor(tr$subj) && !identical(levels(tr$subj), as.character(seq_len(ns)))) {
+      cli::cli_abort("{.code schedule$trials$subj} factor levels must match {.code 1:{ns}}.")
+    }
+    if (anyNA(tr$subj) || any(as.character(tr$subj) != as.character(sid))) {
+      cli::cli_abort("{.code schedule$trials$subj} disagrees with {.code schedule$trials$subj_id}.")
+    }
+  }
+  if ("item" %in% names(tr)) {
+    if (is.factor(tr$item) && !identical(levels(tr$item), as.character(seq_len(ni)))) {
+      cli::cli_abort("{.code schedule$trials$item} factor levels must match {.code 1:{ni}}.")
+    }
+    if (anyNA(tr$item) || any(as.character(tr$item) != as.character(iid))) {
+      cli::cli_abort("{.code schedule$trials$item} disagrees with {.code schedule$trials$item_id}.")
+    }
+  }
+  if (!is.null(schedule$n_cells) && as.integer(schedule$n_cells) != des$n_cells) {
+    cli::cli_abort(c(
+      "{.arg schedule} has {schedule$n_cells} cell(s), whereas {.code dgp$design} has {des$n_cells} cell(s).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  sched_has_t <- isTRUE(schedule$n_testlet > 0L) || ("testlet_id" %in% names(tr))
+  if (!identical(sched_has_t, isTRUE(des$has_testlet))) {
+    cli::cli_abort(c(
+      "Testlet nesting of {.arg schedule} does not match {.code dgp$design}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (isTRUE(des$has_testlet)) {
+    if (!("testlet_id" %in% names(tr)) || is.null(schedule$n_testlet) || schedule$n_testlet < 1L) {
+      cli::cli_abort("{.arg schedule} is missing required testlet assignments for {.code dgp$design}.")
+    }
+    if (!is.null(schedule$testlet_size) && as.integer(schedule$testlet_size) != des$testlet_size) {
+      cli::cli_abort("{.arg schedule} testlet size ({schedule$testlet_size}) does not match {.code dgp$design} ({des$testlet_size}).")
+    }
+    exp_nt <- ni %/% des$testlet_size
+    if (as.integer(schedule$n_testlet) != exp_nt) {
+      cli::cli_abort("{.code schedule$n_testlet} ({schedule$n_testlet}) does not match {exp_nt} for {ni} items of testlet size {des$testlet_size}.")
+    }
+    tid <- tr$testlet_id
+    exp_tid <- ((iid - 1L) %/% des$testlet_size) + 1L
+    if (!is.numeric(tid) || any(!is.finite(tid)) || any(tid != floor(tid) | as.integer(tid) != exp_tid)) {
+      cli::cli_abort("{.code schedule$trials$testlet_id} disagrees with scheduled item-to-testlet nesting.")
+    }
+    if ("testlet" %in% names(tr)) {
+      if (anyNA(tr$testlet) || any(as.character(tr$testlet) != as.character(exp_tid))) {
+        cli::cli_abort("{.code schedule$trials$testlet} disagrees with {.code schedule$trials$testlet_id}.")
+      }
+    }
+  }
+  if (!is.null(schedule$factor_names) &&
+      !identical(as.character(schedule$factor_names), as.character(des$factor_names))) {
+    cli::cli_abort(c(
+      "Experimental factors in {.arg schedule} ({.val {schedule$factor_names}}) do not match {.code dgp$design} ({.val {des$factor_names}}).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (!is.null(schedule$allocation) && !identical(as.character(schedule$allocation), as.character(des$allocation))) {
+    cli::cli_abort(c(
+      "Allocation mode of {.arg schedule} ({.val {schedule$allocation}}) does not match {.code dgp$design} ({.val {des$allocation}}).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (!is.null(schedule$between_subj) &&
+      !identical(as.character(schedule$between_subj), as.character(des$between_subj))) {
+    cli::cli_abort(c(
+      "{.arg between_subj} factors in {.arg schedule} ({.val {schedule$between_subj}}) do not match {.code dgp$design} ({.val {des$between_subj}}).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (!is.null(schedule$between_item) &&
+      !identical(as.character(schedule$between_item), as.character(des$between_item))) {
+    cli::cli_abort(c(
+      "{.arg between_item} factors in {.arg schedule} ({.val {schedule$between_item}}) do not match {.code dgp$design} ({.val {des$between_item}}).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if ("items_per_subject" %in% names(schedule)) {
+    sched_ips <- if (is.null(schedule$items_per_subject)) as.integer(ni) else as.integer(schedule$items_per_subject)
+    des_ips <- if (is.null(des$items_per_subject)) as.integer(ni) else as.integer(des$items_per_subject)
+    if (!identical(sched_ips, des_ips)) {
+      cli::cli_abort(c(
+        "{.arg items_per_subject} in {.arg schedule} ({.val {schedule$items_per_subject}}) does not match {.code dgp$design} ({.val {des$items_per_subject}}).",
+        "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+      ))
+    }
+  }
+  exp_n_tr <- compute_scheduled_trials(des, as.integer(ns), as.integer(ni))
+  if (nrow(tr) != exp_n_tr) {
+    cli::cli_abort(c(
+      "{.arg schedule} has {nrow(tr)} scheduled trial(s), whereas {.code dgp$design} at ({ns}, {ni}) schedules {exp_n_tr} trial(s).",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (!is.null(schedule$cells) && is.data.frame(schedule$cells) && ("cell_name" %in% names(schedule$cells))) {
+    sched_cells <- as.character(schedule$cells$cell_name)
+    dgp_cells <- as.character(des$cells$cell_name)
+    if (!identical(sched_cells, dgp_cells)) {
+      cli::cli_abort(c(
+        "Cell ordering/definitions in {.arg schedule} ({.val {sched_cells}}) do not match {.code dgp$design} ({.val {dgp_cells}}).",
+        "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule} so cell IDs and factor contrasts align."
+      ))
+    }
+  }
+  cid <- tr$cell_id
+  if (!is.numeric(cid) || any(!is.finite(cid)) || any(cid != floor(cid) | cid < 1L | cid > des$n_cells)) {
+    cli::cli_abort("{.code schedule$trials$cell_id} must contain integer IDs in 1..{des$n_cells}.")
+  }
+  cid <- as.integer(cid)
+  missing_fn <- setdiff(des$factor_names, names(tr))
+  if (length(missing_fn) > 0L) {
+    cli::cli_abort(c(
+      "{.code schedule$trials} is missing factor column(s) required by {.code dgp$design}: {.val {missing_fn}}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  extra_fn <- setdiff(
+    names(tr),
+    c("subj", "item", "testlet", "subj_id", "item_id", "testlet_id", "list_id", "cell_id", "y", des$factor_names)
+  )
+  if (length(des$factor_names) == 0L && length(extra_fn) > 0L) {
+    cli::cli_abort(c(
+      "{.code schedule$trials} contains factor column(s) ({.val {extra_fn}}) absent from intercept-only {.code dgp$design}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  for (fn in des$factor_names) {
+    col_v <- tr[[fn]]
+    if (is.factor(col_v) && !identical(levels(col_v), des$factors[[fn]])) {
+      cli::cli_abort(c(
+        "Factor {.field {fn}} in {.arg schedule} has levels {.val {levels(col_v)}}, whereas {.code dgp$design} expects {.val {des$factors[[fn]]}}.",
+        "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule} so cell IDs and factor contrasts align."
+      ))
+    }
+    expected_v <- as.character(des$cells[[fn]][cid])
+    actual_v <- as.character(col_v)
+    if (anyNA(actual_v) || any(actual_v != expected_v)) {
+      cli::cli_abort(c(
+        "Cell-to-condition mapping in {.arg schedule} disagrees with {.code dgp$design} for factor {.field {fn}}.",
+        "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+      ))
+    }
+  }
+  # Structural allocation checks on trials (catches stripped or mutated schedules)
+  triple_keys <- paste(sid, iid, cid)
+  if (anyDuplicated(triple_keys) > 0L) {
+    cli::cli_abort(c(
+      "{.arg schedule} repeats the same experimental condition ({.field cell_id}) within a subject-item pair.",
+      "i" = "Each scheduled subject-item pair must present distinct conditions from {.code dgp$design}."
+    ))
+  }
+  pair_keys <- paste(sid, iid)
+  if (des$allocation != "crossed" && anyDuplicated(pair_keys) > 0L) {
+    cli::cli_abort(c(
+      "{.arg schedule} repeats subject-item pairs, which is incompatible with {.code allocation = '{des$allocation}'} in {.code dgp$design}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  pair_tab <- table(pair_keys)
+  if (any(pair_tab != des$trials_per_pair)) {
+    cli::cli_abort(c(
+      "{.arg schedule} does not present all {des$trials_per_pair} distinct within-pair condition(s) required by {.code dgp$design}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  eff_m <- if (is.null(des$items_per_subject) || as.integer(des$items_per_subject) == ni) {
+    ni
+  } else {
+    as.integer(des$items_per_subject)
+  }
+  items_by_s <- split(iid, factor(sid, levels = seq_len(ns)))
+  if (any(vapply(items_by_s, function(v) length(unique(v)) != eff_m, logical(1L)))) {
+    cli::cli_abort(c(
+      "{.arg schedule} does not assign exactly {eff_m} distinct item(s) to every subject in 1..{ns}.",
+      "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+    ))
+  }
+  if (isTRUE(des$has_testlet) && eff_m < ni) {
+    t_by_s <- split(as.integer(tr$testlet_id), factor(sid, levels = seq_len(ns)))
+    expected_rows_per_t <- des$testlet_size * des$trials_per_pair
+    if (any(vapply(t_by_s, function(tv) any(table(tv) != expected_rows_per_t), logical(1L)))) {
+      cli::cli_abort(c(
+        "{.arg schedule} splits testlets across subjects rather than presenting whole testlets of size {des$testlet_size}.",
+        "i" = "Generate {.arg schedule} from {.code dgp$design} via {.fn generate_design_schedule}."
+      ))
+    }
+  }
+  for (fn in des$between_subj) {
+    by_s <- split(as.character(tr[[fn]]), sid)
+    if (any(vapply(by_s, function(v) length(unique(v)) > 1L, logical(1L)))) {
+      cli::cli_abort(
+        "Factor {.field {fn}} varies within subjects in {.arg schedule}, contradicting {.arg between_subj} in {.code dgp$design}."
+      )
+    }
+  }
+  for (fn in des$between_item) {
+    by_i <- split(as.character(tr[[fn]]), iid)
+    if (any(vapply(by_i, function(v) length(unique(v)) > 1L, logical(1L)))) {
+      cli::cli_abort(
+        "Factor {.field {fn}} varies within items in {.arg schedule}, contradicting {.arg between_item} in {.code dgp$design}."
+      )
+    }
+  }
+  if (eff_m == ni) {
+    for (fn in des$within_subj) {
+      lv_expected <- des$factors[[fn]]
+      n_lv <- length(lv_expected)
+      by_s <- split(factor(as.character(tr[[fn]]), levels = lv_expected), factor(sid, levels = seq_len(ns)))
+      if (any(vapply(by_s, function(v) any(tabulate(v, nbins = n_lv) == 0L), logical(1L)))) {
+        cli::cli_abort(
+          "Factor {.field {fn}} is between-subject in {.arg schedule}, contradicting within-subject allocation ({.code '{des$allocation}'}) in {.code dgp$design}."
+        )
+      }
+      if (any(vapply(by_s, function(v) length(unique(tabulate(v, nbins = n_lv))) > 1L, logical(1L)))) {
+        cli::cli_abort(
+          "Factor {.field {fn}} is unbalanced within subjects in {.arg schedule}, contradicting {.code allocation = '{des$allocation}'} in {.code dgp$design}."
+        )
+      }
+    }
+    for (fn in des$within_item) {
+      lv_expected <- des$factors[[fn]]
+      n_lv <- length(lv_expected)
+      by_i <- split(factor(as.character(tr[[fn]]), levels = lv_expected), factor(iid, levels = seq_len(ni)))
+      if (any(vapply(by_i, function(v) any(tabulate(v, nbins = n_lv) == 0L), logical(1L)))) {
+        cli::cli_abort(
+          "Factor {.field {fn}} is between-item in {.arg schedule}, contradicting within-item allocation ({.code '{des$allocation}'}) in {.code dgp$design}."
+        )
+      }
+      if (any(vapply(by_i, function(v) length(unique(tabulate(v, nbins = n_lv))) > 1L, logical(1L)))) {
+        cli::cli_abort(
+          "Factor {.field {fn}} is unbalanced within items in {.arg schedule}, contradicting {.code allocation = '{des$allocation}'} in {.code dgp$design}."
+        )
+      }
+    }
+  }
+  invisible(TRUE)
 }
 
 draw_dgp_trials <- function(dgp, schedule, keep_person_item_effects = FALSE) {

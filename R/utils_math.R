@@ -2,6 +2,21 @@
 .glmmplanr_env <- new.env(parent = emptyenv())
 .glmmplanr_env$gh1d <- list()
 
+# Build-time MD5 stamp of package R/ and src/ files so validation checkpoint
+# resume can verify that the loaded glmmplanr installation matches the current
+# source tree even across separate temporary installation directories.
+.glmmplanr_source_md5 <- local({
+  pkg_files <- sort(c(
+    list.files("R", pattern = "\\.R$", full.names = TRUE),
+    list.files("src", pattern = "\\.(cpp|h)$", full.names = TRUE)
+  ), method = "radix")
+  if (length(pkg_files) > 0L && file.exists("DESCRIPTION")) {
+    tools::md5sum(pkg_files)
+  } else {
+    NULL
+  }
+})
+
 #' Standard-Normal Gauss-Hermite Quadrature Rule (1D)
 #'
 #' Computes nodes and weights for integrating against the standard normal
@@ -154,33 +169,41 @@ mafc_binomial <- function(chance = 0) {
     return(stats::binomial(link = "logit"))
   }
   g <- as.numeric(chance)
-  eps <- 1e-10
+  span <- 1 - g
+  lo_mu <- g + max(.Machine$double.eps * max(g, 1), .Machine$double.xmin)
+  hi_mu <- 1 - .Machine$double.eps
   link <- structure(
     list(
       linkfun = function(mu) {
-        mu_c <- pmin(pmax(mu, g + 1e-6), 1 - 1e-6)
+        mu_c <- pmin(pmax(as.numeric(mu), lo_mu), hi_mu)
         log((mu_c - g) / (1 - mu_c))
       },
       linkinv = function(eta) {
-        p <- stats::plogis(eta)
-        pmin(pmax(g + (1 - g) * p, g + eps), 1 - eps)
+        eta <- as.numeric(eta)
+        raw <- ifelse(
+          eta >= 0,
+          1 - span * stats::plogis(-eta),
+          g + span * stats::plogis(eta)
+        )
+        pmin(pmax(raw, lo_mu), hi_mu)
       },
       mu.eta = function(eta) {
-        p <- stats::plogis(eta)
-        pmax((1 - g) * p * (1 - p), eps)
+        eta <- as.numeric(eta)
+        pmax(span * stats::plogis(eta) * stats::plogis(-eta), span * .Machine$double.eps)
       },
       valideta = function(eta) TRUE,
-      name = sprintf("mafc_logit(%.4f)", g)
+      name = sprintf("mafc_logit(%s)", format(g, digits = 8L, trim = TRUE))
     ),
     class = "link-glm"
   )
   fam <- stats::binomial(link = link)
+  fam$validmu <- function(mu) all(is.finite(mu)) && all(mu > g & mu < 1)
   fam$initialize <- bquote({
     if (NCOL(y) == 1L) {
       if (is.factor(y)) y <- y != levels(y)[1L]
       n <- rep.int(1, nobs)
       y[weights == 0] <- 0
-      mustart <- .(g) + (1 - .(g)) * (weights * y + 0.5) / (weights + 1)
+      mustart <- .(g) + .(span) * (weights * y + 0.5) / (weights + 1)
       m <- weights * y
     } else {
       stop("mafc_binomial requires binary 0/1 response vector.", call. = FALSE)
@@ -201,7 +224,35 @@ validate_chance <- function(chance) {
     }
     cli::cli_abort(msg)
   }
+  if ((1 - as.numeric(chance)) <= 4 * .Machine$double.eps) {
+    cli::cli_abort(
+      "{.arg chance} is too close to 1 ({format(chance, digits = 17)}) to represent probabilities strictly inside (chance, 1) in double precision."
+    )
+  }
   invisible(chance)
+}
+
+validate_positive_int <- function(x, arg, min_val = 1L) {
+  if (!is.numeric(x) || !is.null(dim(x)) || length(x) != 1L ||
+      !is.finite(x) || x != floor(x) || x < min_val || x > .Machine$integer.max) {
+    if (min_val == 1L) {
+      cli::cli_abort("{.arg {arg}} must be a positive integer.")
+    }
+    cli::cli_abort("{.arg {arg}} must be an integer of at least {min_val}.")
+  }
+  as.integer(x)
+}
+
+validate_integer_seed <- function(seed, arg = "seed", allow_null = FALSE) {
+  if (allow_null && is.null(seed)) return(NULL)
+  if (!is.numeric(seed) || !is.null(dim(seed)) || length(seed) != 1L ||
+      !is.finite(seed) || seed != trunc(seed) || abs(seed) > .Machine$integer.max) {
+    if (allow_null) {
+      cli::cli_abort("{.arg {arg}} must be NULL or a single finite integer.")
+    }
+    cli::cli_abort("{.arg {arg}} must be a single finite integer.")
+  }
+  as.integer(seed)
 }
 
 # Box-Muller keeps the second normal draw outside .Random.seed. R exposes
@@ -210,16 +261,110 @@ uses_box_muller <- function() {
   exists(".Random.seed", .GlobalEnv, inherits = FALSE) && RNGkind()[2L] == "Box-Muller"
 }
 
-isolated_seeded_call <- function(fun, frame, call) {
-  supplied <- names(as.list(call)[-1L])
-  args <- mget(supplied, frame, inherits = FALSE)
-  path <- getNamespaceInfo(asNamespace("glmmplanr"), "path")
-  callr::r(function(fun, args, path) {
-    if (!file.exists(file.path(path, "Meta", "package.rds"))) {
-      pkgload::load_all(path, quiet = TRUE)
+collect_closure_globals <- function(x) {
+  fns <- list()
+  walk_obj <- function(v) {
+    if (is.function(v) && !is.primitive(v)) {
+      fns[[length(fns) + 1L]] <<- v
+    } else if (is.list(v) && !is.data.frame(v) && !is.object(v)) {
+      for (el in v) walk_obj(el)
     }
-    do.call(get(fun, asNamespace("glmmplanr"), inherits = FALSE), args)
-  }, list(fun = fun, args = args, path = path), show = TRUE)
+  }
+  walk_obj(x)
+  if (!length(fns)) return(list())
+
+  seen <- character(0)
+  found <- list()
+  queue <- fns
+  while (length(queue) > 0L) {
+    fn <- queue[[1L]]
+    queue <- queue[-1L]
+    fml_list <- as.list(formals(fn))
+    fml_nms <- if (is.null(names(fml_list))) character(0) else names(fml_list)
+    fml_syms <- character(0)
+    for (i in seq_along(fml_list)) {
+      sub_call <- as.call(c(list(quote(list)), unname(fml_list[i])))
+      fml_syms <- c(fml_syms, setdiff(all.names(sub_call), c("list", "", fml_nms[seq_len(i)])))
+    }
+    body_syms <- setdiff(all.names(body(fn)), fml_nms)
+    syms <- unique(c(fml_syms, body_syms))
+    for (s in syms) {
+      if (!nzchar(s) || (s %in% seen)) next
+      seen <- c(seen, s)
+      if (exists(s, envir = .GlobalEnv, inherits = FALSE)) {
+        val <- get(s, envir = .GlobalEnv, inherits = FALSE)
+        found[[s]] <- val
+        if (is.function(val) && !is.primitive(val)) {
+          queue[[length(queue) + 1L]] <- val
+        }
+      }
+    }
+  }
+  found
+}
+
+isolated_seeded_call <- function(fun, frame, call) {
+  ns <- asNamespace("glmmplanr")
+  fn_obj <- get(fun, envir = ns, inherits = FALSE)
+  fml_nms <- names(formals(fn_obj))
+  args <- list()
+  for (nm in setdiff(fml_nms, "...")) {
+    args[[nm]] <- get(nm, envir = frame, inherits = FALSE)
+  }
+  if ("..." %in% fml_nms) {
+    dots <- eval(quote(list(...)), envir = frame)
+    args <- c(args, dots)
+  }
+  global_bindings <- collect_closure_globals(args)
+  raw_path <- getNamespaceInfo(ns, "path")
+  path <- normalizePath(raw_path, winslash = "/", mustWork = TRUE)
+  is_installed_pkg <- file.exists(file.path(path, "Meta", "package.rds"))
+  pkg_lib <- if (is_installed_pkg) dirname(path) else NULL
+  lib_paths <- unique(c(pkg_lib, .libPaths()))
+  was_attached <- "package:glmmplanr" %in% search()
+  expected_md5 <- .glmmplanr_source_md5
+
+  callr::r(
+    function(fun, args, global_bindings, path, is_installed_pkg, pkg_lib, lib_paths, was_attached, expected_md5) {
+      .libPaths(unique(c(pkg_lib, lib_paths)))
+      if (is_installed_pkg) {
+        loadNamespace("glmmplanr", lib.loc = pkg_lib)
+        if (isTRUE(was_attached)) {
+          suppressPackageStartupMessages(
+            library("glmmplanr", lib.loc = pkg_lib, character.only = TRUE, quietly = TRUE)
+          )
+        }
+      } else {
+        pkgload::load_all(path, quiet = TRUE)
+      }
+      child_ns <- asNamespace("glmmplanr")
+      child_path <- normalizePath(getNamespaceInfo(child_ns, "path"), winslash = "/", mustWork = TRUE)
+      child_md5 <- get0(".glmmplanr_source_md5", envir = child_ns, inherits = FALSE)
+      if (!identical(child_path, path) || !identical(child_md5, expected_md5)) {
+        stop(sprintf(
+          "Isolated R session loaded glmmplanr from '%s' (md5=%s) instead of '%s' (md5=%s).",
+          child_path, as.character(child_md5), path, as.character(expected_md5)
+        ), call. = FALSE)
+      }
+      if (length(global_bindings) > 0L) {
+        list2env(global_bindings, envir = .GlobalEnv)
+      }
+      do.call(get(fun, envir = child_ns, inherits = FALSE), args)
+    },
+    list(
+      fun = fun,
+      args = args,
+      global_bindings = global_bindings,
+      path = path,
+      is_installed_pkg = is_installed_pkg,
+      pkg_lib = pkg_lib,
+      lib_paths = lib_paths,
+      was_attached = was_attached,
+      expected_md5 = expected_md5
+    ),
+    libpath = lib_paths,
+    show = TRUE
+  )
 }
 
 #' Generate Deterministic L'Ecuyer-CMRG Stream Seeds

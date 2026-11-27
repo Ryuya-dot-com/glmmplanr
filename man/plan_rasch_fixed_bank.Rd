@@ -55,15 +55,20 @@ item-block assignment (default \code{1L}).}
 \itemize{
 \item \code{"fixed_item"} (default): Marginal Maximum Likelihood with fixed item
 parameters identified by centering person abilities at mean zero
-(\code{constraint = "cases"}). Items with 0\% or 100\% observed correct
-responses have no finite fixed-item MLE (\code{NA_real_}), rendering bank-wide
-difficulty targets unevaluable (counted as misses in the \code{nsim}
-assurance denominator).
+(\code{constraint = "cases"}). Requires at least one participant with two or
+more observed responses on estimable (non-constant) items so the free
+person ability variance is identifiable from the data. Items with 0\% or
+100\% observed correct responses have no finite fixed-item MLE
+(\code{NA_real_}), rendering bank-wide difficulty targets unevaluable (counted
+as misses in the \code{nsim} assurance denominator).
 \item \code{"random_item"}: Crossed random-intercept GLMM (\code{y ~ 1 + (1 | subj) + (1 | item)}),
 estimating person and item effects by empirical Bayes conditional modes.
-When the fit succeeds, an administered item with zero correct or zero
-incorrect responses receives a finite difficulty. Shrinkage toward the
-bank mean can be substantial for extreme items.
+Requires at least two observed participants, two observed items, at least
+one participant with two or more observed responses, and at least one
+item with two or more observed responses so person and item variances are
+identifiable. When the fit succeeds, an administered item with zero
+correct or zero incorrect responses receives a finite difficulty.
+Shrinkage toward the bank mean can be substantial for extreme items.
 }}
 
 \item{engine}{Estimation engine: \code{"auto"} (default; selects \code{"mml"} for
@@ -97,11 +102,15 @@ A \code{glmmplanr_rasch} list (see \link{rasch_plan_methods}) with:
 \code{n_evaluable}, \code{rmse}, Wilson bounds (\code{mc_lo}, \code{mc_hi}), and \code{decision}.
 \item \code{recommended_n_subj}: Smallest candidate \code{n_subj} achieving \code{PASS} on
 \code{target == "joint"} (\code{NA_integer_} if none pass).
-\item \code{item_summary}: Per-item bias, RMSE, MAE, finite-estimate count, and
-all-zero / all-one counts across replications at each \code{n_subj}.
-\code{n_scheduled} and \code{component} describe the pre-missingness schedule
-(see \code{\link[=generate_design_schedule]{generate_design_schedule()}}).
+\item \code{item_summary}: Per-item \code{item_id}, \code{item_name} (preserving names from
+\code{item_difficulties} when supplied, otherwise character item indices),
+bias, RMSE, MAE, finite-estimate count, and all-zero / all-one counts
+across replications at each \code{n_subj}. \code{n_scheduled} and \code{component}
+describe the pre-missingness schedule (see \code{\link[=generate_design_schedule]{generate_design_schedule()}}).
 \item \code{replications}: Replication-level error and diagnostic table.
+\item \code{item_difficulties}: True item difficulties (retaining input names when supplied).
+\item \code{items_per_subject}, \code{item_seed}, \code{attrition}, \code{participant_dropout}, \code{design}:
+Retained item-allocation and missingness settings used to generate trials.
 }
 }
 \description{

@@ -102,8 +102,10 @@ optimize_sample_size <- function(
   early_stop <- control$early_stop
   nsim_sensitivity <- control$nsim_sensitivity
   parallel_backend <- control$parallel_backend
-  workers <- max(1L, as.integer(workers))
-  seed <- as.integer(seed)
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
+  nsim_final <- validate_positive_int(nsim_final, "nsim_final", 1L)
+  workers <- validate_positive_int(workers, "workers", 1L)
+  seed <- validate_integer_seed(seed, "seed")
   if (nsim_topup > 0L && identical(topup_policy, "pooled")) {
     cli::cli_warn(c(
       "Using {.code topup_policy = 'pooled'} combines Stage-2 and adaptive top-up replications.",
@@ -169,8 +171,15 @@ optimize_sample_size <- function(
     )
   }
 
+  full_grid_confirm <- identical(method, "grid") || (nrow(grid_df) <= (n_eval_init + n_eval_adapt))
+  if (!full_grid_confirm && n_eval_init < 1L) {
+    cli::cli_abort(c(
+      "{.arg n_eval_init} must be at least 1 when {.code method = 'surrogate_gp'} explores a subset of the candidate lattice ({nrow(grid_df)} candidate designs > {n_eval_init + n_eval_adapt} Stage-1 budget).",
+      "i" = "Increase {.arg n_eval_init} in {.fn optimize_control} or use {.code method = 'grid'}."
+    ))
+  }
   run_base <- is.null(scenarios) ||
-    any(vapply(scenarios, function(sc) dgp_is_equivalent(spec$dgp, sc), logical(1L)))
+    (!full_grid_confirm && any(vapply(scenarios, function(sc) dgp_is_equivalent(spec$dgp, sc), logical(1L))))
 
   core_res <- if (run_base) {
     run_single_spec_search(
@@ -241,17 +250,22 @@ optimize_sample_size <- function(
     verified_pareto <- extract_2d_pareto(verified_df[verified_df$decision_status == "pass", , drop = FALSE])
   }
 
-  sens_spec <- if (!is.null(robust_info) && !is.null(robust_info$specs) &&
+  sens_scen <- if (!is.null(robust_info) && !is.null(robust_info$specs) &&
                    nzchar(robust_info$toughest_scenario) &&
                    (robust_info$toughest_scenario %in% names(robust_info$specs))) {
-    robust_info$specs[[robust_info$toughest_scenario]]
+    as.character(robust_info$toughest_scenario[1L])
+  } else {
+    NA_character_
+  }
+  sens_spec <- if (!is.na(sens_scen)) {
+    robust_info$specs[[sens_scen]]
   } else {
     spec
   }
 
   sens_df <- if (as.integer(nsim_sensitivity) > 0L && has_random_slopes(sens_spec$dgp)) {
     if (verbose) {
-      scen_lbl <- if (!is.null(robust_info)) paste0(" (", robust_info$toughest_scenario, ")") else ""
+      scen_lbl <- if (!is.na(sens_scen)) paste0(" (", sens_scen, ")") else ""
       cli::cli_inform(
         "Computing 3-level random-slope sensitivity analysis at N_subj = {optimal$n_subj}, N_item = {optimal$n_item}{scen_lbl}..."
       )
@@ -271,7 +285,8 @@ optimize_sample_size <- function(
       seed = seed,
       workers = workers,
       parallel_backend = parallel_backend,
-      verbose = verbose
+      verbose = verbose,
+      source_scenario = sens_scen
     )
   } else {
     NULL
@@ -324,12 +339,14 @@ optimize_sample_size <- function(
         n_grid_total = nrow(grid_df),
         n_grid_verified = nrow(verified_df),
         n_stage2_decisions = n_decisions,
-        simulation_version = 3L,
+        simulation_version = 5L,
         n_grid_stride = n_grid_stride,
         n_eval_init = as.integer(n_eval_init),
         n_eval_adapt = as.integer(n_eval_adapt),
         nsim_init = as.integer(nsim_init),
         nsim_final = as.integer(nsim_final),
+        nsim_sensitivity = as.integer(nsim_sensitivity),
+        sensitivity_scenario = if (!is.null(sens_df)) sens_scen else NA_character_,
         nsim_topup = nsim_topup,
         topup_policy = topup_policy,
         topup_rounds = if (isTRUE(used_topup_rows)) 1L else 0L,
@@ -373,8 +390,26 @@ switch_preference <- function(
   if (!inherits(result, "glmmplanr_result")) {
     cli::cli_abort("{.arg result} must be a {.cls glmmplanr_result} object.")
   }
-  if (is.null(result$spec$prob_boot) && result$spec$scale %in% c("pp", "prob")) {
-    cli::cli_abort("Rerun this probability-scale plan to verify the target contrast under the current interval method.")
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
+  all_specs <- Filter(Negate(is.null), c(list(result$spec), result$robust$specs))
+  for (sp_chk in all_specs) {
+    validate_factor_names_vec(sp_chk$dgp$design$factor_names)
+    if (is.null(sp_chk$prob_boot) && sp_chk$scale %in% c("pp", "prob")) {
+      cli::cli_abort("Rerun this probability-scale plan to verify the target contrast under the current interval method.")
+    }
+  }
+  incompat <- diagnose_saved_plan_incompatibility(result)
+  if (length(incompat) > 0L) {
+    ver_lbl <- if (is.null(result$search_meta$simulation_version)) {
+      "unversioned (< 3)"
+    } else {
+      as.character(result$search_meta$simulation_version)
+    }
+    cli::cli_warn(c(
+      "Re-ranking candidates from an earlier {.pkg glmmplanr} simulation contract ({.code simulation_version = {ver_lbl}}).",
+      "!" = incompat[1L],
+      "i" = "Stored candidate decisions reflect that earlier calculation; rerun {.fn optimize_sample_size} for a current recommendation."
+    ))
   }
   prefer <- match.arg(prefer)
 
@@ -385,8 +420,13 @@ switch_preference <- function(
   if (!is.null(result$robust)) {
     rc <- result$robust
     ev <- attach_grid_meta(rc$scenario_evaluations, result$surface)
-    ranked <- rank_scenarios(ev, rc$standard_scenario, rc$toughest_scenario, result$spec)
+    scen_ord <- if (!is.null(rc$specs)) names(rc$specs) else NULL
+    ranked <- rank_scenarios(
+      ev, rc$standard_scenario, rc$toughest_scenario, result$spec,
+      prefer = prefer, scen_order = scen_ord
+    )
     ranked$specs <- rc$specs
+    ranked$exploratory_evaluations <- rc$exploratory_evaluations
     result$robust <- ranked
     result$verified <- ranked$verified
   } else {
@@ -396,7 +436,7 @@ switch_preference <- function(
     result$evaluated <- attach_grid_meta(result$evaluated, result$surface)
   }
 
-  sel <- select_recommended_from_verified(result$verified, result$spec)
+  sel <- select_recommended_from_verified(result$verified, result$spec, prefer = prefer)
   result$optimal <- sel$optimal
   result$optimal_high_confidence <- sel$optimal_high_confidence
   result$decision_status <- sel$optimal$decision_status[1L]
@@ -404,14 +444,38 @@ switch_preference <- function(
   confirmed <- (result$verified$decision_status == "pass")
   result$verified_pareto <- extract_2d_pareto(result$verified[confirmed, , drop = FALSE])
   result$pareto_frontier <- result$verified_pareto
-  if (!is.null(result$sensitivity) &&
-      any(result$sensitivity$n_subj != sel$optimal$n_subj | result$sensitivity$n_item != sel$optimal$n_item)) {
-    if (isTRUE(verbose)) {
-      cli::cli_inform(
-        "Cleared stored random-slope sensitivity table because selected design moved to ({sel$optimal$n_subj}, {sel$optimal$n_item})."
-      )
+  if (!is.null(result$sensitivity)) {
+    opt_scen <- if (!is.null(result$robust) && !is.null(sel$optimal$scenario) &&
+                    length(sel$optimal$scenario) > 0L) {
+      as.character(sel$optimal$scenario[1L])
+    } else {
+      NA_character_
     }
-    result$sensitivity <- NULL
+    sens_src <- attr(result$sensitivity, "source_scenario")
+    if ((is.null(sens_src) || !length(sens_src)) && "source_scenario" %in% names(result$sensitivity)) {
+      sens_src <- as.character(result$sensitivity$source_scenario[1L])
+    }
+    if ((is.null(sens_src) || !length(sens_src)) && !is.null(result$search_meta$sensitivity_scenario)) {
+      sens_src <- as.character(result$search_meta$sensitivity_scenario[1L])
+    }
+    coord_changed <- any(
+      result$sensitivity$n_subj != sel$optimal$n_subj |
+        result$sensitivity$n_item != sel$optimal$n_item
+    )
+    scen_changed <- !is.na(opt_scen) && (
+      is.null(sens_src) || length(sens_src) == 0L || is.na(sens_src[1L]) ||
+        !identical(as.character(sens_src[1L]), opt_scen)
+    )
+    if (coord_changed || scen_changed) {
+      if (isTRUE(verbose)) {
+        scen_msg <- if (scen_changed) paste0(" (scenario = ", opt_scen, ")") else ""
+        cli::cli_inform(
+          "Cleared stored random-slope sensitivity table because selected design moved to ({sel$optimal$n_subj}, {sel$optimal$n_item}){scen_msg}."
+        )
+      }
+      result$sensitivity <- NULL
+      result$search_meta$sensitivity_scenario <- NA_character_
+    }
   }
   result
 }
@@ -453,14 +517,14 @@ reclassify_verified_mc <- function(df, spec, conf_level) {
     denom <- if (spec$failure_policy == "effective") n_tot else n_val
     valid_gate_ok <- if (spec$failure_policy == "effective") TRUE else ((n_val / n_tot) >= spec$min_valid_rate)
 
-    k_sig <- if (is.finite(df$effective_power[i])) round(df$effective_power[i] * n_tot) else NA_integer_
+    k_sig <- if (is.finite(df$effective_power[i])) min(denom, round(df$effective_power[i] * n_tot)) else NA_integer_
     mc_pow <- wilson_mc_ci(k_sig, denom, conf_level = conf_level)
     df$power_mc_lo[i] <- unname(mc_pow["lo"])
     df$power_mc_hi[i] <- unname(mc_pow["hi"])
 
     mc_aipe <- c(lo = NA_real_, hi = NA_real_)
     if (!is.null(spec$ci_width) && "effective_aipe_prob" %in% names(df) && is.finite(df$effective_aipe_prob[i])) {
-      k_aipe <- round(df$effective_aipe_prob[i] * n_tot)
+      k_aipe <- min(denom, round(df$effective_aipe_prob[i] * n_tot))
       mc_aipe <- wilson_mc_ci(k_aipe, denom, conf_level = conf_level)
       df$aipe_mc_lo[i] <- unname(mc_aipe["lo"])
       df$aipe_mc_hi[i] <- unname(mc_aipe["hi"])
@@ -468,13 +532,13 @@ reclassify_verified_mc <- function(df, spec, conf_level) {
 
     mc_joint <- c(lo = NA_real_, hi = NA_real_)
     if (!is.null(spec$ci_width) && "k_joint" %in% names(df) && is.finite(df$k_joint[i])) {
-      mc_joint <- wilson_mc_ci(df$k_joint[i], denom, conf_level = conf_level)
+      mc_joint <- wilson_mc_ci(min(denom, df$k_joint[i]), denom, conf_level = conf_level)
       df$joint_mc_lo[i] <- unname(mc_joint["lo"])
       df$joint_mc_hi[i] <- unname(mc_joint["hi"])
     }
 
     k_rope <- if ("effective_rope_prob" %in% names(df) && is.finite(df$effective_rope_prob[i])) {
-      round(df$effective_rope_prob[i] * n_tot)
+      min(denom, round(df$effective_rope_prob[i] * n_tot))
     } else {
       NA_integer_
     }
@@ -493,6 +557,7 @@ reclassify_verified_mc <- function(df, spec, conf_level) {
       mc_joint = mc_joint
     )
   }
+  df$mc_conf_level_used <- rep(conf_level, nrow(df))
   df
 }
 
@@ -608,6 +673,12 @@ run_single_spec_search <- function(
     eval_all <- verified_df
     surf <- build_surrogate_surface(grid_df, eval_all, spec, prefer = prefer)
   } else {
+    if (n_eval_init < 1L) {
+      cli::cli_abort(c(
+        "{.arg n_eval_init} must be at least 1 when {.code method = 'surrogate_gp'} explores a subset of the candidate lattice ({n_grid} candidate designs > {n_eval_init + n_eval_adapt} Stage-1 budget).",
+        "i" = "Increase {.arg n_eval_init} in {.fn optimize_control} or use {.code method = 'grid'}."
+      ))
+    }
     init_idx <- select_initial_lhs_points(grid_df, n_init = n_eval_init, seed = seed)
     if (verbose) {
       cli::cli_inform(
@@ -703,7 +774,8 @@ run_single_spec_search <- function(
       gp_feas_idx <- which(surf_refit$pred_criterion_met &
         !(paste(surf_refit$n_subj, surf_refit$n_item) %in% paste(verified_df$n_subj, verified_df$n_item)))
       if (length(gp_feas_idx) > 0L) {
-        best_backup <- gp_feas_idx[order(surf_refit$preference_score[gp_feas_idx])[seq_len(min(2L, length(gp_feas_idx)))]]
+        ord_bk <- preference_order(surf_refit[gp_feas_idx, , drop = FALSE], prefer = prefer)
+        best_backup <- gp_feas_idx[ord_bk[seq_len(min(2L, length(gp_feas_idx)))]]
         ex_out <- evaluate_grid_batch(
           spec = verification_spec(nrow(verified_df) + length(best_backup)),
           grid_sub = grid_df[best_backup, , drop = FALSE],
@@ -778,7 +850,7 @@ run_single_spec_search <- function(
     surf <- build_surrogate_surface(grid_df, eval_for_gp, spec, prefer = prefer)
   }
 
-  sel <- select_recommended_from_verified(verified_df, spec)
+  sel <- select_recommended_from_verified(verified_df, spec, prefer = prefer)
 
   list(
     optimal = sel$optimal,
@@ -790,17 +862,26 @@ run_single_spec_search <- function(
   )
 }
 
-select_recommended_from_verified <- function(verified_df, spec) {
+select_recommended_from_verified <- function(verified_df, spec, prefer = NULL) {
   passed <- which(verified_df$decision_status == "pass")
   pending <- which(verified_df$decision_status == "indeterminate")
 
   if (length(passed) || length(pending)) {
     rows <- if (length(passed)) passed else pending
-    best <- rows[order(verified_df$preference_score[rows], -verified_df$power[rows],
-                       verified_df$ci_width_mean[rows])[1L]]
+    sub_df <- verified_df[rows, , drop = FALSE]
+    ord <- preference_order(
+      sub_df,
+      prefer = prefer,
+      tie1 = -ifelse(is.na(sub_df$power), 0.0, sub_df$power),
+      tie2 = sub_df$ci_width_mean
+    )
+    best <- rows[ord[1L]]
   } else {
     att <- attainment_score(verified_df, spec)
-    best <- order(-att, verified_df$preference_score)[1L]
+    sub_ord <- preference_order(verified_df, prefer = prefer)
+    rk_pref <- integer(nrow(verified_df))
+    rk_pref[sub_ord] <- seq_along(sub_ord)
+    best <- order(-att, rk_pref)[1L]
   }
   candidate <- verified_df[best, , drop = FALSE]
   rownames(candidate) <- NULL
@@ -914,6 +995,103 @@ pool_replications <- function(initial, extra, spec, row, extra_summary) {
   out
 }
 
+diagnose_saved_plan_incompatibility <- function(result) {
+  meta <- result$search_meta
+  old_specs <- Filter(Negate(is.null), c(list(result$spec), result$robust$specs))
+  reasons <- character(0)
+  if (is.null(meta$simulation_version) &&
+      any(vapply(old_specs, function(sp) isTRUE(sp$dgp$design$attrition > 0), logical(1L)))) {
+    reasons <- c(reasons, "Earlier versions used a different trial missingness mechanism.")
+  }
+  if (is.null(meta$simulation_version) || meta$simulation_version < 4L) {
+    used_old_prob_scale <- vapply(old_specs, function(sp) {
+      w <- sp$contrast_weights
+      isTRUE(
+        sp$scale %in% c("pp", "prob") && length(w) > 0L && all(is.finite(w)) &&
+          any(abs(w) > 0) && abs(max(abs(w)) - 1.0) > 1e-12
+      )
+    }, logical(1L))
+    used_old_partial_fastpath <- vapply(old_specs, function(sp) {
+      isTRUE(
+        !is.null(sp$dgp$design$items_per_subject) &&
+          isTRUE(sp$dgp$design$attrition == 0) &&
+          isTRUE(dropout_rate(sp$dgp$design) == 0)
+      )
+    }, logical(1L))
+    if (any(used_old_prob_scale)) {
+      reasons <- c(
+        reasons,
+        "Earlier versions computed probability-scale standard errors on unnormalized contrast weights, so saved candidate decisions cannot be combined with updated evaluations."
+      )
+    }
+    if (any(used_old_partial_fastpath)) {
+      reasons <- c(
+        reasons,
+        "Earlier versions skipped cell-identifiability checks on zero-attrition partial-presentation schedules."
+      )
+    }
+  }
+  if (is.null(meta$simulation_version) || meta$simulation_version < 3L) {
+    used_old_scale <- vapply(old_specs, function(sp) {
+      isTRUE(sp$prior_tau_sd < 0.5) &&
+        (identical(sp$engine, "bayes_laplace") || identical(sp$on_singular, "switch_bayes"))
+    }, logical(1L))
+    if (any(used_old_scale)) {
+      reasons <- c(
+        reasons,
+        "The previous regularized estimator used 0.5 for `prior_tau_sd` values below 0.5."
+      )
+    }
+  }
+  if (is.null(meta$simulation_version) || meta$simulation_version < 5L) {
+    used_pos_chance <- vapply(old_specs, function(sp) {
+      isTRUE(sp$dgp$chance > 0) && !identical(sp$analysis_link, "logit")
+    }, logical(1L))
+    used_nondefault_assurance <- vapply(old_specs, function(sp) {
+      ca <- sp$ci_assurance
+      isTRUE(!is.null(ca) && length(ca) == 1L && is.finite(ca) && abs(ca - 0.80) > 1e-12)
+    }, logical(1L))
+    used_cond_zero_valid <- any(vapply(old_specs, function(sp) {
+      identical(sp$failure_policy, "conditional")
+    }, logical(1L))) && is.data.frame(result$verified) && ("n_valid" %in% names(result$verified)) &&
+      any(result$verified$n_valid == 0L, na.rm = TRUE)
+    if (any(used_pos_chance)) {
+      reasons <- c(
+        reasons,
+        "Earlier versions (simulation_version < 5) clamped positive-chance starting intercepts and mafc_binomial() link evaluations, changing valid-fit counts and pass/fail decisions."
+      )
+    }
+    if (any(used_nondefault_assurance)) {
+      reasons <- c(
+        reasons,
+        "Earlier versions (simulation_version < 5) stored the ci_assurance quantile rather than the 80th percentile in ci_width_q80."
+      )
+    }
+    if (isTRUE(used_cond_zero_valid)) {
+      reasons <- c(
+        reasons,
+        "Earlier versions (simulation_version < 5) computed non-missing conditional Wilson intervals from nsim when n_valid == 0."
+      )
+    }
+  }
+  reasons
+}
+
+check_compatible_saved_plan <- function(result) {
+  old_specs <- Filter(Negate(is.null), c(list(result$spec), result$robust$specs))
+  for (sp in old_specs) {
+    validate_factor_names_vec(sp$dgp$design$factor_names)
+  }
+  if (any(vapply(old_specs, function(sp) is.null(sp$prob_boot) && sp$scale %in% c("pp", "prob"), logical(1L)))) {
+    cli::cli_abort("Rerun this probability-scale plan with {.fn optimize_sample_size} before top-up verification; saved candidates used an earlier interval specification.")
+  }
+  reasons <- diagnose_saved_plan_incompatibility(result)
+  if (length(reasons) > 0L) {
+    cli::cli_abort(paste(c("Rerun this plan with {.fn optimize_sample_size} before top-up verification.", reasons), collapse = " "))
+  }
+  invisible(TRUE)
+}
+
 #' Run Additional Independent Top-Up Replications on Borderline Candidates
 #'
 #' Executes `nsim_extra` fresh, independent Monte Carlo replications (using a
@@ -979,32 +1157,16 @@ topup_verification <- function(
   }
   topup_policy <- match.arg(topup_policy)
   sequential_adjustment <- match.arg(sequential_adjustment)
-  nsim_extra <- as.integer(nsim_extra)
-  if (nsim_extra < 1L) cli::cli_abort("{.arg nsim_extra} must be a positive integer.")
+  if (!rlang::is_bool(verbose)) cli::cli_abort("{.arg verbose} must be TRUE or FALSE.")
+  nsim_extra <- validate_positive_int(nsim_extra, "nsim_extra", 1L)
+  workers <- validate_positive_int(workers, "workers", 1L)
 
-  if (is.null(result$spec$prob_boot) && result$spec$scale %in% c("pp", "prob")) {
-    cli::cli_abort("Rerun this probability-scale plan before pooling replications with the current interval method.")
-  }
+  check_compatible_saved_plan(result)
   meta <- result$search_meta
-  old_specs <- c(list(result$spec), result$robust$specs)
-  if (identical(topup_policy, "pooled") && is.null(meta$simulation_version) &&
-      any(vapply(old_specs, function(sp) isTRUE(sp$dgp$design$attrition > 0), logical(1)))) {
-    cli::cli_abort("Rerun this plan before pooling results from different trial missingness mechanisms.")
-  }
   round_num <- if (is.null(meta$topup_rounds)) 1L else as.integer(meta$topup_rounds) + 1L
   rc <- result$robust
   decisions <- if (is.null(rc)) result$verified else rc$scenario_evaluations
   if (!any(decisions$decision_status == "indeterminate")) return(result)
-  if (identical(topup_policy, "pooled") &&
-      (is.null(meta$simulation_version) || meta$simulation_version < 3L)) {
-    used_old_scale <- vapply(old_specs, function(sp) {
-      isTRUE(sp$prior_tau_sd < 0.5) &&
-        (identical(sp$engine, "bayes_laplace") || identical(sp$on_singular, "switch_bayes"))
-    }, logical(1))
-    if (any(used_old_scale)) {
-      cli::cli_abort("Rerun this plan before pooling replications. The previous regularized estimator used 0.5 for {.arg prior_tau_sd} values below 0.5.")
-    }
-  }
   if (identical(topup_policy, "pooled")) {
     cli::cli_warn(c(
       "Pooling prior Stage-2 and adaptive top-up replications ({.code topup_policy = 'pooled'}).",
@@ -1042,12 +1204,56 @@ topup_verification <- function(
     )
   }
 
+  extract_surface_grid <- function(surf, des) {
+    if (!is.data.frame(surf) || !all(c("n_subj", "n_item") %in% names(surf))) return(NULL)
+    cols <- intersect(
+      c("n_subj", "n_item", "orig_grid_id", "grid_id", "n_trials_scheduled",
+        "n_trials_expected", "n_trials_scheduled_max", "n_trials_scheduled_mean",
+        "preference_score"),
+      names(surf)
+    )
+    g <- surf[, cols, drop = FALSE]
+    if (!("orig_grid_id" %in% names(g))) g$orig_grid_id <- seq_len(nrow(g))
+    if (!("grid_id" %in% names(g))) g$grid_id <- seq_len(nrow(g))
+    if (!("n_trials_scheduled" %in% names(g))) {
+      g$n_trials_scheduled <- compute_scheduled_trials(des, g$n_subj, g$n_item)
+    }
+    if (!("n_trials_expected" %in% names(g))) {
+      g$n_trials_expected <- compute_expected_trials(des, g$n_subj, g$n_item)
+    }
+    g
+  }
+
   if (is.null(rc)) {
     result$verified <- topup_rows(
       result$verified, result$spec, result, nsim_extra,
       50L + round_num, topup_policy, workers, parallel_backend, verbose,
       conf_level_override = conf_round
     )
+    s1_rows <- if (!is.null(result$evaluated) && ("stage" %in% names(result$evaluated))) {
+      result$evaluated[result$evaluated$stage %in% c("surrogate_init", "surrogate_adapt"), , drop = FALSE]
+    } else {
+      NULL
+    }
+    result$evaluated <- if (!is.null(s1_rows) && nrow(s1_rows) > 0L) {
+      align_and_bind_rows(list(s1_rows, result$verified))
+    } else {
+      result$verified
+    }
+    grid_base <- extract_surface_grid(result$surface, result$spec$dgp$design)
+    if (!is.null(grid_base)) {
+      s1_keep <- if (!is.null(s1_rows) && nrow(s1_rows) > 0L) {
+        s1_rows[!(paste(s1_rows$n_subj, s1_rows$n_item) %in%
+                    paste(result$verified$n_subj, result$verified$n_item)), , drop = FALSE]
+      } else {
+        NULL
+      }
+      eval_for_gp <- align_and_bind_rows(list(s1_keep, result$verified))
+      eval_mask <- if ("evaluated" %in% names(result$surface)) result$surface$evaluated else NULL
+      result$surface <- build_surrogate_surface(
+        grid_base, eval_for_gp, result$spec, evaluated_mask = eval_mask, prefer = result$prefer
+      )
+    }
   } else {
     if (is.null(rc$specs)) cli::cli_abort("Rerun this saved plan to recover the scenario models for top-up.")
     ev <- rc$scenario_evaluations
@@ -1063,6 +1269,20 @@ topup_verification <- function(
     })
     ev_new <- align_and_bind_rows(updated)
     result$robust$scenario_evaluations <- ev_new
+    result$evaluated <- ev_new
+    grid_base <- extract_surface_grid(result$surface, result$spec$dgp$design)
+    if (!is.null(grid_base)) {
+      result$surface <- rebuild_multi_scenario_surface(
+        grid_base, ev_new, rc$specs, rc$exploratory_evaluations, prefer = result$prefer
+      )
+    }
+  }
+  nsim_sens <- if (!is.null(result$search_meta$nsim_sensitivity)) {
+    as.integer(result$search_meta$nsim_sensitivity)
+  } else if (!is.null(result$sensitivity) && nrow(result$sensitivity) > 0L) {
+    as.integer(result$sensitivity$nsim[1L])
+  } else {
+    0L
   }
   result$search_meta$topup_rounds <- round_num
   result$search_meta$topup_policy <- topup_policy
@@ -1074,7 +1294,49 @@ topup_verification <- function(
   if (identical(topup_policy, "pooled")) {
     result$search_meta$adaptive_pooled <- TRUE
   }
-  switch_preference(result, result$prefer)
+  res_out <- switch_preference(result, result$prefer, verbose = FALSE)
+  if (nsim_sens > 0L && is.null(res_out$sensitivity)) {
+    opt_new <- res_out$optimal
+    sens_scen_new <- if (!is.null(res_out$robust) && !is.null(res_out$robust$specs) &&
+                         !is.null(opt_new$scenario) && length(opt_new$scenario) > 0L &&
+                         (as.character(opt_new$scenario[1L]) %in% names(res_out$robust$specs))) {
+      as.character(opt_new$scenario[1L])
+    } else {
+      NA_character_
+    }
+    sens_spec_new <- if (!is.na(sens_scen_new)) res_out$robust$specs[[sens_scen_new]] else res_out$spec
+    if (has_random_slopes(sens_spec_new$dgp) &&
+        !is.null(res_out$search_meta$seed) && !is.null(res_out$search_meta$n_grid_stride)) {
+      if (isTRUE(verbose)) {
+        scen_lbl <- if (!is.na(sens_scen_new)) paste0(" (", sens_scen_new, ")") else ""
+        cli::cli_inform(
+          "Updating 3-level random-slope sensitivity analysis at N_subj = {opt_new$n_subj}, N_item = {opt_new$n_item}{scen_lbl}..."
+        )
+      }
+      surf_df <- res_out$surface
+      opt_orig_id <- if (is.data.frame(surf_df) && "orig_grid_id" %in% names(surf_df)) {
+        surf_df$orig_grid_id[surf_df$n_subj == opt_new$n_subj & surf_df$n_item == opt_new$n_item][1L]
+      } else {
+        1L
+      }
+      if (is.na(opt_orig_id)) opt_orig_id <- 1L
+      res_out$sensitivity <- compute_sensitivity_table(
+        spec = sens_spec_new,
+        n_subj = opt_new$n_subj,
+        n_item = opt_new$n_item,
+        orig_grid_id = opt_orig_id,
+        n_grid_stride = res_out$search_meta$n_grid_stride,
+        nsim = nsim_sens,
+        seed = res_out$search_meta$seed,
+        workers = workers,
+        parallel_backend = parallel_backend,
+        verbose = verbose,
+        source_scenario = sens_scen_new
+      )
+      res_out$search_meta$sensitivity_scenario <- if (!is.null(res_out$sensitivity)) sens_scen_new else NA_character_
+    }
+  }
+  res_out
 }
 
 topup_rows <- function(
@@ -1218,7 +1480,7 @@ topup_rows <- function(
       ver[[nm]][r_i] <- pooled(old_r[[nm]], new_r[[nm]], n1, n2)
     }
     # Marginal summaries do not retain the order statistics or subgroup counts.
-    for (nm in intersect(c("ci_width_q80", "power_nonsingular", "coverage_nonsingular",
+    for (nm in intersect(c("ci_width_q80", "ci_width_q_assurance", "power_nonsingular", "coverage_nonsingular",
                            "type_m_error", "type_s_error", "reduced_power", "reduced_coverage",
                            "reduced_ci_width_mean"), names(ver))) ver[[nm]][r_i] <- NA_real_
 
@@ -1229,6 +1491,7 @@ topup_rows <- function(
     ver$decision_status[r_i] <- compute_decision_status(
       sp_eval, valid_gate_ok, mc_pow, mc_aipe, mc_rope, mc_joint
     )
+    ver$mc_conf_level_used[r_i] <- sp_eval$mc_conf_level
   }
 
   ver
@@ -1412,9 +1675,27 @@ evaluate_grid_batch <- function(
     ))
 
     spec_999 <- spec
-    spec_999$mc_conf_level <- 0.999
+    spec_999$mc_conf_level <- max(0.999, spec$mc_conf_level)
     idx_int <- seq_len(n_interim)
+    n_rem <- nsim - n_interim
     for (p_i in seq_len(n_pts)) {
+      v_int <- sum(valid_target_fit(
+        est_mat[p_i, idx_int], se_mat[p_i, idx_int],
+        conv_mat[p_i, idx_int], status_mat[p_i, idx_int],
+        pest_mat[p_i, idx_int], pse_mat[p_i, idx_int], spec$scale
+      ))
+      valid_possible <- if (spec$failure_policy == "effective") {
+        TRUE
+      } else {
+        ((v_int + n_rem) / nsim) >= (spec$min_valid_rate - 1e-12)
+      }
+      if (!valid_possible) {
+        curtailed_mask[p_i] <- TRUE
+        next
+      }
+      if (spec$failure_policy == "conditional" && v_int == 0L) {
+        next
+      }
       r999 <- summarize_mc_metrics(
         est = est_mat[p_i, idx_int],
         se = se_mat[p_i, idx_int],
@@ -1429,7 +1710,8 @@ evaluate_grid_batch <- function(
         n_subj = grid_sub$n_subj[p_i],
         n_item = grid_sub$n_item[p_i],
         nsim = n_interim,
-        engine_use = engine_use
+        engine_use = engine_use,
+        valid_gate_override = TRUE
       )
       if (identical(r999$decision_status, "fail")) {
         curtailed_mask[p_i] <- TRUE
@@ -1533,6 +1815,7 @@ build_surrogate_surface <- function(grid_df, eval_df, spec, evaluated_mask = NUL
   denom_col <- if (spec$failure_policy == "effective") "nsim" else "n_valid"
 
   gp_power <- fit_monotone_gp_prob(eval_df, grid_df, prob_col = "power", nsim_col = denom_col)
+  gp_valid <- fit_monotone_gp_prob(eval_df, grid_df, prob_col = "valid_rate", nsim_col = "nsim")
   gp_width <- fit_monotone_gp_width(eval_df, grid_df, width_col = "ci_width_mean")
   gp_width_pp <- fit_monotone_gp_width(eval_df, grid_df, width_col = "prob_ci_width_mean_pp")
 
@@ -1561,15 +1844,18 @@ build_surrogate_surface <- function(grid_df, eval_df, spec, evaluated_mask = NUL
     gp_power = gp_power,
     gp_aipe = gp_aipe,
     gp_rope = gp_rope, gp_joint = gp_joint,
+    gp_valid = gp_valid,
     evaluated_mask = evaluated_mask,
     prefer = prefer
   )
 
-  surf$pred_power <- gp_power$mean_prob
-  surf$pred_power_sd <- gp_power$sd_probit * stats::dnorm(gp_power$mean_probit)
+  has_null <- can_define_null_target(spec)
+  surf$pred_power <- if (has_null) gp_power$mean_prob else rep(NA_real_, nrow(grid_df))
+  surf$pred_power_sd <- if (has_null) gp_power$sd_probit * stats::dnorm(gp_power$mean_probit) else rep(NA_real_, nrow(grid_df))
+  surf$pred_valid_rate <- gp_valid$mean_prob
   surf$pred_ci_width <- gp_width$mean_width
   surf$pred_prob_ci_width_pp <- gp_width_pp$mean_width
-  surf$pred_joint_prob <- if (is.null(gp_joint)) NA_real_ else gp_joint$mean_prob
+  surf$pred_joint_prob <- if (!has_null || is.null(gp_joint)) NA_real_ else gp_joint$mean_prob
   surf$pred_aipe_prob <- gp_aipe$mean_prob
   surf$pred_rope_prob <- gp_rope$mean_prob
   surf$prob_feasible <- acq_info$prob_feasible
@@ -1577,7 +1863,43 @@ build_surrogate_surface <- function(grid_df, eval_df, spec, evaluated_mask = NUL
   surf$acquisition <- acq_info$acq
   surf$evaluated <- evaluated_mask
 
-  surf$pred_criterion_met <- vapply(seq_len(nrow(surf)), function(i) {
+  obs_valid_rate <- rep(NA_real_, nrow(surf))
+  obs_criterion_met <- rep(NA, nrow(surf))
+  obs_attainment <- rep(NA_real_, nrow(surf))
+  if (!is.null(eval_df) && nrow(eval_df) > 0L) {
+    ord_ev <- order(eval_df$nsim, seq_len(nrow(eval_df)), decreasing = TRUE)
+    ev_best <- eval_df[ord_ev, , drop = FALSE]
+    ev_best <- ev_best[!duplicated(paste(ev_best$n_subj, ev_best$n_item)), , drop = FALSE]
+    m_idx <- match(paste(surf$n_subj, surf$n_item), paste(ev_best$n_subj, ev_best$n_item))
+    hit <- !is.na(m_idx)
+    if (any(hit)) {
+      if ("valid_rate" %in% names(ev_best)) {
+        obs_valid_rate[hit] <- ev_best$valid_rate[m_idx[hit]]
+      }
+      if ("criterion_met" %in% names(ev_best)) {
+        obs_criterion_met[hit] <- as.logical(ev_best$criterion_met[m_idx[hit]])
+      }
+      obs_attainment[hit] <- attainment_score(ev_best[m_idx[hit], , drop = FALSE], spec)
+    }
+  }
+  surf$obs_valid_rate <- obs_valid_rate
+  surf$obs_criterion_met <- obs_criterion_met
+  surf$obs_attainment <- obs_attainment
+
+  valid_pred_ok <- if (identical(spec$failure_policy, "conditional")) {
+    thr_sm <- smooth_prob_threshold(
+      spec$min_valid_rate,
+      if (!is.null(gp_valid$n_ref)) gp_valid$n_ref else NA_real_
+    ) - 1e-6
+    ifelse(
+      !is.na(obs_valid_rate),
+      obs_valid_rate >= spec$min_valid_rate,
+      !is.na(surf$pred_valid_rate) & (surf$pred_valid_rate >= thr_sm)
+    )
+  } else {
+    rep(TRUE, nrow(surf))
+  }
+  surf$pred_criterion_met <- valid_pred_ok & vapply(seq_len(nrow(surf)), function(i) {
     check_criterion_met(
       spec = spec,
       power = surf$pred_power[i],
@@ -1611,15 +1933,30 @@ select_diverse_top_acq <- function(surf, k, evaluated_mask) {
 select_stage2_candidates <- function(surf, spec, prefer = "balanced", n_verify = 4L) {
   n_verify <- max(1L, min(n_verify, nrow(surf)))
 
-  # Extract predicted feasible Pareto frontier + high-confidence neighbors
+  # Combine predicted feasible candidates with observed Stage-1 feasible candidates
+  # so boundary smoothing never drops an already-observed passing candidate.
+  obs_ok <- if ("obs_criterion_met" %in% names(surf)) {
+    !is.na(surf$obs_criterion_met) & surf$obs_criterion_met
+  } else {
+    rep(FALSE, nrow(surf))
+  }
   pf <- extract_pareto_frontier(surf, spec)
+  if (nrow(pf) == 0L && any(obs_ok)) {
+    pf <- extract_2d_pareto(surf[obs_ok, , drop = FALSE])
+  } else if (nrow(pf) > 0L && any(obs_ok)) {
+    pf <- extract_2d_pareto(surf[surf$pred_criterion_met | obs_ok, , drop = FALSE])
+  }
   if (nrow(pf) > 0L) {
     pf_idx <- match(paste(pf$n_subj, pf$n_item), paste(surf$n_subj, surf$n_item))
     # 1. Best under requested `prefer`
-    best_pref <- pf_idx[order(surf$preference_score[pf_idx], -surf$prob_feasible[pf_idx])]
+    best_pref <- pf_idx[preference_order(surf[pf_idx, , drop = FALSE], prefer = prefer, tie1 = -surf$prob_feasible[pf_idx])]
     # 2. High-confidence neighbor (`prob_feasible >= 0.80`) along `prefer`
     hc <- which(surf$prob_feasible >= 0.80)
-    ord_hc <- hc[order(surf$preference_score[hc], -surf$prob_feasible[hc])]
+    ord_hc <- if (length(hc) > 0L) {
+      hc[preference_order(surf[hc, , drop = FALSE], prefer = prefer, tie1 = -surf$prob_feasible[hc])]
+    } else {
+      integer(0)
+    }
     # 3. Spread points along Pareto frontier (fewer_items end, balanced knee, fewer_subj end)
     spread_idx <- unique(pf_idx[round(seq(1, length(pf_idx), length.out = min(length(pf_idx), n_verify)))])
 
@@ -1635,12 +1972,31 @@ select_stage2_candidates <- function(surf, spec, prefer = "balanced", n_verify =
 
   plausible <- which(surf$prob_feasible >= 0.35)
   if (length(plausible) > 0L) {
-    ord_pl <- plausible[order(surf$preference_score[plausible], -surf$prob_feasible[plausible])]
+    ord_pl <- plausible[preference_order(surf[plausible, , drop = FALSE], prefer = prefer, tie1 = -surf$prob_feasible[plausible])]
     return(ord_pl[seq_len(min(n_verify, length(ord_pl)))])
   }
 
-  ord <- order(-surf$prob_feasible, -surf$pred_power, surf$pred_ci_width, surf$preference_score)
-  ord[seq_len(n_verify)]
+  obs_promising <- integer(0)
+  if ("obs_attainment" %in% names(surf)) {
+    obs_v_ok <- if (identical(spec$failure_policy, "conditional") && "obs_valid_rate" %in% names(surf)) {
+      !is.na(surf$obs_valid_rate) & (surf$obs_valid_rate >= spec$min_valid_rate)
+    } else {
+      !is.na(surf$obs_attainment)
+    }
+    cand_obs <- which(obs_v_ok & is.finite(surf$obs_attainment))
+    if (length(cand_obs) > 0L) {
+      pref_obs <- integer(length(cand_obs))
+      pref_obs[preference_order(surf[cand_obs, , drop = FALSE], prefer = prefer)] <- seq_along(cand_obs)
+      obs_promising <- cand_obs[order(-surf$obs_attainment[cand_obs], pref_obs)]
+    }
+  }
+
+  p_fallback <- ifelse(is.na(surf$pred_power), -Inf, surf$pred_power)
+  pref_rk <- integer(nrow(surf))
+  pref_rk[preference_order(surf, prefer = prefer)] <- seq_len(nrow(surf))
+  ord <- order(-surf$prob_feasible, -p_fallback, surf$pred_ci_width, pref_rk)
+  pool_fb <- unique(c(obs_promising, ord))
+  pool_fb[seq_len(min(n_verify, length(pool_fb)))]
 }
 
 attainment_score <- function(df, spec) {
@@ -1688,21 +2044,22 @@ extract_pareto_frontier <- function(surf, spec) {
   if (nrow(feas) > 0L) {
     return(extract_2d_pareto(feas))
   }
-  max_s <- max(surf$n_subj)
-  max_i <- max(surf$n_item)
-  out <- surf[surf$n_subj == max_s | surf$n_item == max_i, , drop = FALSE]
-  out <- out[order(out$n_item, out$n_subj), , drop = FALSE]
-  rownames(out) <- NULL
-  out
+  feas
 }
 
 #' @rdname print.glmmplanr_design
 #' @export
 print.glmmplanr_result <- function(x, ...) {
-  cli::cli_h2("glmmplanr 2D Sample Size Optimization Result")
-  cli::cli_text("{analysis_description(x$spec)}")
   opt <- x$optimal
-  unit_lbl <- switch(x$spec$scale, logit = "logit", pp = "pp", prob = "prob")
+  sp_opt <- if (!is.null(x$robust$specs) && !is.null(opt$scenario) &&
+                length(opt$scenario) > 0L && (opt$scenario[1L] %in% names(x$robust$specs))) {
+    x$robust$specs[[opt$scenario[1L]]]
+  } else {
+    x$spec
+  }
+  cli::cli_h2("glmmplanr 2D Sample Size Optimization Result")
+  cli::cli_text("{analysis_description(sp_opt)}")
+  unit_lbl <- switch(sp_opt$scale, logit = "logit", pp = "pp", prob = "prob")
 
   status_txt <- switch(
     opt$decision_status[1L],
@@ -1716,27 +2073,47 @@ print.glmmplanr_result <- function(x, ...) {
   )
 
   role <- if (isTRUE(x$feasible)) "Recommended design" else "Unconfirmed candidate"
-  cov_show <- if (x$spec$scale == "logit") opt$coverage else opt$prob_coverage
-  has_null <- can_define_null_target(x$spec)
-  val_info <- assess_inferential_validity(cov_show, opt$n_valid, x$spec$alpha, has_null = has_null)
-  one_cell <- isTRUE(x$spec$dgp$design$n_cells == 1L)
-  acc_line <- if (!has_null || one_cell) {
-    sprintf(
+  cov_show <- if (sp_opt$scale == "logit") opt$coverage else opt$prob_coverage
+  has_null <- can_define_null_target(sp_opt)
+  val_info <- assess_inferential_validity(cov_show, opt$n_valid, sp_opt$alpha, has_null = has_null)
+  p_kind <- prob_target_kind(sp_opt)
+  acc_line <- switch(
+    p_kind,
+    absolute = sprintf(
       "Target accuracy (%s): true = %.1f%% | Mean CI width = {.strong %.2f pp} (%.3f logit)",
-      x$spec$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
-    )
-  } else {
-    sprintf(
+      sp_opt$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
+    ),
+    difference = sprintf(
       "Accuracy diff (%s): true = %+.1f pp | Mean CI width = {.strong %.2f pp} (%.3f logit)",
-      x$spec$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
+      sp_opt$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
+    ),
+    weighted_contrast = sprintf(
+      "Weighted contrast (%s): true = %+.1f pp | Mean CI width = {.strong %.2f pp} (%.3f logit)",
+      sp_opt$prob_estimand, opt$prob_diff_true_pp, opt$prob_ci_width_mean_pp, opt$logit_ci_width_mean
     )
+  )
+
+  sched_txt <- if (!is.null(x$robust) && isTRUE(x$robust$schedules_differ)) {
+    sprintf("Scheduled by scenario: %s", format_scenario_counts(x$robust$robust_trials_by_scenario))
+  } else {
+    sprintf("Scheduled: %s trials", opt$n_trials_scheduled)
+  }
+  exp_txt <- if (!is.null(x$robust) && isTRUE(x$robust$expected_differ) && !is.null(x$robust$robust_expected_by_scenario)) {
+    sprintf("Expected post-attrition by scenario: %s", format_scenario_counts(x$robust$robust_expected_by_scenario))
+  } else {
+    sprintf("Expected post-attrition: %s", opt$n_trials_expected)
   }
 
+  pow_str <- if (is.na(opt$power)) {
+    "NA [NA, NA]"
+  } else {
+    sprintf("%.1f%% [%.1f%%, %.1f%%]", opt$power * 100, opt$power_mc_lo * 100, opt$power_mc_hi * 100)
+  }
   bullets <- c(
     "Target attainment: {.strong {status_txt}}",
     "Inferential validity: {val_info$detail}",
-    "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} (Scheduled: {opt$n_trials_scheduled} trials | Expected post-attrition: {opt$n_trials_expected})",
-    if (has_null) "Power ({x$spec$failure_policy}) = {.strong {sprintf('%.1f%%', opt$power * 100)}} [{sprintf('%.1f%%', opt$power_mc_lo * 100)}, {sprintf('%.1f%%', opt$power_mc_hi * 100)}] | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
+    "{role} ({.code prefer = '{x$prefer}'}): N_subj = {.strong {opt$n_subj}}, N_item = {.strong {opt$n_item}} ({sched_txt} | {exp_txt})",
+    if (has_null) "Power ({sp_opt$failure_policy}) = {.strong {pow_str}} | Conditional Power = {ifelse(is.na(opt$conditional_power), 'NA', sprintf('%.1f%%', opt$conditional_power * 100))} (Valid fits: {sprintf('%.1f%%', opt$valid_rate * 100)})",
     acc_line
   )
   exp_regimes <- detect_exploratory_regimes(x$spec)
@@ -1817,9 +2194,14 @@ print.glmmplanr_result <- function(x, ...) {
   if (!is.null(x$robust)) {
     rc <- x$robust
     if (isTRUE(rc$feasible_robust)) {
+      rob_trials_txt <- if (isTRUE(rc$schedules_differ)) {
+        sprintf("scheduled trials by scenario: %s", format_scenario_counts(rc$robust_trials_by_scenario))
+      } else {
+        sprintf("%+d scheduled trials", rc$delta_trials)
+      }
       bullets <- c(
         bullets,
-        "All-scenario robustness increment (vs {.val {rc$standard_scenario}}): {sprintf('%+d', rc$delta_subj)} subjects, {sprintf('%+d', rc$delta_item)} items ({sprintf('%+d', rc$delta_trials)} scheduled trials)"
+        "All-scenario robustness increment (vs {.val {rc$standard_scenario}}): {sprintf('%+d', rc$delta_subj)} subjects, {sprintf('%+d', rc$delta_item)} items ({rob_trials_txt})"
       )
     }
   }
