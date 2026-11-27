@@ -1030,21 +1030,14 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
       values <- surf[[column]]
       values <- values[is.finite(values)]
       if (length(values) && min(values) < x$spec$power_min && max(values) > x$spec$power_min) {
-        p <- p + ggplot2::geom_contour(ggplot2::aes(z = .data[[column]]),
-          breaks = x$spec$power_min, color = "#fde047", linetype = "dashed")
+        p <- p + dashed_target_contour(column, x$spec$power_min)
       }
     }
     if (x$spec$criterion %in% c("ci_width", "both") && !is.null(x$spec$ci_width) &&
         any(is.finite(surf$pred_aipe_prob))) {
       a_rng <- range(surf$pred_aipe_prob, na.rm = TRUE)
       if (x$spec$ci_assurance > a_rng[1L] && x$spec$ci_assurance < a_rng[2L]) {
-        p <- p + ggplot2::geom_contour(
-          ggplot2::aes(z = .data$pred_aipe_prob),
-          breaks = x$spec$ci_assurance,
-          color = "#fde047",
-          linetype = "dashed",
-          linewidth = 1.15
-        )
+        p <- p + dashed_target_contour("pred_aipe_prob", x$spec$ci_assurance)
       }
     }
   }
@@ -1125,10 +1118,10 @@ plot_contour_2d <- function(x, metric = "power", show_pareto_frontier = TRUE) {
       y = sprintf("Number of Items (N_item, multiples of %d)", x$spec$dgp$design$k_item),
       caption = paste0(
         switch(x$spec$criterion, power = "Solid white = target power",
-          both = "Solid white = target power | Dashed yellow = target width assurance",
-          ci_width = "Dashed yellow = target width assurance",
-          joint = "Dashed yellow = detection and width in the same study",
-          rope = "Dashed yellow = target ROPE exclusion"), "\n",
+          both = "Solid white = target power | Dashed black = target width assurance",
+          ci_width = "Dashed black = target width assurance",
+          joint = "Dashed black = detection and width in the same study",
+          rope = "Dashed black = target ROPE exclusion"), "\n",
         "Cyan nodes = non-dominated Pareto designs | Red diamond = selected candidate"
       )
     ) +
@@ -1284,13 +1277,32 @@ plot_surface_3d <- function(x, metric = "power") {
     )
 }
 
+# A dark dashed contour drawn over a white halo stays visible on both the
+# light and dark ends of the viridis and magma fills.
+dashed_target_contour <- function(column, level) {
+  list(
+    ggplot2::geom_contour(ggplot2::aes(z = .data[[column]]), breaks = level,
+      color = "white", linewidth = 2.2, alpha = 0.85),
+    ggplot2::geom_contour(ggplot2::aes(z = .data[[column]]), breaks = level,
+      color = "#111827", linetype = "dashed", linewidth = 1.0)
+  )
+}
+
+# Axis breaks for whole-number quantities such as sample sizes and counts.
+integer_breaks <- function(limits) {
+  b <- pretty(limits)
+  b <- b[abs(b - round(b)) < 1e-8]
+  if (length(b)) b else round(mean(limits))
+}
+
 plot_pareto_curve <- function(x) {
   pf <- x$pareto_frontier[order(x$pareto_frontier$n_subj, -x$pareto_frontier$n_item), , drop = FALSE]
   pf$label <- sprintf("(%d, %d)", pf$n_subj, pf$n_item)
   opt <- x$optimal
 
-  ggplot2::ggplot(pf, ggplot2::aes(x = .data$n_subj, y = .data$n_item)) +
-    ggplot2::geom_line(color = "#2563eb", linewidth = 0.95) +
+  p <- ggplot2::ggplot(pf, ggplot2::aes(x = .data$n_subj, y = .data$n_item))
+  if (nrow(pf) >= 2L) p <- p + ggplot2::geom_line(color = "#2563eb", linewidth = 0.95)
+  p +
     ggplot2::geom_point(
       size = 3.2,
       shape = 21,
@@ -1299,10 +1311,13 @@ plot_pareto_curve <- function(x) {
     ) +
     ggplot2::geom_text(
       ggplot2::aes(label = .data$label),
-      vjust = -0.9,
+      hjust = -0.2,
+      vjust = -0.6,
       size = 3.1,
       color = "#1f2937"
     ) +
+    ggplot2::scale_x_continuous(breaks = integer_breaks, expand = ggplot2::expansion(mult = c(0.08, 0.15))) +
+    ggplot2::scale_y_continuous(breaks = integer_breaks, expand = ggplot2::expansion(mult = c(0.08, 0.15))) +
     ggplot2::geom_point(
       data = opt,
       ggplot2::aes(x = .data$n_subj, y = .data$n_item),

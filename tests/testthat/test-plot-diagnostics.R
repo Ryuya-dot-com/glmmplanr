@@ -97,3 +97,47 @@ test_that("absolute probability validation plots coverage and width attainment",
   expect_equal(attainment$value, 100 * tested$aipe_prob)
   expect_equal(attainment$lo, 100 * tested$aipe_mc_lo)
 })
+
+test_that("contour halo, single-point Pareto curve, and Rasch attainment labels build cleanly", {
+  des <- design_crossed(list(condition = c("a", "b")))
+  dgp <- calibrate_dgp(des, c(a = .40, b = .65), subj_sd = .3, item_sd = .3)
+  sp_w <- specify_target(dgp, "condition", scale = "pp", criterion = "ci_width",
+                         ci_width = 25, prob_se_method = "joint_delta")
+  plan_w <- optimize_sample_size(
+    sp_w, n_subj_range = c(12L, 36L), n_item_range = c(8L, 20L),
+    method = "grid", nsim_final = 6L, workers = 1L, seed = 91L, verbose = FALSE,
+    control = optimize_control(nsim_sensitivity = 0L)
+  )
+  p_cont <- plot(plan_w, type = "contour", show_annotations = TRUE)
+  expect_match(p_cont$labels$caption, "Dashed black = target width assurance", fixed = TRUE)
+  expect_warning(ggplot2::ggplot_build(p_cont), NA)
+
+  # Single-point Pareto frontier omits geom_line and uses integer breaks without warning
+  plan_1 <- plan_w
+  plan_1$pareto_frontier <- plan_w$optimal
+  p_par1 <- plot(plan_1, type = "pareto")
+  expect_warning(b_par1 <- ggplot2::ggplot_build(p_par1), NA)
+  expect_equal(glmmplanr:::integer_breaks(c(12.21, 12.39)), 12)
+  expect_true(all(abs(glmmplanr:::integer_breaks(c(16, 24)) %% 1) < 1e-8))
+
+  # Random-item and fixed-bank Rasch plots use exact candidate breaks and guard NA attainment
+  dgp_r <- calibrate_dgp(design_crossed(list()), 0.55, subj_sd = 0.8, item_sd = 0.6)
+  rp <- plan_rasch_precision(
+    dgp_r, expand.grid(n_subj = c(16L, 24L), n_item = c(8L, 12L)),
+    max_error = c(ability = 0.9), nsim = 4L, seed = 12L, verbose = FALSE
+  )
+  p_rp <- plot(rp, show_annotations = TRUE)
+  expect_identical(p_rp$labels$title, "Rasch recovery: joint target")
+  expect_warning(ggplot2::ggplot_build(p_rp), NA)
+
+  rp_na <- rp
+  rp_na$summary$attainment[1L] <- NA_real_
+  p_rp_na <- plot(rp_na)
+  expect_warning(b_rp_na <- ggplot2::ggplot_build(p_rp_na), NA)
+  expect_false(any(b_rp_na$data[[1L]]$label == "NA%", na.rm = TRUE))
+
+  fb <- plan_rasch_fixed_bank(c(-1, 0, 1), c(18L, 26L), c(difficulty = 0.8), nsim = 4L, seed = 13L)
+  p_fb <- plot(fb)
+  expect_warning(b_fb <- ggplot2::ggplot_build(p_fb), NA)
+  expect_equal(b_fb$layout$panel_params[[1L]]$x$breaks, c(18, 26))
+})

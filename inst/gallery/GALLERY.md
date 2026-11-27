@@ -90,7 +90,7 @@ plot(res1, type = "pareto")
 
 ![Recipe 1: 2D Power & Precision Surface and Non-Dominated Pareto Frontier](../../man/figures/gallery_01_latin_square_3afc.png)
 
-- **Panel A (2D Surface)**: Notice how the **dashed yellow CI-width assurance contour** ($\le 12\text{ pp}$ in $\ge 80\%$ of replications) lies *above and to the right* of the **solid white 80% power contour**. Planning for power alone would select an under-precise design (e.g., $48 \times 20$ achieves $81.1\%$ power, but its 95% CI width meets $\le 12\text{ pp}$ in only $1.1\%$ of studies!).
+- **Panel A (2D Surface)**: Notice how the **dashed black CI-width assurance contour** ($\le 12\text{ pp}$ in $\ge 80\%$ of replications) lies *above and to the right* of the **solid white 80% power contour**. Planning for power alone would select an under-precise design (e.g., $48 \times 20$ achieves $81.1\%$ power, but its 95% CI width meets $\le 12\text{ pp}$ in only $1.1\%$ of studies!).
 - **Panel B (Pareto Frontier)**: Seven non-dominated designs simultaneously pass both Wilson lower-bound gates: `(72, 20)`, `(60, 24)`, `(52, 28)`, **`(44, 32)`** (balanced recommendation: `1,408` scheduled trials, Power = `91.1% [86.0%, 94.5%]`, Mean CI = `11.06 pp`, Singular rate = `0.0%`), `(40, 36)`, `(36, 40)`, and `(32, 44)`.
 
 ---

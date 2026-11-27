@@ -159,11 +159,19 @@ plot.glmmplanr_rasch <- function(x, type = c("design", "items"), target = "joint
       ggplot2::geom_hline(yintercept = x$assurance, linetype = "dashed") +
       ggplot2::geom_linerange(ggplot2::aes(ymin = .data$mc_lo, ymax = .data$mc_hi)) +
       ggplot2::scale_y_continuous(limits = c(0, 1), labels = function(v) paste0(v * 100, "%")) +
+      ggplot2::scale_x_continuous(breaks = sort(unique(df$n_subj))) +
       ggplot2::labs(y = "Studies meeting the target / all planned studies",
         subtitle = sprintf("%g%% Wilson Monte Carlo intervals. Dashed line at %g%% required assurance.",
                            100 * x$mc_conf_level, 100 * x$assurance))
   } else {
     p <- ggplot2::ggplot(df, ggplot2::aes(.data$n_subj, .data$n_item)) +
+      ggplot2::geom_text(
+        ggplot2::aes(label = ifelse(is.finite(.data$attainment), sprintf("%.0f%%", 100 * .data$attainment), NA_character_)),
+        vjust = 2.1, size = 3, color = "#374151", na.rm = TRUE
+      ) +
+      ggplot2::scale_x_continuous(breaks = sort(unique(df$n_subj))) +
+      ggplot2::scale_y_continuous(breaks = sort(unique(df$n_item)),
+        expand = ggplot2::expansion(mult = c(0.12, 0.05))) +
       ggplot2::labs(y = "Items")
     if (target == "joint" && nrow(x$pareto)) {
       p <- p + ggplot2::geom_point(data = x$pareto, shape = 1, size = 6) +
@@ -172,7 +180,7 @@ plot.glmmplanr_rasch <- function(x, type = c("design", "items"), target = "joint
   }
   p <- p + ggplot2::geom_point(ggplot2::aes(shape = .data$decision), size = 3) +
     ggplot2::scale_shape_manual(values = c(pass = 16, indeterminate = 17, fail = 4)) +
-    ggplot2::labs(title = paste("Rasch recovery for", target), x = "Examinees", shape = "Decision") +
+    ggplot2::labs(title = sprintf("Rasch recovery: %s target", target), x = "Examinees", shape = "Decision") +
     ggplot2::theme_bw()
   style_plot_annotations(p, show_annotations)
 }
