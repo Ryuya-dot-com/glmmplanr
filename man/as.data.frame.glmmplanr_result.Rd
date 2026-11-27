@@ -19,3 +19,8 @@ records are available in the original object.
 \description{
 Extract verified GLMM candidates as a data frame
 }
+\examples{
+# Create the five-replication demonstration plan from the optimizer help.
+example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+as.data.frame(plan)[c("n_subj", "n_item", "nsim", "power")]
+}

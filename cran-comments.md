@@ -6,12 +6,14 @@
 * `cmdstanr` is an optional dependency in `Suggests` (used only when a user
   explicitly selects `engine = "stan_hmc"` with CmdStan) and is available from
   `Additional_repositories: https://stan-dev.r-universe.dev/`. All examples,
-  vignettes, and tests run without `cmdstanr` or `instantiate` installed
-  (verified with `_R_CHECK_DEPENDS_ONLY_=true`).
-* Words flagged by spell checking in `DESCRIPTION` (`Boeck`, `De`, `GLMM`,
-  `GLMMs`, `Rasch`, `Westfall`, `al`, `et`, `psycholinguistics`, `testlet`) are
-  author surnames (`Westfall`, `De Boeck`), the standard abbreviation `et al.`,
-  or established statistical/psychometric terms.
+  vignettes, and tests run without `cmdstanr` installed (verified with
+  `_R_CHECK_DEPENDS_ONLY_=true`).
+* Words flagged by spell checking in `DESCRIPTION` (`GLMM`, `GLMMs`, `Rasch`,
+  `psycholinguistics`, `testlet`) are established statistical and psychometric
+  terms.
+* On Linux systems compiling with debug symbols (`-g`), CRAN checks may report
+  an installed `libs/` size NOTE (~57 MB) from `RcppEigen` C++ template
+  instantiations; the stripped shared library is under 1 MB.
 
 ## Test environments
 

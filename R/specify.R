@@ -60,8 +60,7 @@
 #' @param engine Primary estimation backend: `"bayes_laplace"` (default,
 #'   built-in regularized C++ Laplace engine supporting both ordinary binary
 #'   logit and `chance > 0` links), `"cpp_laplace"`, `"lme4"`, `"lme4_fast"`,
-#'   `"glmmTMB"`, `"stan_hmc"`, or legacy alias `"stan_laplace"` (deprecated;
-#'   executes full HMC/NUTS via `"stan_hmc"`). Optional external backends
+#'   `"glmmTMB"`, or `"stan_hmc"`. Optional external backends
 #'   (`"glmmTMB"`, `"stan_hmc"`) abort rather than silently falling back if
 #'   unavailable or incompatible with `chance > 0`, ensuring numerical
 #'   consistency. Unpenalized engines flag separation if all observed responses
@@ -107,7 +106,7 @@ specify_target <- function(
   power_min = 0.80,
   ci_width = NULL,
   alpha = 0.05,
-  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc", "stan_laplace"),
+  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc"),
   analysis_re = c("match_dgp", "maximal", "uncorrelated", "intercept_only"),
   prob_se_method = c("bootstrap", "joint_delta"),
   control = target_control()
@@ -228,19 +227,12 @@ specify_target <- function(
     cli::cli_abort("{.arg mc_conf_level} must lie strictly in (0.5, 1).")
   }
 
-  if (identical(engine, "stan_laplace") && !engine_was_missing) {
-    cli::cli_warn(c(
-      "{.code engine = 'stan_laplace'} is a deprecated alias for {.code 'stan_hmc'}.",
-      "i" = "It runs full Stan HMC/NUTS rather than Laplace approximation. Specify {.code engine = 'stan_hmc'} for Stan HMC or {.code engine = 'bayes_laplace'} for C++ regularized Laplace."
-    ))
-  }
-
   resolved_engine <- resolve_available_engine(
     engine, chance = chance_use, notify = !engine_was_missing
   )
   engine_fallback <- !identical(resolved_engine, engine)
   if (is.null(stage1_engine)) {
-    stage1_engine <- if (resolved_engine %in% c("stan_laplace", "stan_hmc", "bayes_laplace")) {
+    stage1_engine <- if (resolved_engine %in% c("stan_hmc", "bayes_laplace")) {
       "bayes_laplace"
     } else {
       "cpp_laplace"
@@ -325,10 +317,8 @@ resolve_effect_column <- function(design, effect) {
 
 has_cmdstan_backend <- function() {
   isTRUE(
-    (requireNamespace("instantiate", quietly = TRUE) &&
-       tryCatch(instantiate::stan_cmdstan_exists(), error = function(e) FALSE)) ||
-      (requireNamespace("cmdstanr", quietly = TRUE) &&
-         !is.null(tryCatch(cmdstanr::cmdstan_path(), error = function(e) NULL)))
+    requireNamespace("cmdstanr", quietly = TRUE) &&
+      !is.null(tryCatch(cmdstanr::cmdstan_path(), error = function(e) NULL))
   )
 }
 
@@ -374,7 +364,7 @@ resolve_available_engine <- function(engine, chance = 0.0, notify = TRUE) {
     }
     return("glmmTMB")
   }
-  if (engine %in% c("stan_laplace", "stan_hmc")) {
+  if (engine == "stan_hmc") {
     if (has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE)) {
       return(engine)
     }

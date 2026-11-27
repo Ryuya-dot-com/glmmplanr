@@ -786,10 +786,31 @@ test_that("observed-analysis vignette chunk executes on valid 54x30 data and cat
   env8$valid_glmer_fit <- env54$valid_glmer_fit
   environment(env8$valid_glmer_fit) <- env8
 
-  # Force separated response vector on the 31 retained rows (all 0 in "restudy")
+  # Force separated response vector on the 31 retained rows (all 0 in "restudy").
+  # Fall back to a direct NA-retaining glmer() fit when older lme4 (<= 1.1-35)
+  # errors inside refit() on models fitted with na.omit.
   mf8 <- stats::model.frame(fit8)
+  keep8 <- !is.na(sim8$y)
+  refit_or_glmer8 <- function(y_new) {
+    m <- suppressWarnings(suppressMessages(
+      tryCatch(lme4::refit(fit8, y_new), error = function(e) NULL)
+    ))
+    if (is.null(m)) {
+      sim_new <- sim8
+      sim_new$y[keep8] <- y_new
+      m <- suppressWarnings(suppressMessages(
+        tryCatch(
+          lme4::glmer(stats::formula(env8$target), data = sim_new, family = stats::family(env8$target)),
+          error = function(e) NULL
+        )
+      ))
+    }
+    m
+  }
   y_sep <- ifelse(as.character(mf8$study_method) == "restudy", 0L, rep(c(0L, 1L), length.out = nrow(mf8)))
-  fit8_sep <- suppressWarnings(suppressMessages(lme4::refit(fit8, y_sep)))
+  fit8_sep <- refit_or_glmer8(y_sep)
+  expect_false(is.null(fit8_sep))
+  expect_equal(nrow(stats::model.frame(fit8_sep)), 31L)
   expect_false(env8$valid_glmer_fit(fit8_sep))
 
   # Across 40 parametric draws on 8x4 with 1 dropped NA row, every truly separated draw is caught
@@ -802,7 +823,7 @@ test_that("observed-analysis vignette chunk executes on valid 54x30 data and cat
     is_sep <- !all(tapply(yj, as.character(mf8$study_method), function(v) any(v == 0L) && any(v == 1L)))
     if (is_sep) {
       n_true_sep <- n_true_sep + 1L
-      mj <- suppressWarnings(suppressMessages(tryCatch(lme4::refit(fit8, yj), error = function(e) NULL)))
+      mj <- refit_or_glmer8(yj)
       if (!is.null(mj) && isTRUE(env8$valid_glmer_fit(mj))) {
         n_missed_sep <- n_missed_sep + 1L
       }
@@ -2053,4 +2074,53 @@ test_that("v4 positive-chance plans warn in switch_preference, crossed duplicate
   df_glm <- simulate_dgp_data(dgp_hi, n_subj = 32L, n_item = 12L)
   fit_glm <- stats::glm(y ~ condition, family = mafc_binomial(0.95), data = df_glm)
   expect_true(all(is.finite(stats::coef(fit_glm))))
+})
+
+test_that("isolated_seeded_call restores caller RNG even if callr advances .Random.seed, and citation tracks packageVersion", {
+  old_kind <- RNGkind()
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  old_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+  on.exit({
+    do.call(RNGkind, as.list(old_kind))
+    if (had_seed) {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+
+  RNGkind("Mersenne-Twister", "Box-Muller", "Rejection")
+  set.seed(202611L)
+  invisible(stats::rnorm(1L)) # caches second Box-Muller draw outside .Random.seed
+  expected_norm <- stats::rnorm(1L)
+  expected_unif <- stats::runif(1L)
+
+  RNGkind("Mersenne-Twister", "Box-Muller", "Rejection")
+  set.seed(202611L)
+  invisible(stats::rnorm(1L))
+  seed_before <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+
+  real_callr_r <- callr::r
+  local_mocked_bindings(
+    r = function(...) {
+      invisible(stats::runif(3L)) # simulate processx < 3.8.6 advancing caller RNG
+      42L
+    },
+    .package = "callr"
+  )
+  des <- design_crossed(list(A = c("a", "b")))
+  res_iso <- calibrate_dgp(
+    des, c(a = 0.4, b = 0.6), subj_sd = 0.4, item_sd = 0.3,
+    control = calibrate_control(check_nsim = 20L)
+  )
+  expect_identical(res_iso, 42L)
+  expect_identical(get(".Random.seed", envir = .GlobalEnv, inherits = FALSE), seed_before)
+  expect_identical(stats::rnorm(1L), expected_norm)
+  expect_identical(stats::runif(1L), expected_unif)
+
+  cit <- utils::citation("glmmplanr")
+  expect_identical(
+    cit$note,
+    paste("R package version", as.character(utils::packageVersion("glmmplanr")))
+  )
 })

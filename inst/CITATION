@@ -5,6 +5,6 @@ bibentry(
   title   = "glmmplanr: Two-Dimensional Sample Size Planning for Crossed Binary GLMMs",
   author  = person("Ryuya", "Komuro", email = "ryuya.komuro.c4@tohoku.ac.jp"),
   year    = "2026",
-  note    = "R package version 0.1.0",
+  note    = paste("R package version", if (!is.null(meta$Version)) meta$Version else "0.1.0"),
   url     = "https://github.com/Ryuya-dot-com/glmmplanr"
 )

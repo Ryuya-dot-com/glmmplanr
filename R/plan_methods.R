@@ -5,6 +5,10 @@
 #' @return One row per verified candidate, including failed and indeterminate
 #'   candidates. Numeric values retain full precision. Nested replication
 #'   records are available in the original object.
+#' @examples
+#' # Create the five-replication demonstration plan from the optimizer help.
+#' example("optimize_sample_size", package = "glmmplanr", local = environment(), echo = FALSE)
+#' as.data.frame(plan)[c("n_subj", "n_item", "nsim", "power")]
 #' @export
 as.data.frame.glmmplanr_result <- function(x, row.names = NULL, optional = FALSE, ...) {
   df <- x$verified
@@ -242,10 +246,8 @@ coef.glmmplanr_dgp <- function(object, ...) {
 }
 
 analysis_description <- function(sp) {
-  stan <- sp$engine %in% c("stan_laplace", "stan_hmc")
-  engine_label <- if (identical(sp$engine, "stan_laplace")) {
-    "stan_hmc (via deprecated 'stan_laplace' alias)"
-  } else if (!is.null(sp$requested_engine) && !identical(sp$requested_engine, sp$engine)) {
+  stan <- identical(sp$engine, "stan_hmc")
+  engine_label <- if (!is.null(sp$requested_engine) && !identical(sp$requested_engine, sp$engine)) {
     sprintf("%s (fallback from requested '%s')", sp$engine, sp$requested_engine)
   } else {
     sp$engine

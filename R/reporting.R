@@ -717,6 +717,13 @@ plot_scenario_comparison <- function(x, candidates) {
 #'   nominal or planning targets. These lines are reference values.
 #'   The default theme is [ggplot2::theme_bw()]. Add [ggplot2::labs()] to
 #'   supply your own title or caption.
+#' @examples
+#' des <- design_crossed(list(condition = c("a", "b")))
+#' dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+#' spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
+#' val <- validate_design_point(spec, 16, 8, nsim = 5L)
+#' plot(val)
+#' plot(val, type = "patterns")
 #' @export
 plot.glmmplanr_validation <- function(x, type = c("rates", "patterns"), ...,
                                       show_annotations = FALSE) {

@@ -77,12 +77,6 @@ fit_single_dataset <- function(
         df = df, X = X, Z_s = Z_s, Z_i = Z_i, Z_t = Z_t,
         chance = chance_fit, corr_mode = corr_mode, eff_idx = eff_idx
       )
-    } else if (engine_use == "stan_laplace") {
-      fit_via_stan_laplace(
-        df = df, X = X, Z_s = Z_s, Z_i = Z_i, Z_t = Z_t,
-        chance = chance_fit, corr_mode = corr_mode,
-        spec = spec, eff_idx = eff_idx
-      )
     } else if (engine_use == "stan_hmc") {
       fit_via_stan_hmc(
         df = df, X = X, Z_s = Z_s, Z_i = Z_i, Z_t = Z_t,
@@ -291,7 +285,7 @@ summarize_probability_fit <- function(
 }
 
 engine_supports_singularity <- function(engine) {
-  !(engine %in% c("bayes_laplace", "stan_hmc", "stan_laplace"))
+  !(engine %in% c("bayes_laplace", "stan_hmc"))
 }
 
 make_failed_fit <- function(status = "engine_error", reason = "", singular = FALSE) {

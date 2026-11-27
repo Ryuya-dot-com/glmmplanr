@@ -216,16 +216,6 @@ build_stan_data <- function(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec) {
   )
 }
 
-fit_via_stan_laplace <- function(
-  df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec, eff_idx
-) {
-  # Joint MAP/Laplace over hierarchical (beta, tau, z) suffers from Neal's funnel
-  # degeneracy in crossed GLMMs; integrated Laplace is provided natively by
-  # `bayes_laplace`, while Stan backends (`stan_hmc` and legacy alias `stan_laplace`)
-  # execute full HMC/NUTS with strict convergence gates across CmdStan and RStan.
-  fit_via_stan_hmc(df, X, Z_s, Z_i, Z_t, chance, corr_mode, spec, eff_idx)
-}
-
 evaluate_stan_hmc_diagnostics <- function(
   diag_draws,
   n_div,
@@ -476,11 +466,6 @@ get_compiled_stan_model <- function(prefer = c("any", "cmdstan", "rstan")) {
     if (file.exists(stan_file) && requireNamespace("cmdstanr", quietly = TRUE) &&
         !is.null(tryCatch(cmdstanr::cmdstan_path(), error = function(e) NULL))) {
       mod <- tryCatch(cmdstanr::cmdstan_model(stan_file, dir = tempdir()), error = function(e) NULL)
-    } else if (requireNamespace("instantiate", quietly = TRUE) &&
-               isTRUE(tryCatch(instantiate::stan_cmdstan_exists(), error = function(e) FALSE))) {
-      mod <- tryCatch(instantiate::stan_package_model(
-        name = "crossed_binomial_mafc", package = "glmmplanr", dir = tempdir()
-      ), error = function(e) NULL)
     }
     if (!is.null(mod)) {
       res <- list(backend = "cmdstan", model = mod)

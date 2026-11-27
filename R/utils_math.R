@@ -324,6 +324,20 @@ isolated_seeded_call <- function(fun, frame, call) {
   was_attached <- "package:glmmplanr" %in% search()
   expected_md5 <- .glmmplanr_source_md5
 
+  # processx < 3.8.6 (used by callr) draws from the caller's RNG when it
+  # starts a process; restore the caller's stream so it is left untouched.
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  caller_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+  on.exit({
+    if (had_seed) {
+      if (!identical(get0(".Random.seed", envir = .GlobalEnv, inherits = FALSE), caller_seed)) {
+        assign(".Random.seed", caller_seed, envir = .GlobalEnv)
+      }
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+
   callr::r(
     function(fun, args, global_bindings, path, is_installed_pkg, pkg_lib, lib_paths, was_attached, expected_md5) {
       .libPaths(unique(c(pkg_lib, lib_paths)))

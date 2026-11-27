@@ -12,8 +12,7 @@ specify_target(
   power_min = 0.8,
   ci_width = NULL,
   alpha = 0.05,
-  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc",
-    "stan_laplace"),
+  engine = c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc"),
   analysis_re = c("match_dgp", "maximal", "uncorrelated", "intercept_only"),
   prob_se_method = c("bootstrap", "joint_delta"),
   control = target_control()
@@ -75,8 +74,7 @@ probability \verb{0..1} when \code{scale = "prob"}).}
 \item{engine}{Primary estimation backend: \code{"bayes_laplace"} (default,
 built-in regularized C++ Laplace engine supporting both ordinary binary
 logit and \code{chance > 0} links), \code{"cpp_laplace"}, \code{"lme4"}, \code{"lme4_fast"},
-\code{"glmmTMB"}, \code{"stan_hmc"}, or legacy alias \code{"stan_laplace"} (deprecated;
-executes full HMC/NUTS via \code{"stan_hmc"}). Optional external backends
+\code{"glmmTMB"}, or \code{"stan_hmc"}. Optional external backends
 (\code{"glmmTMB"}, \code{"stan_hmc"}) abort rather than silently falling back if
 unavailable or incompatible with \code{chance > 0}, ensuring numerical
 consistency. Unpenalized engines flag separation if all observed responses

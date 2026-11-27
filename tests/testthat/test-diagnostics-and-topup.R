@@ -37,18 +37,17 @@ test_that("evaluate_stan_hmc_diagnostics refuses to pass without diagnostic back
   }
 })
 
-test_that("stan_laplace emits deprecation warning and Bonferroni MC adjustment widens Stage-2 Wilson bounds", {
+test_that("stan_hmc checks backend availability and Bonferroni MC adjustment widens Stage-2 Wilson bounds", {
   des <- design_crossed(list(A = c("a", "b")), allocation = "latin_square")
   dgp <- calibrate_dgp(des, c(a = 0.45, b = 0.70), subj_sd = 0.4, item_sd = 0.3)
 
+  expect_error(specify_target(dgp, "A", engine = "stan_laplace"), "arg")
   if (glmmplanr:::has_cmdstan_backend() || requireNamespace("rstan", quietly = TRUE)) {
-    expect_warning(
-      sp_sl <- specify_target(dgp, "A", engine = "stan_laplace"),
-      "deprecated alias"
-    )
+    sp_sh <- specify_target(dgp, "A", engine = "stan_hmc")
+    expect_identical(sp_sh$engine, "stan_hmc")
   } else {
     expect_error(
-      suppressWarnings(specify_target(dgp, "A", engine = "stan_laplace")),
+      specify_target(dgp, "A", engine = "stan_hmc"),
       "Stan backend"
     )
   }

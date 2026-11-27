@@ -33,3 +33,11 @@ supply your own title or caption.
 \description{
 Plot Fixed-design Validation Results
 }
+\examples{
+des <- design_crossed(list(condition = c("a", "b")))
+dgp <- calibrate_dgp(des, c(a = 0.4, b = 0.6), subj_sd = 0.3, item_sd = 0.4)
+spec <- specify_target(dgp, "condition", criterion = "power", engine = "bayes_laplace")
+val <- validate_design_point(spec, 16, 8, nsim = 5L)
+plot(val)
+plot(val, type = "patterns")
+}

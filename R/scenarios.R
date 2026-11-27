@@ -134,7 +134,7 @@ run_multi_scenario_analysis <- function(
       sp_s$analysis_re
     }
     if (is.null(base_spec$requested_stage1_engine)) {
-      sp_s$stage1_engine <- if (sp_s$engine %in% c("stan_laplace", "stan_hmc", "bayes_laplace")) {
+      sp_s$stage1_engine <- if (sp_s$engine %in% c("stan_hmc", "bayes_laplace")) {
         "bayes_laplace"
       } else {
         "cpp_laplace"

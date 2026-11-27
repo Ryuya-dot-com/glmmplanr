@@ -2851,7 +2851,7 @@ struct OrientedGLMMWorkspace {
 };
 
 Rcpp::List wrap_fit_result(const FitResult& res, bool has_testlet, bool regularized, bool fix_cov, bool return_ranef) {
-  return Rcpp::List::create(
+  Rcpp::List out = Rcpp::List::create(
     Rcpp::Named("beta") = res.beta,
     Rcpp::Named("se") = res.se_beta,
     Rcpp::Named("vcov") = res.vcov_beta,
@@ -2873,10 +2873,12 @@ Rcpp::List wrap_fit_result(const FitResult& res, bool has_testlet, bool regulari
       : Rcpp::LogicalVector::create(res.singular),
     Rcpp::Named("converged") = res.strictly_converged,
     Rcpp::Named("status") = res.status,
-    Rcpp::Named("iterations") = res.outer_used,
-    Rcpp::Named("outer_diff") = res.final_outer_diff,
-    Rcpp::Named("inner_step") = res.final_inner_step
+    Rcpp::Named("iterations") = res.outer_used
   );
+  // Rcpp < 1.0.13 caps List::create() at 20 elements; append the rest.
+  out.push_back(res.final_outer_diff, "outer_diff");
+  out.push_back(res.final_inner_step, "inner_step");
+  return out;
 }
 
 double eval_marginal_contrast_cpp(

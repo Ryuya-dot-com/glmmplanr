@@ -10,7 +10,7 @@ test_that("3AFC estimates agree with the independent Stan fit", {
   set.seed(303, kind = "L'Ecuyer-CMRG", normal.kind = "Inversion", sample.kind = "Rejection")
   data <- simulate_dgp_data(dgp, schedule = schedule)
   cpp <- fit_single_dataset(data, spec, engine_use = "bayes_laplace")
-  stan <- fit_single_dataset(data, spec, engine_use = "stan_laplace")
+  stan <- fit_single_dataset(data, spec, engine_use = "stan_hmc")
   expect_true(cpp$converged, info = cpp$error_reason)
   expect_true(stan$converged, info = stan$error_reason)
   expect_equal(cpp$est, stan$est, tolerance = 0.15)

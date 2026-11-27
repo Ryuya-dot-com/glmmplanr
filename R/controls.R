@@ -171,7 +171,7 @@ target_control <- function(
   if (!is.null(stage1_engine)) {
     stage1_engine <- match.arg(
       stage1_engine,
-      c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc", "stan_laplace")
+      c("bayes_laplace", "cpp_laplace", "lme4", "lme4_fast", "glmmTMB", "stan_hmc")
     )
   }
 

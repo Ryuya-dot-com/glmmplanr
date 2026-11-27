@@ -1,5 +1,5 @@
 // Bundled Stan model for glmmplanr: Crossed Binary GLMM with m-AFC Guessing
-// Compatible with cmdstanr ($laplace(), $pathfinder(), $sample()) and instantiate.
+// Compatible with cmdstanr and rstan.
 data {
   int<lower=1> N;
   array[N] int<lower=0, upper=1> y;
